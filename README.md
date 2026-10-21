@@ -26,3 +26,8 @@ AI-assisted experimental bird flight game for mobile browsers.
 - Do not reuse proprietary game code or assets without permission.
 - Keep scope light enough for smartphone browsers.
 - Use Draft PRs for implementation and review; do not merge without owner approval.
+
+## v0.0 minimal prototype
+- `npm install && npm run dev` to run locally, `npm run build` to build.
+- Controls: left-side drag = turn / climb-dive, 羽ばたき = flap, 滑空 (hold) = glide. Keyboard: arrows/WASD, Space, Shift.
+- Deploys to GitHub Pages via `.github/workflows/pages.yml` after merge to `main` (Settings > Pages > Source: GitHub Actions).

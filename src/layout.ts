@@ -4,7 +4,9 @@ export interface Collider { minX: number; maxX: number; minZ: number; maxZ: numb
 export interface House { x: number; z: number; ry: number; floors: 1 | 2; wall: number; roof: number }
 export interface Apt { x: number; z: number; ry: number; floors: number; wall: number; w: number; d: number }
 export interface Tree { x: number; z: number; s: number; tint: number }
+export interface Low { x: number; z: number; hw: number; hd: number; top: number; kind: "bench" | "wall" | "planter" }
 export interface Layout {
+  lows: Low[];
   colliders: Collider[]; houses: House[]; apts: Apt[]; tanks: { x: number; z: number; y: number }[];
   trees: Tree[]; poles: { x: number; z: number }[]; poleLines: [number, number][][];
   lots: { x: number; z: number; park: boolean }[]; roads: number[];
@@ -25,7 +27,7 @@ export function houseHeight(floors: number) { return floors === 2 ? 6.2 : 3.2; }
 export function generateLayout(seed = 7): Layout {
   const r = rng(seed);
   const pick = <T,>(a: T[]) => a[Math.floor(r() * a.length)];
-  const L: Layout = { colliders: [], houses: [], apts: [], tanks: [], trees: [], poles: [], poleLines: [], lots: [], roads: [], heightAt };
+  const L: Layout = { lows: [], colliders: [], houses: [], apts: [], tanks: [], trees: [], poles: [], poleLines: [], lots: [], roads: [], heightAt };
   for (let k = 0; k < 8; k++) L.roads.push((k - 3.5) * PITCH);
   const box = (x: number, z: number, hw: number, hd: number, top: number) =>
     L.colliders.push({ minX: x - hw, maxX: x + hw, minZ: z - hd, maxZ: z + hd, top });
@@ -74,6 +76,14 @@ export function generateLayout(seed = 7): Layout {
       L.poles.push({ x: rd + 5.8, z: p }); line2.push([rd + 5.8, p]);
     }
     L.poleLines.push(line, line2);
+  }
+  // 低い障害物(歩く・小ジャンプで乗り越える練習用): 既存の乱数列を乱さないよう別系列で配置する
+  const r2 = rng(seed + 999);
+  const low = (x: number, z: number, hw: number, hd: number, top: number, kind: Low["kind"]) => { L.lows.push({ x, z, hw, hd, top, kind }); box(x, z, hw, hd, top); };
+  for (const lot of L.lots) {
+    if (lot.park) { for (let k = 0; k < 6; k++) { const a = (k / 6) * Math.PI * 2; low(lot.x + Math.cos(a) * 9, lot.z + Math.sin(a) * 9, k % 2 ? 0.25 : 0.8, k % 2 ? 0.8 : 0.25, 0.5, "bench"); } continue; }
+    if (r2() < 0.7) low(lot.x + (r2() - 0.5) * 14, lot.z + (r2() < 0.5 ? -20.3 : 20.3), 5, 0.15, 1.0, "wall");
+    if (r2() < 0.5) low(lot.x + (r2() < 0.5 ? -21 : 21) , lot.z + (r2() - 0.5) * 20, 0.5, 0.5, 0.45, "planter");
   }
   function heightAt(x: number, z: number) {
     let h = 0;

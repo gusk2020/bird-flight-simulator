@@ -17,13 +17,14 @@ export class Flight {
   mode: Mode = "air";
   stun = 0; stall = false; strokeT = -1; strokes = 0;
   wind: WindSource | null = null; windVec = new THREE.Vector3(); liftScale = 1; dragScale = 1; clock = 0; airspeed = 0;
+  groundHold = 0; walkV = 0; hopping = false; hopT = -1; walkPhase = 0;
   alpha = 0; speed = 0; agl = 0; braking = false; crashes = 0; resets = 0;
   constructor(public world: WorldQuery) { this.reset(); }
 
   reset() {
     this.pos.set(28, 14, 110); this.prevPos.copy(this.pos); this.vel.set(0, 0, -10);
     this.yaw = 0; this.pitch = 0.1; this.roll = 0; this.mode = "air";
-    this.stun = 0; this.stall = false; this.strokeT = -1; this.resets++;
+    this.stun = 0; this.stall = false; this.strokeT = -1; this.resets++; this.walkV = 0; this.hopping = false; this.hopT = -1;
   }
   forward(out: THREE.Vector3, yaw = this.yaw, pitch = this.pitch) {
     return out.set(-Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
@@ -39,14 +40,25 @@ export class Flight {
     if (this.strokeT >= 0) {
       this.strokeT += dt / P.strokeTime;
       if (this.strokeT >= 1) { if (held) { this.strokeT -= 1; this.strokes++; } else this.strokeT = -1; }
-    } else if (held || tap) { this.strokeT = 0; this.strokes++; }
+    } else if ((held || tap) && this.mode === "air" && !(this.hopping && this.hopT < P.hopTapTime)) {
+      if (this.hopping) { // 小ジャンプ中に押し続けた → 離陸へ移行
+        this.hopping = false; this.forward(_f, this.yaw, 0);
+        const hs = Math.max(P.takeoffSpeed, Math.hypot(this.vel.x, this.vel.z)); this.vel.x = _f.x * hs; this.vel.z = _f.z * hs; this.vel.y = Math.max(this.vel.y, P.takeoffUp * 0.7); this.pitch = 0.25;
+      }
+      this.strokeT = 0; this.strokes++;
+    }
 
     if (this.mode === "air") this.air(dt, sx, sy);
-    else { this.stall = false; this.ground(dt, sx); }
+    else { this.stall = false; this.strokeT = -1; this.ground(dt, sx, inp.brake && ctl > 0, tap, held); this.braking = this.mode === "rollout" && inp.brake && ctl > 0; }
     this.finish();
   }
 
+  /** 地上で歩いている(歩くボタンを押していて前進中) */
+  get walking() { return this.mode === "landed" && this.walkV > 0.05; }
+
   private air(dt: number, sx: number, sy: number) {
+    if (this.hopping) { this.hopT += dt; if (this.strokeT >= 0) this.hopping = false; }
+    if (this.hopping) { this.hop(dt, sx); return; }
     // 空気に対する速度で空力を計算し、最後に風を足して地面に対する移動にする
     const w = this.windVec; if (this.wind) this.wind.at(this.pos.x, this.pos.y, this.pos.z, this.clock, w); else w.set(0, 0, 0);
     this.vel.sub(w);
@@ -110,35 +122,71 @@ export class Flight {
   }
   private crash() { this.stun = P.stunTime; this.crashes++; this.strokeT = -1; }
 
-  private ground(dt: number, sx: number) {
+  /** 小ジャンプ中: ほぼ放物運動。向きは変えられる。着地は安全(沈下速度が小さい) */
+  private hop(dt: number, sx: number) {
+    this.yaw -= sx * P.groundTurn * 1.2 * dt;
+    this.pitch += (0.15 - this.pitch) * (1 - Math.exp(-6 * dt)); this.roll += (0 - this.roll) * (1 - Math.exp(-6 * dt));
+    this.vel.y -= P.gravity * dt; this.stall = false;
+    this.pos.addScaledVector(this.vel, dt);
+    this.collide();
+    const gh = this.world.heightAt(this.pos.x, this.pos.z), feet = this.pos.y - P.feetOffset;
+    this.agl = feet - gh;
+    if (feet <= gh && this.vel.y <= 0) {
+      this.pos.y = gh + P.feetOffset; this.hopping = false; this.hopT = -1;
+      const hs = Math.hypot(this.vel.x, this.vel.z); this.vel.y = 0;
+      if (hs > 0.3) this.mode = "rollout"; else { this.mode = "landed"; this.vel.set(0, 0, 0); }
+    }
+  }
+
+  private ground(dt: number, sx: number, walkHeld: boolean, tap: boolean, flapHeld: boolean) {
     _f.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
-    if (this.strokeT >= 0) { // 離陸
-      const hs = Math.max(P.takeoffSpeed, this.vel.dot(_f));
-      this.vel.copy(_f).multiplyScalar(hs); this.vel.y = P.takeoffUp;
-      this.mode = "air"; this.pitch = 0.25; this.pos.y += 0.05; return;
+    // 押下を検知できない入力(押しっぱなしだけ)でも、長押しなら離陸する
+    this.groundHold = flapHeld ? this.groundHold + dt : 0;
+    if (!tap && this.groundHold >= P.hopTapTime) {
+      this.groundHold = 0;
+      const hs = Math.max(P.takeoffSpeed, this.vel.dot(_f)); this.vel.copy(_f).multiplyScalar(hs); this.vel.y = P.takeoffUp;
+      this.mode = "air"; this.pitch = 0.25; this.pos.y += 0.05; this.strokeT = 0; this.strokes++; this.walkV = 0; return;
+    }
+    if (tap) {
+      const hs0 = Math.max(0, this.vel.dot(_f));
+      if (this.mode === "rollout" && hs0 > 4) { // 走りながら羽ばたく: そのまま離陸
+        this.vel.copy(_f).multiplyScalar(Math.max(P.takeoffSpeed, hs0)); this.vel.y = P.takeoffUp;
+        this.mode = "air"; this.pitch = 0.25; this.pos.y += 0.05; this.strokeT = 0; this.strokes++; return;
+      }
+      // 小ジャンプ (押し続ければ hopTapTime 後に離陸の羽ばたきが始まる)
+      this.vel.copy(_f).multiplyScalar(this.walkV + P.hopForward); this.vel.y = P.hopUp;
+      this.mode = "air"; this.hopping = true; this.hopT = 0; this.walkV = 0; this.pos.y += 0.03; return;
     }
     let hs = Math.max(0, this.vel.dot(_f));
     if (this.mode === "rollout") {
-      hs = Math.max(0, hs - (P.rolloutDecel + (this.braking ? P.rolloutBrake : 0)) * dt);
+      hs = Math.max(0, hs - (P.rolloutDecel + (walkHeld ? P.rolloutBrake : 0)) * dt);
       this.yaw -= sx * P.groundTurn * Math.min(1, hs / 4) * dt;
       if (hs < 0.3) { hs = 0; this.mode = "landed"; }
-    } else this.yaw -= sx * P.groundTurn * dt;
+      this.walkV = 0;
+    } else {
+      // 歩行: 歩くボタンで前進。スティックで向きを変える
+      this.yaw -= sx * P.groundTurn * dt;
+      const target = walkHeld ? P.walkSpeed : 0;
+      this.walkV += clamp(target - this.walkV, -P.walkDecel * dt, P.walkAccel * dt);
+      hs = this.walkV; this.walkPhase += hs * dt * 4.5;
+    }
     this.vel.copy(_f).multiplyScalar(hs);
     this.pos.addScaledVector(this.vel, dt);
-    this.collide();
+    this.collide(true);
     this.pitch += (0 - this.pitch) * (1 - Math.exp(-8 * dt));
     this.roll += (0 - this.roll) * (1 - Math.exp(-8 * dt));
     const gh = this.world.heightAt(this.pos.x, this.pos.z);
     this.agl = this.pos.y - P.feetOffset - gh;
-    if (this.agl > 0.08) { this.mode = "air"; } // 屋根の縁から外へ出た
-    else this.pos.y = gh + P.feetOffset;
+    if (this.agl > P.stepDown) { this.mode = "air"; this.walkV = 0; } // 屋根の縁・高い段から外へ出た
+    else this.pos.y = gh + P.feetOffset;                                 // 小さな段差は歩いて昇降(接地を維持)
   }
 
   /** 建物の壁との衝突。上面は heightAt が受け持つ。 */
-  private collide() {
+  private collide(grounded = false) {
     const R = P.bodyRadius, prevFeet = this.prevPos.y - P.feetOffset;
     for (const c of this.world.colliders) {
       if (prevFeet >= c.top - 0.05) continue;
+      if (grounded && c.top - prevFeet <= P.stepUp) continue; // 低い段差は壁にせず、そのまま乗り上がる
       const cx = clamp(this.pos.x, c.minX, c.maxX), cz = clamp(this.pos.z, c.minZ, c.maxZ);
       let nx = this.pos.x - cx, nz = this.pos.z - cz, pen: number;
       const d = Math.hypot(nx, nz);

@@ -12,7 +12,7 @@ export class Input {
     const zone = document.getElementById("stick")!;
     zone.addEventListener("pointerdown", e => {
       if (this.stickId >= 0) return;
-      this.stickId = e.pointerId; zone.setPointerCapture(e.pointerId);
+      this.stickId = e.pointerId; try { zone.setPointerCapture(e.pointerId); } catch { /* 合成イベントなど */ }
       this.R = Math.max(45, Math.min(75, Math.min(innerWidth, innerHeight) * 0.13));
       this.ox = e.clientX; this.oy = e.clientY; this.move(e.clientX, e.clientY); this.showStick(true);
     });
@@ -38,7 +38,7 @@ export class Input {
   private hold(id: string, set: (down: boolean) => void) {
     const el = document.getElementById(id)!; const ids = new Set<number>();
     const upd = () => { set(ids.size > 0); el.classList.toggle("on", ids.size > 0); };
-    el.addEventListener("pointerdown", e => { ids.add(e.pointerId); el.setPointerCapture(e.pointerId); upd(); });
+    el.addEventListener("pointerdown", e => { ids.add(e.pointerId); try { el.setPointerCapture(e.pointerId); } catch { /* 合成イベントなど */ } upd(); });
     const up = (e: PointerEvent) => { ids.delete(e.pointerId); upd(); };
     el.addEventListener("pointerup", up); el.addEventListener("pointercancel", up); el.addEventListener("lostpointercapture", up);
     this.releasers.push(() => { ids.clear(); upd(); });

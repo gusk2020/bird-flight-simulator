@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { generateLayout, Layout, PITCH, ROAD, LOT, LOT_TOP, HOUSE_W, HOUSE_D, FLOOR_H, houseHeight, APT_W, APT_D } from "./layout";
 
-export interface World extends Layout { group: THREE.Group; clouds: THREE.Group; setLights(level: number): void; updateLOD(x: number, z: number, force?: boolean): void; lodCounts(): { near: number; far: number } }
+export interface World extends Layout { group: THREE.Group; clouds: THREE.Group; setLights(level: number): void; lightsLevel(): number; updateLOD(x: number, z: number, force?: boolean): void; lodCounts(): { near: number; far: number } }
 
 /** 4x4窓タイルのテクスチャ(色)と、点灯している窓だけを光らせる発光マップ */
 function wallTextures(): { map: THREE.CanvasTexture; emissive: THREE.CanvasTexture } {
@@ -117,6 +117,12 @@ export function buildWorld(): World {
   }
   group.add(inst(new THREE.BoxGeometry(5, 2.2, 5), lam(0xb9bcc0), L.tanks.map(t => ({ x: t.x, y: t.y + 1.1, z: t.z }))));
 
+  // 低い障害物(ベンチ・塀・植え込み)
+  const lowCol = { bench: 0x8a5a3a, wall: 0xc9c3b4, planter: 0x6f7f5a };
+  for (const k of ["bench", "wall", "planter"] as const) {
+    const list = L.lows.filter(l => l.kind === k);
+    group.add(inst(new THREE.BoxGeometry(1, 1, 1), lam(lowCol[k]), list.map(l => ({ x: l.x, y: l.top / 2, z: l.z, sx: l.hw * 2, sy: l.top, sz: l.hd * 2 }))));
+  }
   // 街路樹
   const trunk = new THREE.CylinderGeometry(0.15, 0.22, 2.4, 5); trunk.translate(0, 1.2, 0);
   const greens = [0x4f8a3f, 0x5d9645, 0x3f7a3a, 0x6aa34d];
@@ -178,9 +184,11 @@ export function buildWorld(): World {
     m.scale.set(40 + (i % 3) * 14, 7, 22 + (i % 4) * 6); clouds.add(m);
   }
   group.add(clouds);
+  let lightsLv = 0;
   const setLights = (lv: number) => {
+    lightsLv = lv;
     side.emissiveIntensity = 0.9 * lv;
     lampMat.color.setHex(0x777777).lerp(new THREE.Color(0xffd98a), lv);
   };
-  return Object.assign(L, { group, clouds, setLights, updateLOD, lodCounts: () => ({ near: nNear, far: nFar }) }) as World;
+  return Object.assign(L, { group, clouds, setLights, lightsLevel: () => lightsLv, updateLOD, lodCounts: () => ({ near: nNear, far: nFar }) }) as World;
 }

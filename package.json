@@ -1,4 +1,4 @@
 {"name":"bird-flight-simulator","private":true,"version":"0.0.0","type":"module",
-"scripts":{"dev":"vite","build":"tsc --noEmit && vite build","preview":"vite preview"},
+"scripts":{"dev":"vite","build":"tsc --noEmit && vite build","preview":"vite preview","test:sim":"esbuild test/sim.ts --bundle --platform=node --outfile=dist-test/sim.cjs --log-level=error && node dist-test/sim.cjs"},
 "dependencies":{"three":"0.170.0"},
 "devDependencies":{"@types/three":"0.170.0","typescript":"5.6.3","vite":"5.4.11"}}

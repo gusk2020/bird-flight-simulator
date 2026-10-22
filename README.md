@@ -27,7 +27,9 @@ AI-assisted experimental bird flight game for mobile browsers.
 - Keep scope light enough for smartphone browsers.
 - Use Draft PRs for implementation and review; do not merge without owner approval.
 
-## v0.0 minimal prototype
-- `npm install && npm run dev` to run locally, `npm run build` to build.
-- Controls: left-side drag = turn / climb-dive, 羽ばたき = flap, 滑空 (hold) = glide. Keyboard: arrows/WASD, Space, Shift.
-- Deploys to GitHub Pages via `.github/workflows/pages.yml` after merge to `main` (Settings > Pages > Source: GitHub Actions).
+## v0.1
+- Controls (landscape recommended): left-half drag = turn / climb-dive, 羽ばたき (hold = continuous), 減速 (brake / flare), top buttons: 時間帯 (day/dusk/night), 視点 (3rd/1st person), リセット.
+- Land on roads, lots and rooftops; flap while landed to take off. Hard impacts stun briefly but never lock controls.
+- Code: `src/params.ts` (all flight tuning numbers), `flight.ts` (fixed 60Hz physics, no rendering), `layout.ts` (town data), `world.ts`, `birdModel.ts`, `camera.ts`, `input.ts`.
+- `npm run dev` / `npm run build` / `npm run test:sim` (headless physics scenarios).
+- Trees and utility poles have no collision. No external models or assets are used (all geometry is generated).

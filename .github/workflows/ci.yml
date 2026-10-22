@@ -17,5 +17,5 @@ jobs:
       - run: npm run test:sim       # 既存の飛行安全アサーション(verify.ymlと同じ)
       - run: npm run test:unit      # 物理・カメラ・ゲーム進行・環境(失敗でexit 1)
       - run: npm run build          # tsc型チェック + vite build
-      - run: npx playwright install --with-deps chromium
+      - run: npx playwright install chromium
       - run: npm run test:browser   # 開始/停止/入力解除/着地/復帰/視点安定(失敗でexit 1)

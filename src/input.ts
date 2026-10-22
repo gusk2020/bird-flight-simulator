@@ -3,7 +3,7 @@ import type { FlightInput } from "./flight";
 /** タッチ/キーボード入力。指を離す・取消・画面外・アプリ切替で必ず解除する。 */
 export class Input {
   state: FlightInput = { x: 0, y: 0, flapHeld: false, flapTap: false, brake: false };
-  onReset = () => {}; onCamera = () => {}; onTime = () => {};
+  onReset = () => {}; onCamera = () => {}; onTime = () => {}; onPause = () => {};
   private stickId = -1; private ox = 0; private oy = 0; private R = 60;
   private keys = new Set<string>();
   private base = document.getElementById("stickBase")!; private knob = document.getElementById("stickKnob")!;
@@ -31,7 +31,7 @@ export class Input {
     addEventListener("keydown", e => {
       if (e.repeat) return; this.keys.add(e.code);
       if (e.code === "Space") { this.state.flapHeld = true; this.state.flapTap = true; }
-      if (e.code === "KeyC") this.onCamera(); if (e.code === "KeyR") this.onReset(); if (e.code === "KeyT") this.onTime();
+      if (e.code === "KeyC") this.onCamera(); if (e.code === "KeyR") this.onReset(); if (e.code === "KeyT") this.onTime(); if (e.code === "KeyP" || e.code === "Escape") this.onPause();
     });
     addEventListener("keyup", e => { this.keys.delete(e.code); if (e.code === "Space") this.state.flapHeld = false; });
   }

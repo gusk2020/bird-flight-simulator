@@ -1,21 +1,26 @@
 import * as THREE from "three";
 import { generateLayout, Layout, PITCH, ROAD, LOT, LOT_TOP, HOUSE_W, HOUSE_D, FLOOR_H, houseHeight, APT_W, APT_D } from "./layout";
 
-export interface World extends Layout { group: THREE.Group; clouds: THREE.Group }
+export interface World extends Layout { group: THREE.Group; clouds: THREE.Group; setLights(level: number): void }
 
-function wallTexture(): THREE.CanvasTexture {
-  const c = document.createElement("canvas"); c.width = c.height = 64;
-  const g = c.getContext("2d")!;
-  g.fillStyle = "#fff"; g.fillRect(0, 0, 64, 64);
-  g.fillStyle = "#e4e4e4"; g.fillRect(0, 54, 64, 10); // 床スラブ
-  g.fillStyle = "#cfcfcf"; g.fillRect(10, 11, 44, 38);
-  g.fillStyle = "#6f8aa3"; g.fillRect(13, 14, 38, 32);
-  g.fillStyle = "#9db6cc"; g.fillRect(13, 14, 38, 10);
-  g.fillStyle = "#cfcfcf"; g.fillRect(31, 14, 2, 32);
-  const t = new THREE.CanvasTexture(c);
-  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = 2;
-  return t;
+/** 4x4窓タイルのテクスチャ(色)と、点灯している窓だけを光らせる発光マップ */
+function wallTextures(): { map: THREE.CanvasTexture; emissive: THREE.CanvasTexture } {
+  const T = 64, N = 4;
+  const mk = () => { const c = document.createElement("canvas"); c.width = c.height = T * N; return c; };
+  const cm = mk(), ce = mk(), g = cm.getContext("2d")!, e = ce.getContext("2d")!;
+  g.fillStyle = "#fff"; g.fillRect(0, 0, T * N, T * N); e.fillStyle = "#000"; e.fillRect(0, 0, T * N, T * N);
+  let seed = 11; const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
+  for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
+    const x = i * T, y = j * T;
+    g.fillStyle = "#e4e4e4"; g.fillRect(x, y + 54, T, 10);
+    g.fillStyle = "#cfcfcf"; g.fillRect(x + 10, y + 11, 44, 38);
+    g.fillStyle = "#6f8aa3"; g.fillRect(x + 13, y + 14, 38, 32);
+    g.fillStyle = "#9db6cc"; g.fillRect(x + 13, y + 14, 38, 10);
+    g.fillStyle = "#cfcfcf"; g.fillRect(x + 31, y + 14, 2, 32);
+    if (rnd() < 0.45) { e.fillStyle = rnd() < 0.5 ? "#ffd79a" : "#fff1d0"; e.fillRect(x + 13, y + 14, 38, 32); }
+  }
+  const fin = (c: HTMLCanvasElement, srgb: boolean) => { const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; if (srgb) t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 2; return t; };
+  return { map: fin(cm, true), emissive: fin(ce, true) };
 }
 
 /** 窓の繰り返しが実寸になるよう、箱の側面UVを寸法に合わせて伸ばす。底面は原点。 */
@@ -83,10 +88,10 @@ export function buildWorld(): World {
   group.add(inst(flat(0.25, 3), mark, dashes), inst(flat(0.7, 3.4), mark, stripes));
 
   // 建物
-  const wall = wallTexture();
-  const side = lam(0xffffff, { map: wall }), roofFlat = lam(0x9a9ca2), under = lam(0x777777);
+  const wall = wallTextures();
+  const side = lam(0xffffff, { map: wall.map, emissiveMap: wall.emissive, emissive: 0xffffff, emissiveIntensity: 0 }), roofFlat = lam(0x9a9ca2), under = lam(0x777777);
   const bm = [side, side, roofFlat, under, side, side];
-  const houseGeo = (fl: number) => buildingBox(HOUSE_W, houseHeight(fl), HOUSE_D, 3.3, 3.1);
+  const houseGeo = (fl: number) => buildingBox(HOUSE_W, houseHeight(fl), HOUSE_D, 3.3 * 4, 3.1 * 4);
   for (const fl of [1, 2] as const) for (const rot of [0, Math.PI / 2]) {
     const list = L.houses.filter(h => h.floors === fl && h.ry === rot);
     group.add(inst(houseGeo(fl), bm, list.map(h => ({ x: h.x, y: 0, z: h.z, ry: h.ry, color: h.wall }))));
@@ -98,7 +103,7 @@ export function buildWorld(): World {
   }
   const floorsSet = [...new Set(L.apts.map(a => a.floors))];
   for (const fl of floorsSet) {
-    group.add(inst(buildingBox(APT_W, fl * FLOOR_H, APT_D, 3.5, FLOOR_H), bm, L.apts.filter(a => a.floors === fl).map(a => ({ x: a.x, y: 0, z: a.z, color: a.wall }))));
+    group.add(inst(buildingBox(APT_W, fl * FLOOR_H, APT_D, 3.5 * 4, FLOOR_H * 4), bm, L.apts.filter(a => a.floors === fl).map(a => ({ x: a.x, y: 0, z: a.z, color: a.wall }))));
   }
   group.add(inst(new THREE.BoxGeometry(5, 2.2, 5), lam(0xb9bcc0), L.tanks.map(t => ({ x: t.x, y: t.y + 1.1, z: t.z }))));
 
@@ -113,6 +118,8 @@ export function buildWorld(): World {
   const pole = new THREE.CylinderGeometry(0.12, 0.16, 9, 6); pole.translate(0, 4.5, 0);
   const arm = new THREE.BoxGeometry(2.2, 0.12, 0.12); arm.translate(0, 8.3, 0);
   group.add(inst(pole, lam(0x8c8579), L.poles.map(p => ({ x: p.x, y: 0, z: p.z }))), inst(arm, lam(0x6d665c), L.poles.map(p => ({ x: p.x, y: 0, z: p.z }))));
+  const lampMat = new THREE.MeshBasicMaterial({ color: 0x777777 });
+  group.add(inst(new THREE.SphereGeometry(0.3, 8, 6), lampMat, L.poles.filter((_, i) => i % 2 === 0).map(p => ({ x: p.x, y: 8.9, z: p.z }))));
   const pts: number[] = [];
   for (const line of L.poleLines) for (let i = 0; i + 1 < line.length; i++) for (const o of [-0.9, 0, 0.9]) {
     const [x0, z0] = line[i], [x1, z1] = line[i + 1], alongX = Math.abs(x1 - x0) > 1;
@@ -143,5 +150,9 @@ export function buildWorld(): World {
     m.scale.set(40 + (i % 3) * 14, 7, 22 + (i % 4) * 6); clouds.add(m);
   }
   group.add(clouds);
-  return Object.assign(L, { group, clouds }) as World;
+  const setLights = (lv: number) => {
+    side.emissiveIntensity = 0.9 * lv;
+    lampMat.color.setHex(0x777777).lerp(new THREE.Color(0xffd98a), lv);
+  };
+  return Object.assign(L, { group, clouds, setLights }) as World;
 }

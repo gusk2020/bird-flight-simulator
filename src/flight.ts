@@ -3,9 +3,14 @@ import { PHYS as P } from "./params";
 import type { Collider } from "./layout";
 
 export interface WindSource { at(x: number, y: number, z: number, t: number, out: THREE.Vector3): THREE.Vector3 }
-export interface WorldQuery { colliders: Collider[]; heightAt(x: number, z: number): number }
+export interface WorldQuery {
+  colliders: Collider[]; heightAt(x: number, z: number): number;
+  perchAt?(x: number, y: number, z: number, r: number): { id: number; t: number } | null;
+  perchPoint?(id: number, t: number, out: { x: number; y: number; z: number }): void;
+  wireDir?(id: number): [number, number];
+}
 export interface FlightInput { x: number; y: number; flapHeld: boolean; flapTap: boolean; brake: boolean }
-export type Mode = "air" | "rollout" | "landed";
+export type Mode = "air" | "rollout" | "landed" | "perch";
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 const V = THREE.Vector3;
 const _f = new V(), _r = new V(), _u = new V(), _d = new V(), _a = new V(), _l = new V();
@@ -17,21 +22,21 @@ export class Flight {
   mode: Mode = "air";
   stun = 0; stall = false; strokeT = -1; strokes = 0;
   wind: WindSource | null = null; windVec = new THREE.Vector3(); liftScale = 1; dragScale = 1; clock = 0; airspeed = 0;
-  groundHold = 0; walkV = 0; hopping = false; hopT = -1; walkPhase = 0;
+  groundHold = 0; perchId = -1; perchT = 0; perchCool = 0; perchBlend = 0; walkV = 0; hopping = false; hopT = -1; walkPhase = 0;
   alpha = 0; speed = 0; agl = 0; braking = false; crashes = 0; resets = 0;
   constructor(public world: WorldQuery) { this.reset(); }
 
   reset() {
     this.pos.set(28, 14, 110); this.prevPos.copy(this.pos); this.vel.set(0, 0, -10);
     this.yaw = 0; this.pitch = 0.1; this.roll = 0; this.mode = "air";
-    this.stun = 0; this.stall = false; this.strokeT = -1; this.resets++; this.walkV = 0; this.hopping = false; this.hopT = -1;
+    this.stun = 0; this.stall = false; this.strokeT = -1; this.resets++; this.walkV = 0; this.hopping = false; this.hopT = -1; this.perchId = -1; this.perchCool = 0;
   }
   forward(out: THREE.Vector3, yaw = this.yaw, pitch = this.pitch) {
     return out.set(-Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
   }
 
   step(dt: number, inp: FlightInput) {
-    this.prevPos.copy(this.pos); this.clock += dt;
+    this.prevPos.copy(this.pos); this.clock += dt; if (this.perchCool > 0) this.perchCool -= dt;
     if (this.stun > 0) this.stun = Math.max(0, this.stun - dt);
     const ctl = this.stun > 0 ? 0 : 1;
     const sx = clamp(inp.x, -1, 1) * ctl, sy = clamp(inp.y, -1, 1) * ctl;
@@ -49,6 +54,7 @@ export class Flight {
     }
 
     if (this.mode === "air") this.air(dt, sx, sy);
+    else if (this.mode === "perch") { this.stall = false; this.strokeT = -1; this.perchStep(dt, sx, inp.brake && ctl > 0, tap, held); this.braking = false; }
     else { this.stall = false; this.strokeT = -1; this.ground(dt, sx, inp.brake && ctl > 0, tap, held); this.braking = this.mode === "rollout" && inp.brake && ctl > 0; }
     this.finish();
   }
@@ -57,7 +63,7 @@ export class Flight {
   get walking() { return this.mode === "landed" && this.walkV > 0.05; }
 
   private air(dt: number, sx: number, sy: number) {
-    if (this.hopping) { this.hopT += dt; if (this.strokeT >= 0) this.hopping = false; }
+    if (this.hopping) { this.hopT += dt; if (this.strokeT >= 0 || this.vel.y < -4 || this.hopT > 1.2) this.hopping = false; } // 高い所からの落下は通常の空力飛行へ
     if (this.hopping) { this.hop(dt, sx); return; }
     // 空気に対する速度で空力を計算し、最後に風を足して地面に対する移動にする
     const w = this.windVec; if (this.wind) this.wind.at(this.pos.x, this.pos.y, this.pos.z, this.clock, w); else w.set(0, 0, 0);
@@ -111,8 +117,41 @@ export class Flight {
     this.collide();
     const gh = this.world.heightAt(this.pos.x, this.pos.z), feet = this.pos.y - P.feetOffset;
     this.agl = feet - gh;
+    if (this.tryPerch(this.braking)) return;
     if (feet <= gh) { this.pos.y = gh + P.feetOffset; this.touchdown(); }
   }
+
+  /** 電線に着地できるか。意図(減速ボタン/小ジャンプ)・低速・近距離・非上昇のすべてを満たすときだけ。通過しただけでは止まらない。 */
+  private tryPerch(intent: boolean): boolean {
+    if (!intent || this.perchCool > 0 || !this.world.perchAt) return false;
+    if (Math.hypot(this.vel.x, this.vel.z) > P.perchMaxSpeed || this.vel.y > P.perchMaxRise) return false;
+    const hit = this.world.perchAt(this.pos.x, this.pos.y - P.feetOffset, this.pos.z, P.perchRadius);
+    if (!hit) return false;
+    this.mode = "perch"; this.perchId = hit.id; this.perchT = hit.t; this.hopping = false; this.hopT = -1; this.strokeT = -1;
+    this.vel.set(0, 0, 0); this.walkV = 0; this.pitch = 0; this.roll = 0; return true;
+  }
+
+  /** 電線上: 足が電線をつかむ位置へなめらかに寄り、滑らず止まる。歩くで電線沿いに移動、羽ばたきで小ジャンプ/離陸。 */
+  private perchStep(dt: number, sx: number, walkHeld: boolean, tap: boolean, flapHeld: boolean) {
+    const w = this.world, pt = { x: 0, y: 0, z: 0 };
+    this.yaw -= sx * P.groundTurn * dt;
+    this.pitch += (0 - this.pitch) * (1 - Math.exp(-8 * dt)); this.roll += (0 - this.roll) * (1 - Math.exp(-8 * dt));
+    _f.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+    this.groundHold = flapHeld ? this.groundHold + dt : 0;
+    if (tap || this.groundHold >= P.hopTapTime) {
+      this.perchCool = P.perchCooldown; this.perchId = -1;
+      if (tap) { this.vel.copy(_f).multiplyScalar(P.perchHopForward); this.vel.y = P.hopUp; this.mode = "air"; this.hopping = true; this.hopT = 0; this.pos.y += 0.03; }
+      else { this.groundHold = 0; this.vel.copy(_f).multiplyScalar(P.takeoffSpeed); this.vel.y = P.takeoffUp; this.mode = "air"; this.pitch = 0.25; this.strokeT = 0; this.strokes++; }
+      return;
+    }
+    const dir = w.wireDir!(this.perchId), along = _f.x * dir[0] + _f.z * dir[1];
+    if (walkHeld && Math.abs(along) > 0.35) { const wl = this.wireLength(); this.perchT = clamp(this.perchT + Math.sign(along) * P.perchWalk * dt / wl, 0.04, 0.96); this.walkPhase += P.perchWalk * dt * 4.5; }
+    w.perchPoint!(this.perchId, this.perchT, pt);
+    const k = 1 - Math.exp(-25 * dt);
+    this.pos.x += (pt.x - this.pos.x) * k; this.pos.y += (pt.y + P.feetOffset - this.pos.y) * k; this.pos.z += (pt.z - this.pos.z) * k;
+    this.vel.set(0, 0, 0); this.agl = this.pos.y - P.feetOffset - w.heightAt(pt.x, pt.z);
+  }
+  private wireLength() { return 28; } // 柱の間隔
 
   private touchdown() {
     const sink = Math.max(0, -this.vel.y), hs = Math.hypot(this.vel.x, this.vel.z);
@@ -131,8 +170,10 @@ export class Flight {
     this.collide();
     const gh = this.world.heightAt(this.pos.x, this.pos.z), feet = this.pos.y - P.feetOffset;
     this.agl = feet - gh;
+    if (this.tryPerch(true)) return;
     if (feet <= gh && this.vel.y <= 0) {
       this.pos.y = gh + P.feetOffset; this.hopping = false; this.hopT = -1;
+      if (-this.vel.y > P.safeSink) { this.mode = "air"; this.touchdown(); return; }
       const hs = Math.hypot(this.vel.x, this.vel.z); this.vel.y = 0;
       if (hs > 0.3) this.mode = "rollout"; else { this.mode = "landed"; this.vel.set(0, 0, 0); }
     }

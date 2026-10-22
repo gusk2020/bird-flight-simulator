@@ -1,7 +1,7 @@
 import { Flight, FlightInput } from "../src/flight";
 import { generateLayout } from "../src/layout";
 export const L = generateLayout();
-export const world = { colliders: L.colliders, heightAt: L.heightAt };
+export const world = { colliders: L.colliders, heightAt: L.heightAt, perchAt: L.perchAt, perchPoint: L.perchPoint, wireDir: L.wireDir };
 export const inp = (o: Partial<FlightInput> = {}): FlightInput => ({ x: 0, y: 0, flapHeld: false, flapTap: false, brake: false, ...o });
 export const at = (x: number, y: number, z: number, yaw = 0, speed = 10) => {
   const f = new Flight(world); f.pos.set(x, y, z); f.prevPos.copy(f.pos); f.yaw = yaw;

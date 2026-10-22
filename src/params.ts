@@ -45,6 +45,12 @@ export const PHYS = {
   stepDown: 0.2,       // これ以下の段差は歩いて降りる(超えると落下)
   hopUp: 3.4,          // 小ジャンプの初速(頂点約0.6m)
   hopForward: 1.6,
+  perchRadius: 0.8,    // 電線をつかめる距離(足先〜電線)。これより遠くからは吸着しない
+  perchMaxSpeed: 8,    // これより速いと通過するだけ
+  perchMaxRise: 1.2,   // 上昇中(これ以上)は着地しない
+  perchCooldown: 0.4,  // 電線を離れた直後は再び捕まえない
+  perchWalk: 0.9,      // 電線上を横歩きする速さ m/s
+  perchHopForward: 1.1,// 電線からの小ジャンプ(隣の電線は約0.9m)
   hopTapTime: 0.22,    // これより短い押下=小ジャンプ。押し続けると離陸の羽ばたきへ移る
   takeoffSpeed: 5,
   takeoffUp: 4.5,

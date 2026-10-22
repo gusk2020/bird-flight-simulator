@@ -1,5 +1,5 @@
 import { finish } from "./harness";
-import { physicsTests } from "./sim";
+import { physicsTests } from "./physics";
 import { cameraTests } from "./camera";
 import { gameTests } from "./game";
 import { envTests } from "./env";

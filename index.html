@@ -5,6 +5,8 @@
 <style>
 html,body{margin:0;height:100%;overflow:hidden;background:#9cd;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;font-family:sans-serif;overscroll-behavior:none}
 canvas{display:block;width:100%;height:100%}
+#fx{position:fixed;inset:0;width:100%;height:100%;pointer-events:none}
+#vig{position:fixed;inset:0;pointer-events:none;opacity:0;background:radial-gradient(ellipse at 50% 46%,transparent 52%,rgba(0,0,0,.75) 100%)}
 #hud{max-width:calc(100% - 230px);position:fixed;top:max(8px,env(safe-area-inset-top));left:max(10px,env(safe-area-inset-left));color:#fff;font-size:14px;text-shadow:0 0 3px #000,0 0 3px #000;pointer-events:none}
 #msg{position:fixed;top:36px;left:50%;transform:translateX(-50%);color:#fff;font-size:13px;text-align:center;text-shadow:0 0 3px #000,0 0 3px #000;pointer-events:none;transition:opacity 1s;white-space:nowrap}
 #stick{position:fixed;left:0;bottom:0;width:50%;height:72%;touch-action:none}
@@ -30,7 +32,7 @@ canvas{display:block;width:100%;height:100%}
 #overlay button[hidden]{display:none}
 #top .btn{position:static;border-radius:18px;height:36px;min-width:58px;font-size:13px}
 </style></head><body>
-<div id="hud"></div><div id="msg">左:ドラッグで旋回・上下　右:羽ばたき(押し続けで連続)・減速　着地中に羽ばたくと離陸</div>
+<div id="vig"></div><canvas id="fx"></canvas><div id="hud"></div><div id="msg">左:ドラッグで旋回・上下　右:羽ばたき(押し続けで連続)・減速　着地中に羽ばたくと離陸</div>
 <div id="stick"></div><div id="stickBase"></div><div id="stickKnob"></div>
 <div id="top"><button class="btn" id="btnPause">⏸</button><button class="btn" id="btnTime">昼</button><button class="btn" id="btnCam">三人称</button><button class="btn" id="btnReset">リセット</button></div>
 <button class="btn" id="brake">減速</button><button class="btn" id="flap">羽ばたき</button>
@@ -38,6 +40,7 @@ canvas{display:block;width:100%;height:100%}
 <div>天気 <button data-set="weather" data-val="clear">晴</button><button data-set="weather" data-val="cloudy">曇</button><button data-set="weather" data-val="rain">雨</button></div>
 <div>風 <button data-set="wind" data-val="0">なし</button><button data-set="wind" data-val="1">弱</button><button data-set="wind" data-val="2">強</button></div>
 <div id="rowBearing">風向 <button data-set="bearing" data-val="0">北</button><button data-set="bearing" data-val="90">東</button><button data-set="bearing" data-val="180">南</button><button data-set="bearing" data-val="270">西</button></div>
+<div>速度演出 <button data-set="fx" data-val="0">なし</button><button data-set="fx" data-val="1">弱</button><button data-set="fx" data-val="2">標準</button><button data-set="fx" data-val="3">強</button></div>
 <div>時間 <button data-set="time" data-val="0">停止</button><button data-set="time" data-val="1">等速</button><button data-set="time" data-val="2">高速</button></div></div>
 <button id="ovGo"></button><button id="ovReset" hidden>リセット</button></div>
 <script type="module" src="/src/main.ts"></script></body></html>

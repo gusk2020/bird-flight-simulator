@@ -15,20 +15,20 @@ export class FollowCam {
   constructor(public cam: THREE.PerspectiveCamera, private world: { heightAt(x: number, z: number): number }) {}
   snap() { this.ready = false; }
 
-  update(dt: number, f: Flight, bp: THREE.Vector3) {
+  update(dt: number, f: Flight, bp: THREE.Vector3, fx = 0) {
     const k = (rate: number) => 1 - Math.exp(-rate * dt);
     const wantCp = Math.max(-0.8, Math.min(0.6, f.pitch * 0.75));
     if (!this.ready) { this.yaw = f.yaw; this.cp = wantCp; this.dist = 5.2; this.t = 1; this.ready = true; }
     this.yaw += wrap(f.yaw - this.yaw) * k(this.mode === "first" ? 14 : 5);
     this.cp += (wantCp - this.cp) * k(5);
-    const fov = 66 + Math.min(10, f.speed * 0.4);
+    const fov = 66 + Math.min(4, f.speed * 0.2) + 14 * fx; // 高速では視野を広げて速度感を出す
     if (Math.abs(this.cam.fov - fov) > 0.05) { this.cam.fov += (fov - this.cam.fov) * k(3); this.cam.updateProjectionMatrix(); }
     if (this.mode === "first") {
       this.cam.position.set(bp.x - Math.sin(f.yaw) * 0.6, bp.y + 0.28, bp.z - Math.cos(f.yaw) * 0.6);
       this.cam.rotation.set(f.pitch * 0.85, this.yaw, f.roll * 0.6, "YXZ");
       return;
     }
-    this.dist += ((f.mode === "air" ? 5.2 : 4.0) - this.dist) * k(3);
+    this.dist += ((f.mode === "air" ? 5.2 + 2.2 * fx : 4.0) - this.dist) * k(3);
     const cc = Math.cos(this.cp), dx = -Math.sin(this.yaw) * cc, dy = Math.sin(this.cp), dz = -Math.cos(this.yaw) * cc;
     this._o.set(-dx * this.dist, -dy * this.dist + 1.3, -dz * this.dist);
     // 遮蔽: 鳥からカメラへ線を引き、建物・地面に入る手前で止める

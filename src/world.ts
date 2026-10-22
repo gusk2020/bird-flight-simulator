@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { generateLayout, Layout, PITCH, ROAD, LOT, LOT_TOP, HOUSE_W, HOUSE_D, FLOOR_H, houseHeight, APT_W, APT_D } from "./layout";
 
-export interface World extends Layout { group: THREE.Group; clouds: THREE.Group; setLights(level: number): void }
+export interface World extends Layout { group: THREE.Group; clouds: THREE.Group; setLights(level: number): void; updateLOD(x: number, z: number, force?: boolean): void; lodCounts(): { near: number; far: number } }
 
 /** 4x4窓タイルのテクスチャ(色)と、点灯している窓だけを光らせる発光マップ */
 function wallTextures(): { map: THREE.CanvasTexture; emissive: THREE.CanvasTexture } {
@@ -21,6 +21,15 @@ function wallTextures(): { map: THREE.CanvasTexture; emissive: THREE.CanvasTextu
   }
   const fin = (c: HTMLCanvasElement, srgb: boolean) => { const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; if (srgb) t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 2; return t; };
   return { map: fin(cm, true), emissive: fin(ce, true) };
+}
+
+/** 地面の細かい模様。急降下で地面が流れて見える手がかり(オプティカルフロー)になる */
+function speckle(repU: number, repV: number, base: string, amp = 26): THREE.CanvasTexture {
+  const c = document.createElement("canvas"); c.width = c.height = 128; const g = c.getContext("2d")!;
+  g.fillStyle = base; g.fillRect(0, 0, 128, 128);
+  let seed = 3; const r = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
+  for (let i = 0; i < 700; i++) { const v = Math.round((r() - 0.5) * amp); g.fillStyle = v > 0 ? `rgba(255,255,255,${v / 90})` : `rgba(0,0,0,${-v / 90})`; g.fillRect(r() * 128, r() * 128, 1 + r() * 3, 1 + r() * 3); }
+  const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(repU, repV); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 2; return t;
 }
 
 /** 窓の繰り返しが実寸になるよう、箱の側面UVを寸法に合わせて伸ばす。底面は原点。 */
@@ -56,8 +65,9 @@ export function buildWorld(): World {
   const group = new THREE.Group();
   const EXT = 2 * 4 * PITCH; // 市街の全幅
   // 地面(草地) と道路
-  const grass = new THREE.Mesh(new THREE.PlaneGeometry(3000, 3000), lam(0x7c9a5e)); grass.rotation.x = -Math.PI / 2; grass.position.y = -0.04; group.add(grass);
-  const asphalt = lam(0x4a4d52);
+  const grass = new THREE.Mesh(new THREE.PlaneGeometry(3000, 3000), lam(0xffffff, { map: speckle(3000 / 8, 3000 / 8, "#7c9a5e", 40) })); grass.rotation.x = -Math.PI / 2; grass.position.y = -0.04; group.add(grass);
+  const asphaltTex = speckle(1, (EXT / 2 + 20) / 6, "#4a4d52", 30); asphaltTex.repeat.set(ROAD / 6, (EXT / 2 + 20) / 6);
+  const asphalt = lam(0xffffff, { map: asphaltTex });
   for (const rd of L.roads) {
     for (const rot of [0, 1]) {
       const p = new THREE.Mesh(new THREE.PlaneGeometry(ROAD, EXT / 2 + 20), asphalt);
@@ -66,7 +76,7 @@ export function buildWorld(): World {
     }
   }
   // 区画(歩道・敷地)
-  const lotMat = lam(0xa7a99f), parkMat = lam(0x6f9a52);
+  const lotMat = lam(0xffffff, { map: speckle(LOT / 6, LOT / 6, "#a7a99f", 34) }), parkMat = lam(0xffffff, { map: speckle(LOT / 6, LOT / 6, "#6f9a52", 44) });
   group.add(inst(new THREE.BoxGeometry(LOT, LOT_TOP, LOT), lotMat, L.lots.filter(l => !l.park).map(l => ({ x: l.x, y: LOT_TOP / 2, z: l.z }))));
   group.add(inst(new THREE.BoxGeometry(LOT, LOT_TOP, LOT), parkMat, L.lots.filter(l => l.park).map(l => ({ x: l.x, y: LOT_TOP / 2, z: l.z }))));
   // 道路標示
@@ -109,10 +119,28 @@ export function buildWorld(): World {
 
   // 街路樹
   const trunk = new THREE.CylinderGeometry(0.15, 0.22, 2.4, 5); trunk.translate(0, 1.2, 0);
-  const crown = new THREE.IcosahedronGeometry(1, 1);
-  group.add(inst(trunk, lam(0x6b4f3a), L.trees.map(t => ({ x: t.x, y: LOT_TOP, z: t.z, sx: t.s * 0.8, sy: t.s * 0.9, sz: t.s * 0.8 }))));
   const greens = [0x4f8a3f, 0x5d9645, 0x3f7a3a, 0x6aa34d];
-  group.add(inst(crown, lam(0xffffff), L.trees.map(t => ({ x: t.x, y: LOT_TOP + 2.4 * t.s * 0.9 + t.s * 1.2, z: t.z, sx: t.s * 1.6, sy: t.s * 1.5, sz: t.s * 1.6, color: greens[Math.floor(t.tint * 4) % 4] }))));
+  group.add(inst(trunk, lam(0x6b4f3a), L.trees.map(t => ({ x: t.x, y: LOT_TOP, z: t.z, sx: t.s * 0.8, sy: t.s * 0.9, sz: t.s * 0.8 }))));
+  // 樹冠は距離でLOD: 近く(<LOD_NEAR)は細かい形、遠くは粗い形。プレイヤーが動いたときだけ再配分する。
+  const NT = L.trees.length, tm = new Float32Array(NT * 16), tc = new Float32Array(NT * 3), od = new THREE.Object3D(), col = new THREE.Color();
+  L.trees.forEach((t, i) => {
+    od.position.set(t.x, LOT_TOP + 2.4 * t.s * 0.9 + t.s * 1.2, t.z); od.rotation.set(0, 0, 0); od.scale.set(t.s * 1.6, t.s * 1.5, t.s * 1.6); od.updateMatrix();
+    od.matrix.toArray(tm, i * 16); col.setHex(greens[Math.floor(t.tint * 4) % 4]).toArray(tc, i * 3);
+  });
+  const mkCrown = (detail: number) => { const m = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, detail), lam(0xffffff), Math.max(1, NT)); m.count = 0; m.frustumCulled = false; m.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(NT * 3), 3); return m; };
+  const nearCrown = mkCrown(1), farCrown = mkCrown(0); group.add(nearCrown, farCrown);
+  const LOD_NEAR = 80; let lodX = 1e9, lodZ = 1e9, nNear = 0, nFar = 0;
+  const updateLOD = (x: number, z: number, force = false) => {
+    if (!force && Math.hypot(x - lodX, z - lodZ) < 10) return; lodX = x; lodZ = z;
+    let a = 0, b = 0;
+    for (let i = 0; i < NT; i++) {
+      const near = Math.hypot(L.trees[i].x - x, L.trees[i].z - z) < LOD_NEAR, m = near ? nearCrown : farCrown, k = near ? a++ : b++;
+      (m.instanceMatrix.array as Float32Array).set(tm.subarray(i * 16, i * 16 + 16), k * 16); (m.instanceColor!.array as Float32Array).set(tc.subarray(i * 3, i * 3 + 3), k * 3);
+    }
+    nearCrown.count = nNear = a; farCrown.count = nFar = b;
+    for (const m of [nearCrown, farCrown]) { m.instanceMatrix.needsUpdate = true; m.instanceColor!.needsUpdate = true; }
+  };
+  updateLOD(0, 0, true);
 
   // 電柱と電線
   const pole = new THREE.CylinderGeometry(0.12, 0.16, 9, 6); pole.translate(0, 4.5, 0);
@@ -154,5 +182,5 @@ export function buildWorld(): World {
     side.emissiveIntensity = 0.9 * lv;
     lampMat.color.setHex(0x777777).lerp(new THREE.Color(0xffd98a), lv);
   };
-  return Object.assign(L, { group, clouds, setLights }) as World;
+  return Object.assign(L, { group, clouds, setLights, updateLOD, lodCounts: () => ({ near: nNear, far: nFar }) }) as World;
 }

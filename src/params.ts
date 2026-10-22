@@ -18,13 +18,14 @@ export const PHYS = {
   flapThrust: 7,      // 前進加速度のピーク
   flapLift: 12,        // 上向き加速度のピーク
   // --- 姿勢・操舵 ---
-  maxSpeed: 20,
+  flapMaxSpeed: 22,    // 羽ばたきだけではこの速度までしか出ない(推力が先細る)
+  maxDiveSpeed: 40,    // 急降下の安全上限(通常は抗力で約35m/sに落ち着く)
   trimPitch: 0.1,      // 操作なしの機首角(約6°)
   maxClimbPitch: 0.6,
-  maxDivePitch: 0.8,
+  maxDivePitch: 1.15,
   pitchResponse: 4.0,
   stallRecoverPitch: -0.5, // 失速中は自動で機首を下げる
-  pitchLimit: 1.1,
+  pitchLimit: 1.3,
   turnRate: 1.7,       // 最大旋回速度 rad/s
   controlSpeed: 9,     // この速度未満では舵の効きが落ちる
   maxBank: 0.9,

@@ -52,6 +52,6 @@ console.log("10 recovery after crash stun"); { const f = at(28, 40, 110); run("c
   const f = at(28, 50, 110);
   f.pos.y = -100;
   f.step(1 / 60, inp());
-  assert.ok(f.resets >= 2, "out-of-bounds fall must recover");
+  assert.ok(f.pos.y >= world.heightAt(f.pos.x, f.pos.z), "below-ground position must recover to safe surface");
 }
 console.log("PASS: all flight assertions");

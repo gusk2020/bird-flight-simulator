@@ -1,4 +1,1 @@
-{"name":"bird-flight-simulator","private":true,"version":"0.0.0","type":"module",
-"scripts":{"dev":"vite","build":"tsc --noEmit && vite build","preview":"vite preview","test:sim":"esbuild test/sim.ts --bundle --platform=node --outfile=dist-test/sim.cjs --log-level=error && node dist-test/sim.cjs"},
-"dependencies":{"three":"0.170.0"},
-"devDependencies":{"@types/three":"0.170.0","typescript":"5.6.3","vite":"5.4.11"}}
+{"name":"bird-flight-simulator","private":true,"version":"0.0.0","type":"module","scripts":{"dev":"vite","build":"tsc --noEmit && vite build","preview":"vite preview","test:browser":"node test/browser.mjs","test":"npm run test:unit && npm run build && npm run test:browser","test:unit":"esbuild test/all.ts --bundle --platform=node --outfile=dist-test/all.cjs --log-level=error && node dist-test/all.cjs"},"dependencies":{"three":"0.170.0"},"devDependencies":{"@types/three":"0.170.0","playwright":"^1.56.1","typescript":"5.6.3","vite":"5.4.11"}}

@@ -33,3 +33,9 @@ AI-assisted experimental bird flight game for mobile browsers.
 - Code: `src/params.ts` (all flight tuning numbers), `flight.ts` (fixed 60Hz physics, no rendering), `layout.ts` (town data), `world.ts`, `birdModel.ts`, `camera.ts`, `input.ts`.
 - `npm run dev` / `npm run build` / `npm run test:sim` (headless physics scenarios).
 - Trees and utility poles have no collision. No external models or assets are used (all geometry is generated).
+
+## Stage A (quality)
+- Camera: follows via a smoothed *offset from the bird* (yaw/pitch), not a lagged world position, so distance and view no longer drift during dives/brakes.
+- 時間帯: 朝・昼・夕・夜 (`src/env.ts` keyframes by hour 0-24, ready for a continuous day cycle); windows and street lamps light up at dawn/dusk/night.
+- Game flow (`src/game.ts`): 開始 / ⏸ 一時停止 / 再開. Pause freezes physics and game time, clears input, and the screen-off / app-switch / blur auto-pauses. Reset still works.
+- Tests (all fail CI on error): `npm run test:unit` (physics, camera, game flow, environment), `npm run test:browser` (Chromium, touch/pause/landing/dive), `npm test` runs everything. CI: `.github/workflows/ci.yml`.

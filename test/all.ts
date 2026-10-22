@@ -7,5 +7,6 @@ import { stageBTests } from "./stageb";
 import { speedFxTests } from "./speedfx";
 import { walkTests } from "./walk";
 import { perchTests } from "./perch";
-physicsTests(); cameraTests(); gameTests(); envTests(); stageBTests(); speedFxTests(); walkTests(); perchTests();
+import { npcTests } from "./npc";
+physicsTests(); cameraTests(); gameTests(); envTests(); stageBTests(); speedFxTests(); walkTests(); perchTests(); npcTests();
 finish();

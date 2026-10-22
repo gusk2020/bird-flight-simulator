@@ -11,6 +11,8 @@ import { WEATHER, applyWeather, Weather } from "./weather";
 import { Rain } from "./rain";
 import { Quality } from "./quality";
 import { SpeedLines, Streaks, speedIntensity } from "./speedfx";
+import { NpcWorld } from "./npc";
+import { NpcView } from "./npcView";
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
 document.body.prepend(renderer.domElement);
@@ -25,6 +27,7 @@ const flight = new Flight(world);
 const wind = new Wind(world.colliders); flight.wind = wind;
 const rain = new Rain(); scene.add(rain.mesh);
 const quality = new Quality();
+const npc = new NpcWorld(world, 11); const npcView = new NpcView(); scene.add(npcView.group);
 const streaks = new Streaks(); scene.add(streaks.mesh);
 const lines = new SpeedLines(document.getElementById("fx") as HTMLCanvasElement, document.getElementById("vig")!);
 let fxLevel = 1, fxSmooth = 0; const FX_MUL = [0, 0.6, 1, 1.4];
@@ -40,7 +43,7 @@ const sky = new THREE.Mesh(skyGeo, new THREE.MeshBasicMaterial({ vertexColors: t
 sky.renderOrder = -1; scene.add(sky);
 const cloudMat = (world.clouds.children[0] as THREE.Mesh).material as THREE.MeshBasicMaterial;
 let hour: number = TIME_PRESETS[1].hour, preset = 1, targetHour: number | null = null;
-const settings = { weather: "clear" as Weather, wind: 1, bearing: 270, time: 0, fx: 2 };
+const settings = { weather: "clear" as Weather, wind: 1, bearing: 270, time: 0, fx: 2, npc: 2, gfx: 0 };
 const WIND_SPEED = [0, 3, 7], WIND_GUST = [0, 0.3, 0.6], TIME_RATE = [0, 24 / 1800, 24 / 180]; // 時間: 停止 / 等速(24h=30分) / 高速(24h=3分)
 function applyEnv() {
   const wd = WEATHER[settings.weather], e = applyWeather(envAt(hour), settings.weather), top = new THREE.Color(e.top), hor = new THREE.Color(e.hor), c = new THREE.Color();
@@ -53,11 +56,13 @@ function applyEnv() {
   sun.color.setHex(e.sun); sun.intensity = e.sunI; sun.position.set(...e.sunDir);
   cloudMat.color.setHex(e.cloud); cloudMat.opacity = wd.cloudOpacity; world.setLights(e.lights);
 }
+const npcPlayer = () => ({ x: flight.pos.x, y: flight.pos.y, z: flight.pos.z, speed: flight.speed, yaw: flight.yaw, air: flight.mode === "air" });
+function applyQuality() { renderer.setPixelRatio(Math.min(devicePixelRatio, quality.pixelRatio)); resize(); rain.setDensity(quality.rainDensity); }
 function applySettings() {
   const wd = WEATHER[settings.weather];
   wind.set(settings.bearing, Math.min(12, WIND_SPEED[settings.wind] * wd.windMul), WIND_GUST[settings.wind]);
   flight.liftScale = wd.liftScale; flight.dragScale = wd.dragScale;
-  rain.setIntensity(wd.rain); fxLevel = FX_MUL[settings.fx]; applyEnv();
+  rain.setIntensity(wd.rain); fxLevel = FX_MUL[settings.fx]; npc.setLevel(settings.npc, npcPlayer()); quality.force(settings.gfx === 0 ? null : [0, 0, 2, 3][settings.gfx]); applyQuality(); applyEnv();
   document.querySelectorAll<HTMLElement>("[data-set]").forEach(b => b.classList.toggle("on", String(settings[b.dataset.set as keyof typeof settings]) === b.dataset.val));
   document.getElementById("rowBearing")!.hidden = settings.wind === 0;
 }
@@ -102,7 +107,7 @@ addEventListener("resize", resize); addEventListener("orientationchange", resize
 
 const hud = document.getElementById("hud")!, msg = document.getElementById("msg")!;
 const brakeBtn = document.getElementById("brake")!; let brakeLabel = "減速";
-const stats = { fxMs: 0, updateMs: 0, renderMs: 0, lines: 0 };
+const stats = { npcMs: 0, fxMs: 0, updateMs: 0, renderMs: 0, lines: 0 };
 let lastGT = 0, last = performance.now(), fpsT = 0, fpsN = 0, fps = 0, hudT = 0;
 const bp = new THREE.Vector3();
 function frame(now: number) {
@@ -116,7 +121,7 @@ function frame(now: number) {
     if (diff < 1e-3) { hour = targetHour; targetHour = null; } else hour = (hour + Math.min(diff, 10 * dt)) % 24;
     applyEnv();
   } else if (gdt > 0 && TIME_RATE[settings.time] > 0) { hour = (hour + gdt * TIME_RATE[settings.time]) % 24; applyEnv(); }
-  if (running && quality.update(dt)) { renderer.setPixelRatio(Math.min(devicePixelRatio, quality.pixelRatio)); resize(); rain.setDensity(quality.rainDensity); }
+  if (running && quality.update(dt)) applyQuality();
   rain.update(running ? dt : 0, camera.position, flight.windVec);
   bp.lerpVectors(flight.prevPos, flight.pos, game.alpha || 1);
   if (!running && game.state === "paused") bp.copy(flight.pos);
@@ -128,6 +133,7 @@ function frame(now: number) {
   fxSmooth += (fxTarget - fxSmooth) * (1 - Math.exp(-6 * vdt));
   const fxc = Math.min(1, fxSmooth);
   world.updateLOD(bp.x, bp.z);
+  const tn = performance.now(); if (running) npc.update(dt, npcPlayer(), hour); npcView.update(npc, camera.position); stats.npcMs += (performance.now() - tn - stats.npcMs) * 0.05;
   cam.update(vdt, flight, bp, fxc);
   const tfx = performance.now();
   streaks.update(camera.position, flight.vel, running ? fxc : 0); stats.fxMs += (performance.now() - tfx - stats.fxMs) * 0.05;
@@ -146,4 +152,4 @@ function frame(now: number) {
 }
 renderer.setAnimationLoop(frame);
 // テスト・デバッグ用
-(window as unknown as Record<string, unknown>).__game = { game, flight, world, input, cam, camera, renderer, scene, frame, env: () => envAt(hour), stats, lines, streaks, speedIntensity, setHour: (h: number) => { hour = h; targetHour = null; applyEnv(); }, settings, applySettings, wind, rain, quality };
+(window as unknown as Record<string, unknown>).__game = { game, flight, world, input, cam, camera, renderer, scene, frame, env: () => envAt(hour), stats, npc, lines, streaks, speedIntensity, setHour: (h: number) => { hour = h; targetHour = null; applyEnv(); }, settings, applySettings, wind, rain, quality };

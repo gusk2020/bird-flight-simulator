@@ -81,7 +81,7 @@ try {
   await p.click('[data-set="weather"][data-val="rain"]'); await p.click('[data-set="wind"][data-val="2"]'); await p.click('[data-set="bearing"][data-val="90"]');
   let B = await p.evaluate(() => ({ rain: __game.rain.mesh.visible, lift: __game.flight.liftScale, fog: __game.scene.fog.far, bear: __game.wind.bearing, sp: __game.wind.speed, on: [...document.querySelectorAll("[data-set].on")].length }));
   check("rain: particles on, lift reduced, visibility shortened", B.rain && B.lift < 1 && B.fog < 500, JSON.stringify(B));
-  check("wind: strong east wind set, buttons highlighted", B.bear === 90 && B.sp > 7 && B.on === 5);
+  check("wind: strong east wind set, buttons highlighted", B.bear === 90 && B.sp > 7 && B.on === 7);
   await p.click('[data-set="time"][data-val="2"]'); await p.click("#ovGo"); await sleep(300);
   const h0 = await p.evaluate(() => __game.env().lights + "|" + __game.game.gameTime);
   await sleep(2500); const w1 = await p.evaluate(() => ({ wv: __game.flight.windVec.length(), rc: __game.rain.count, q: __game.quality.level, hud: document.getElementById("hud").textContent }));
@@ -151,6 +151,20 @@ try {
   await p.evaluate(() => { __game.input.state.brake = false; });
   await p.click("#btnReset"); await sleep(400); s = await S(); check("reset while perched recovers to normal flight", s.mode === "air" && s.y > 8);
   await p.evaluate(() => __game.setHour(12));
+
+  console.log("\n# living town / graphics setting (C4)");
+  const openMenu = async () => { await p.evaluate(() => document.getElementById("btnPause").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }))); await sleep(200); };
+  await p.evaluate(() => { __game.flight.reset(); __game.setHour(12); }); await sleep(2500);
+  const nc = await p.evaluate(() => { const n = __game.npc, c = n.activeCounts(); return { c, vp: n.visiblePeds().length, vc: n.visibleCars().length, fin: n.birds.every(b => Number.isFinite(b.x + b.y + b.z)) && n.cars.every(q => Number.isFinite(q.x + q.z)) && n.peds.every(q => Number.isFinite(q.x + q.z)), ms: __game.stats.npcMs }; });
+  check("NPCs active by default (標準): birds, pedestrians, cars", nc.c.birds === 8 && nc.vp > 10 && nc.vc > 4 && nc.fin, JSON.stringify(nc));
+  check("NPC update+draw CPU cost is small (<2 ms/frame, browser)", nc.ms < 2, `${nc.ms.toFixed(3)} ms`);
+  await openMenu(); await p.click('[data-set="npc"][data-val="0"]'); await p.click("#ovGo"); await sleep(600);
+  const z = await p.evaluate(() => { const c = __game.npc.activeCounts(); return c.birds + c.peds + c.cars + __game.npc.visiblePeds().length + __game.npc.visibleCars().length; });
+  check("街の動き=なし removes all NPCs", z === 0);
+  await openMenu(); await p.click('[data-set="npc"][data-val="3"]'); await p.click('[data-set="gfx"][data-val="3"]'); await p.click("#ovGo"); await sleep(1500);
+  const hi = await p.evaluate(() => ({ c: __game.npc.activeCounts(), pr: __game.renderer.getPixelRatio(), lvl: __game.quality.level }));
+  check("街の動き=多 and 画質=低 are applied (auto quality stays out of the way)", hi.c.birds === 14 && hi.c.cars === 16 && hi.pr <= 0.8 + 1e-9 && hi.lvl === 3, JSON.stringify(hi));
+  await openMenu(); await p.click('[data-set="npc"][data-val="2"]'); await p.click('[data-set="gfx"][data-val="0"]'); await p.click("#ovGo"); await sleep(300);
 
   console.log("\n# time of day (A2)");
   const seen = [];

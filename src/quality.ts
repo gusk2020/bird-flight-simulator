@@ -3,9 +3,12 @@ export const PIXEL_RATIOS = [1.5, 1.25, 1.0, 0.8];
 export class Quality {
   level = 0; private t = 0; private n = 0; private good = 0; private cooldown = 0;
   constructor(public lowFps = 38, public highFps = 56, public window = 2) {}
+  private forced: number | null = null;
+  /** 設定からの固定(null=自動) */
+  force(level: number | null) { this.forced = level; if (level !== null) this.level = level; }
   /** 実行中のフレーム時間だけ渡す。レベルが変わったら true */
   update(dt: number): boolean {
-    if (dt <= 0 || dt > 0.5) return false; // 停止明け・タブ復帰の異常値は無視
+    if (this.forced !== null || dt <= 0 || dt > 0.5) return false; // 停止明け・タブ復帰の異常値は無視
     this.t += dt; this.n++; this.cooldown = Math.max(0, this.cooldown - dt);
     if (this.t < this.window) return false;
     const fps = this.n / this.t; this.t = 0; this.n = 0;

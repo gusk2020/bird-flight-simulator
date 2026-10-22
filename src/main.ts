@@ -6,9 +6,12 @@ import { Input } from "./input";
 import { FollowCam } from "./camera";
 import { Game } from "./game";
 import { envAt, TIME_PRESETS } from "./env";
+import { Wind, bearingName } from "./wind";
+import { WEATHER, applyWeather, Weather } from "./weather";
+import { Rain } from "./rain";
+import { Quality } from "./quality";
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
 document.body.prepend(renderer.domElement);
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(66, 1, 0.1, 1800);
@@ -18,6 +21,10 @@ scene.add(hemi, sun);
 
 const world = buildWorld(); scene.add(world.group);
 const flight = new Flight(world);
+const wind = new Wind(world.colliders); flight.wind = wind;
+const rain = new Rain(); scene.add(rain.mesh);
+const quality = new Quality();
+renderer.setPixelRatio(Math.min(devicePixelRatio, quality.pixelRatio));
 const bird = new BirdModel(); bird.attach(scene);
 const input = new Input();
 const cam = new FollowCam(camera, world);
@@ -28,18 +35,31 @@ skyGeo.setAttribute("color", new THREE.BufferAttribute(new Float32Array(skyGeo.a
 const sky = new THREE.Mesh(skyGeo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false }));
 sky.renderOrder = -1; scene.add(sky);
 const cloudMat = (world.clouds.children[0] as THREE.Mesh).material as THREE.MeshBasicMaterial;
-let hour: number = TIME_PRESETS[1].hour, preset = 1, targetHour: number = hour;
+let hour: number = TIME_PRESETS[1].hour, preset = 1, targetHour: number | null = null;
+const settings = { weather: "clear" as Weather, wind: 1, bearing: 270, time: 0 };
+const WIND_SPEED = [0, 3, 7], WIND_GUST = [0, 0.3, 0.6], TIME_RATE = [0, 24 / 1800, 24 / 180]; // 時間: 停止 / 等速(24h=30分) / 高速(24h=3分)
 function applyEnv() {
-  const e = envAt(hour), top = new THREE.Color(e.top), hor = new THREE.Color(e.hor), c = new THREE.Color();
+  const wd = WEATHER[settings.weather], e = applyWeather(envAt(hour), settings.weather), top = new THREE.Color(e.top), hor = new THREE.Color(e.hor), c = new THREE.Color();
   const pos = skyGeo.attributes.position, col = skyGeo.attributes.color as THREE.BufferAttribute;
   for (let i = 0; i < pos.count; i++) { const h = Math.max(0, pos.getY(i) / 1500); c.lerpColors(hor, top, Math.pow(h, 0.6)); col.setXYZ(i, c.r, c.g, c.b); }
   col.needsUpdate = true;
   if (!scene.fog) scene.fog = new THREE.Fog(e.fog, 140, 900);
-  (scene.fog as THREE.Fog).color.setHex(e.fog);
+  const fg = scene.fog as THREE.Fog; fg.color.setHex(e.fog); fg.near = wd.fogNear; fg.far = wd.fogFar;
   hemi.color.setHex(e.hemiSky); hemi.groundColor.setHex(e.hemiGround); hemi.intensity = e.hemiI;
   sun.color.setHex(e.sun); sun.intensity = e.sunI; sun.position.set(...e.sunDir);
-  cloudMat.color.setHex(e.cloud); world.setLights(e.lights);
+  cloudMat.color.setHex(e.cloud); cloudMat.opacity = wd.cloudOpacity; world.setLights(e.lights);
 }
+function applySettings() {
+  const wd = WEATHER[settings.weather];
+  wind.set(settings.bearing, Math.min(12, WIND_SPEED[settings.wind] * wd.windMul), WIND_GUST[settings.wind]);
+  flight.liftScale = wd.liftScale; flight.dragScale = wd.dragScale;
+  rain.setIntensity(wd.rain); applyEnv();
+  document.querySelectorAll<HTMLElement>("[data-set]").forEach(b => b.classList.toggle("on", String(settings[b.dataset.set as keyof typeof settings]) === b.dataset.val));
+  document.getElementById("rowBearing")!.hidden = settings.wind === 0;
+}
+document.querySelectorAll<HTMLElement>("[data-set]").forEach(b => b.addEventListener("click", () => {
+  (settings as Record<string, unknown>)[b.dataset.set!] = b.dataset.set === "weather" ? b.dataset.val : Number(b.dataset.val); applySettings();
+}));
 applyEnv();
 input.onTime = () => {
   preset = (preset + 1) % TIME_PRESETS.length; targetHour = TIME_PRESETS[preset].hour;
@@ -71,22 +91,27 @@ input.onPause = () => (game.state === "running" ? pause() : go());
 const away = () => { game.suspend(); showOverlay(); };
 document.addEventListener("visibilitychange", () => { if (document.hidden) away(); });
 addEventListener("pagehide", away); addEventListener("blur", away);
-showOverlay();
+showOverlay(); applySettings();
 
 function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
 addEventListener("resize", resize); addEventListener("orientationchange", resize); resize();
 
 const hud = document.getElementById("hud")!, msg = document.getElementById("msg")!;
-let last = performance.now(), fpsT = 0, fpsN = 0, fps = 0, hudT = 0;
+let lastGT = 0, last = performance.now(), fpsT = 0, fpsN = 0, fps = 0, hudT = 0;
 const bp = new THREE.Vector3();
 function frame(now: number) {
   const dt = Math.min(0.1, Math.max(0, (now - last) / 1000)); last = now;
   const running = game.state === "running";
   game.update(dt);
   // 時間帯の切替アニメーション(実時間・常に前向き)
-  if (Math.abs(hour - targetHour) > 1e-3) {
-    const diff = (targetHour - hour + 24) % 24; hour = (hour + Math.min(diff, 10 * dt)) % 24; applyEnv();
-  }
+  const gdt = game.gameTime - lastGT; lastGT = game.gameTime;
+  if (targetHour !== null) {
+    const diff = (targetHour - hour + 24) % 24;
+    if (diff < 1e-3) { hour = targetHour; targetHour = null; } else hour = (hour + Math.min(diff, 10 * dt)) % 24;
+    applyEnv();
+  } else if (gdt > 0 && TIME_RATE[settings.time] > 0) { hour = (hour + gdt * TIME_RATE[settings.time]) % 24; applyEnv(); }
+  if (running && quality.update(dt)) { renderer.setPixelRatio(Math.min(devicePixelRatio, quality.pixelRatio)); resize(); rain.setDensity(quality.rainDensity); }
+  rain.update(running ? dt : 0, camera.position, flight.windVec);
   bp.lerpVectors(flight.prevPos, flight.pos, game.alpha || 1);
   if (!running && game.state === "paused") bp.copy(flight.pos);
   const gh = world.heightAt(bp.x, bp.z);
@@ -100,10 +125,10 @@ function frame(now: number) {
     hudT = 0;
     const st = flight.stun > 0 ? "衝突!" : flight.mode === "landed" ? "着地中" : flight.mode === "rollout" ? "滑走中" :
       flight.stall ? "失速!" : flight.braking ? "減速" : flight.strokeT >= 0 ? "羽ばたき" : "滑空";
-    hud.textContent = `${st}　速度 ${flight.speed.toFixed(0)} m/s　高度 ${Math.max(0, flight.agl).toFixed(0)} m　${fps.toFixed(0)}fps`;
+    hud.textContent = `${st}　速度 ${flight.speed.toFixed(0)} m/s　高度 ${Math.max(0, flight.agl).toFixed(0)} m　${flight.windVec.length() > 0.1 ? `　風 ${bearingName(wind.bearing)} ${flight.windVec.length().toFixed(0)}m/s${flight.windVec.y > 1 ? " 上昇気流!" : ""}` : ""}　${fps.toFixed(0)}fps Q${quality.level}`;
     msg.style.opacity = game.state === "running" && game.gameTime < 9 ? "1" : "0";
   }
 }
 renderer.setAnimationLoop(frame);
 // テスト・デバッグ用
-(window as unknown as Record<string, unknown>).__game = { game, flight, world, input, cam, camera, renderer, scene, frame, env: () => envAt(hour), setHour: (h: number) => { hour = targetHour = h; applyEnv(); } };
+(window as unknown as Record<string, unknown>).__game = { game, flight, world, input, cam, camera, renderer, scene, frame, env: () => envAt(hour), setHour: (h: number) => { hour = h; targetHour = null; applyEnv(); }, settings, applySettings, wind, rain, quality };

@@ -3,5 +3,6 @@ import { physicsTests } from "./sim";
 import { cameraTests } from "./camera";
 import { gameTests } from "./game";
 import { envTests } from "./env";
-physicsTests(); cameraTests(); gameTests(); envTests();
+import { stageBTests } from "./stageb";
+physicsTests(); cameraTests(); gameTests(); envTests(); stageBTests();
 finish();

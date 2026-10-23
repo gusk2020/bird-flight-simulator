@@ -1,6 +1,10 @@
-# Bird Flight Simulator
+# Vind Ving
 
-AI-assisted experimental bird flight game for mobile browsers.
+*Bird Life & Flight Simulator*
+
+Vind Ving (ヴィンド・ヴィング) is an AI-assisted experimental bird flight game for mobile browsers.
+
+Repository and GitHub Pages URLs retain the existing `bird-flight-simulator` name to avoid disruption.
 
 ## Concept
 - Fly as pigeons, sparrows, and crows in fictional Japanese towns.

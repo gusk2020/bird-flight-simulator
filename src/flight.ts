@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { PHYS as P } from "./params";
 import type { Collider } from "./layout";
 
+export interface WindSource { at(x: number, y: number, z: number, t: number, out: THREE.Vector3): THREE.Vector3 }
 export interface WorldQuery { colliders: Collider[]; heightAt(x: number, z: number): number }
 export interface FlightInput { x: number; y: number; flapHeld: boolean; flapTap: boolean; brake: boolean }
 export type Mode = "air" | "rollout" | "landed";
@@ -15,6 +16,7 @@ export class Flight {
   yaw = 0; pitch = 0; roll = 0;
   mode: Mode = "air";
   stun = 0; stall = false; strokeT = -1; strokes = 0;
+  wind: WindSource | null = null; windVec = new THREE.Vector3(); liftScale = 1; dragScale = 1; clock = 0; airspeed = 0;
   alpha = 0; speed = 0; agl = 0; braking = false; crashes = 0; resets = 0;
   constructor(public world: WorldQuery) { this.reset(); }
 
@@ -28,7 +30,7 @@ export class Flight {
   }
 
   step(dt: number, inp: FlightInput) {
-    this.prevPos.copy(this.pos);
+    this.prevPos.copy(this.pos); this.clock += dt;
     if (this.stun > 0) this.stun = Math.max(0, this.stun - dt);
     const ctl = this.stun > 0 ? 0 : 1;
     const sx = clamp(inp.x, -1, 1) * ctl, sy = clamp(inp.y, -1, 1) * ctl;
@@ -45,7 +47,10 @@ export class Flight {
   }
 
   private air(dt: number, sx: number, sy: number) {
-    const speed = this.vel.length();
+    // 空気に対する速度で空力を計算し、最後に風を足して地面に対する移動にする
+    const w = this.windVec; if (this.wind) this.wind.at(this.pos.x, this.pos.y, this.pos.z, this.clock, w); else w.set(0, 0, 0);
+    this.vel.sub(w);
+    const speed = this.vel.length(); this.airspeed = speed;
     // --- 姿勢 ---
     const ctl = clamp(speed / P.controlSpeed, 0.35, 1.2);
     this.yaw -= sx * P.turnRate * ctl * dt;
@@ -77,8 +82,8 @@ export class Flight {
     // 揚力方向: 翼法線のうち速度に垂直な成分
     _l.copy(_u).addScaledVector(_d, -_u.dot(_d));
     const ll = _l.length();
-    if (ll > 1e-3) _a.addScaledVector(_l, (P.liftK * cl * q) / ll * Math.min(1, ll * 2));
-    _a.addScaledVector(_d, -P.liftK * cd * q);
+    if (ll > 1e-3) _a.addScaledVector(_l, (P.liftK * this.liftScale * cl * q) / ll * Math.min(1, ll * 2));
+    _a.addScaledVector(_d, -P.liftK * this.dragScale * cd * q);
     if (this.strokeT >= 0) {
       const s = Math.sin(Math.PI * this.strokeT);
       _a.addScaledVector(f, P.flapThrust * s); _a.y += P.flapLift * s;
@@ -88,6 +93,7 @@ export class Flight {
     const side = this.vel.dot(_r);
     this.vel.addScaledVector(_r, -side * (1 - Math.exp(-P.sideDamp * dt)));
     if (this.vel.length() > P.maxSpeed) this.vel.setLength(P.maxSpeed);
+    this.vel.add(w);
     this.pos.addScaledVector(this.vel, dt);
 
     this.collide();

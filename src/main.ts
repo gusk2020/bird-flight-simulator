@@ -77,7 +77,7 @@ const overlay = document.getElementById("overlay")!, ovTitle = document.getEleme
 function showOverlay() {
   const ready = game.state === "ready";
   overlay.hidden = game.state === "running";
-  ovTitle.textContent = ready ? "Bird Flight Simulator" : "一時停止中";
+  ovTitle.textContent = ready ? "Vind Ving" : "一時停止中";
   ovGo.textContent = ready ? "開始" : "再開"; ovReset.hidden = ready;
 }
 game.onPause = () => input.releaseAll();

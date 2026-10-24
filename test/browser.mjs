@@ -125,8 +125,7 @@ try {
   await p.waitForFunction(() => __game.flight.mode !== "air", null, { timeout: 40000 }).catch(() => {});
   await p.waitForFunction(() => __game.flight.mode === "landed", null, { timeout: 15000 }).catch(() => {}); await sleep(300);
   check("landed: brake button becomes 歩く", (await p.textContent("#brake")) === "歩く" && (await S()).mode === "landed");
-  const wA = await S(); await tp("touchStart", [{ x: 740, y: 350, id: 3 }]); await sleep(1800); const wB = await S(); await tp("touchEnd", []);
-  const wk = await p.evaluate(() => ({ w: __game.flight.walkV, hud: document.getElementById("hud").textContent }));
+  const wA = await S(); await tp("touchStart", [{ x: 740, y: 350, id: 3 }]); await sleep(1800); const wB = await S(); const wk = await p.evaluate(() => ({ w: __game.flight.walkV, hud: document.getElementById("hud").textContent })); await tp("touchEnd", []);
   check("holding 歩く walks forward, stays on the ground", dist(wA, wB) > 1 && wB.mode === "landed" && wk.hud.includes("歩行中"), `moved=${dist(wA, wB).toFixed(2)} hud=${wk.hud}`);
   await sleep(600);
   await p.evaluate(() => { window.__peak = 0; const t = () => { const f = __game.flight; window.__peak = Math.max(window.__peak, f.pos.y - 0.32 - __game.world.heightAt(f.pos.x, f.pos.z)); requestAnimationFrame(t); }; t(); });

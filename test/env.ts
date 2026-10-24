@@ -9,7 +9,8 @@ export function envTests() {
   check("dawn horizon is warm (orange/pink)", warm(dawn.hor) > 60, `R-B=${warm(dawn.hor)}`);
   check("noon horizon is not warm", warm(noon.hor) < 20);
   check("dawn sun is low and east of noon sun", dawn.sunDir[1] < noon.sunDir[1] && dawn.sunDir[0] > 0);
-  check("windows/lamps: on at night, dim at dawn, off at noon", night.lights === 1 && dawn.lights > 0.2 && dawn.lights < 0.95 && noon.lights === 0 && dusk.lights > 0.3);
+  check("windows/lamps: on at night and dusk, OFF at dawn and noon", night.lights === 1 && dawn.lights === 0 && noon.lights === 0 && dusk.lights > 0.3);
+  check("lights fade out smoothly toward morning", envAt(4.5).lights === 1 && envAt(5).lights > 0 && envAt(5).lights < 1 && envAt(5.6).lights === 0 && envAt(7).lights === 0);
   check("dawn is brighter than night, darker than noon", dawn.sunI > night.sunI && dawn.sunI < noon.sunI);
   check("cycle wraps (0h == 24h)", JSON.stringify(envAt(0)) === JSON.stringify(envAt(24)) && JSON.stringify(envAt(-1)) === JSON.stringify(envAt(23)));
   let maxStep = 0, prev = envAt(0), finite = true;

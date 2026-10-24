@@ -48,3 +48,8 @@ Repository and GitHub Pages URLs retain the existing `bird-flight-simulator` nam
 - Dives now reach ~35 m/s (`maxDiveSpeed`/`flapMaxSpeed` in `src/params.ts`); flapping alone tops out ~18-22 m/s; braking holds a dive at ~17 m/s.
 - 速度演出 (pause menu: なし/弱/標準/強): anime-style speed lines + vignette (2D canvas, 0 cost when off), world-space streaks, FOV/camera pull-back. Nothing is shown at normal speeds (<22 m/s). No frame skipping is used.
 - Ground now carries a fine procedural texture (optical-flow cue when diving) and tree crowns use near/far LOD (triangles 106k -> ~66k measured).
+
+## C2 ground life
+- 朝焼け/朝は建物の窓・街灯が消灯（夕・夜は点灯、夜明けに向けて滑らかに消える）。
+- 着地中は減速ボタンが「歩く」に。押し続けで歩行（スティックで向き）。羽ばたき短押し=小ジャンプ、長押し=離陸。
+- 0.35m以下の段差は歩いて越え、それ以上は壁扱い。ベンチ/植え込み(約0.5m)へは小ジャンプで乗れ、1mの塀は乗れない。

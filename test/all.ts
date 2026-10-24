@@ -5,5 +5,6 @@ import { gameTests } from "./game";
 import { envTests } from "./env";
 import { stageBTests } from "./stageb";
 import { speedFxTests } from "./speedfx";
-physicsTests(); cameraTests(); gameTests(); envTests(); stageBTests(); speedFxTests();
+import { walkTests } from "./walk";
+physicsTests(); cameraTests(); gameTests(); envTests(); stageBTests(); speedFxTests(); walkTests();
 finish();

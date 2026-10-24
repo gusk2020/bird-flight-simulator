@@ -21,15 +21,15 @@ export class BirdModel {
   private tail = new THREE.Group();
   private shadow: THREE.Mesh;
   private wingAng = 0.15; private fold = 0; private legExt = 0; private tailPitch = 0;
-  private parts: THREE.Object3D[] = [];
+  private head!: THREE.Mesh; private neck!: THREE.Mesh; private t = 0;
 
   constructor() {
     const grey = mat(0x8d94a0), dark = mat(0x5f6a7a), light = mat(0xb7bcc6), sheen = mat(0x5f9a8c), wingM = mat(0x858c98, THREE.DoubleSide), bar = mat(0x2b303a, THREE.DoubleSide);
     const r = this.root;
     r.add(ball(0.3, grey, 1, 0.85, 1.55, [0, 0, 0.05]));
     r.add(ball(0.22, light, 1, 0.95, 1.1, [0, -0.02, -0.28]));
-    r.add(ball(0.14, dark, 1, 1, 1, [0, 0.17, -0.52]));
-    r.add(ball(0.13, sheen, 1.1, 0.7, 0.9, [0, 0.09, -0.42]));
+    this.head = ball(0.14, dark, 1, 1, 1, [0, 0.17, -0.52]); this.neck = ball(0.13, sheen, 1.1, 0.7, 0.9, [0, 0.09, -0.42]);
+    r.add(this.head, this.neck);
     r.add(ball(0.12, mat(0xe8e8ee), 1.1, 0.4, 1.0, [0, 0.1, 0.33]));
     const beak = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.13, 6), mat(0xcbbba0)); beak.rotation.x = -Math.PI / 2; beak.position.set(0, 0.16, -0.69); r.add(beak);
     for (const s of [-1, 1]) r.add(ball(0.03, mat(0xe0892a), 1, 1, 1, [s * 0.085, 0.2, -0.58]));
@@ -66,10 +66,11 @@ export class BirdModel {
   update(dt: number, f: Flight, pos: THREE.Vector3, groundY: number) {
     this.group.position.copy(pos);
     this.group.rotation.set(f.pitch, f.yaw, f.roll, "YXZ");
-    const air = f.mode === "air";
+    const air = f.mode === "air"; this.t += dt;
     // 翼
     let target: number, foldT = 0;
     if (!air) { target = 0; foldT = 1; }
+    else if (f.hopping) target = 0.55 + Math.sin(this.t * 38) * 0.4; // 小ジャンプ: 軽くばたつかせる
     else if (f.strokeT >= 0) target = Math.cos(f.strokeT * Math.PI * 2) * 0.85 + 0.1;
     else target = f.braking ? 0.9 : 0.15; // 滑空: わずかに上反角 / ブレーキ: 翼を立てる
     this.wingAng += (target - this.wingAng) * (1 - Math.exp(-(f.strokeT >= 0 ? 30 : 10) * dt));
@@ -81,7 +82,14 @@ export class BirdModel {
     // 脚: 離着陸付近で降ろす
     const ext = !air || (f.agl < 2.2 && f.speed < 13) ? 1 : 0;
     this.legExt += (ext - this.legExt) * (1 - Math.exp(-9 * dt));
-    for (const l of this.legs) { l.rotation.x = (1 - this.legExt) * 1.4; l.scale.y = 0.6 + 0.4 * this.legExt; }
+    this.legs.forEach(l => { l.rotation.x = (1 - this.legExt) * 1.4; l.scale.y = 0.6 + 0.4 * this.legExt; });
+    // 歩行: 足を交互に出し、頭を前後に振る(ハトの歩き)
+    const walkAmt = f.mode === "landed" ? Math.min(1, f.walkV / 1.2) : 0, ph = f.walkPhase;
+    if (walkAmt > 0.01) {
+      this.legs[0].rotation.x = Math.sin(ph) * 0.7 * walkAmt; this.legs[1].rotation.x = -Math.sin(ph) * 0.7 * walkAmt;
+      this.head.position.z = -0.52 + Math.sin(ph) * 0.06 * walkAmt; this.neck.position.z = -0.42 + Math.sin(ph) * 0.05 * walkAmt;
+      this.root.position.y = Math.abs(Math.sin(ph)) * 0.025 * walkAmt;
+    } else { this.head.position.z = -0.52; this.neck.position.z = -0.42; this.root.position.y = 0; }
     // 尾: ブレーキで下げる
     this.tailPitch += ((f.braking ? 0.5 : 0) - this.tailPitch) * (1 - Math.exp(-10 * dt));
     this.tail.rotation.x = this.tailPitch; this.tail.scale.x = 1 + this.tailPitch * 0.8;

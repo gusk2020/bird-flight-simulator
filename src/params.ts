@@ -39,6 +39,13 @@ export const PHYS = {
   rolloutDecel: 6,
   rolloutBrake: 8,
   groundTurn: 1.8,
+  walkSpeed: 2.0,      // 歩行の最高速度 m/s
+  walkAccel: 8, walkDecel: 14,
+  stepUp: 0.35,        // これ以下の段差は歩いて越える。超えると壁として止まる
+  stepDown: 0.2,       // これ以下の段差は歩いて降りる(超えると落下)
+  hopUp: 3.4,          // 小ジャンプの初速(頂点約0.6m)
+  hopForward: 1.6,
+  hopTapTime: 0.22,    // これより短い押下=小ジャンプ。押し続けると離陸の羽ばたきへ移る
   takeoffSpeed: 5,
   takeoffUp: 4.5,
   wallCrashSpeed: 7,

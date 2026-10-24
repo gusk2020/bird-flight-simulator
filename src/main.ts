@@ -101,6 +101,7 @@ function resize() { renderer.setSize(innerWidth, innerHeight, false); lines.resi
 addEventListener("resize", resize); addEventListener("orientationchange", resize); resize();
 
 const hud = document.getElementById("hud")!, msg = document.getElementById("msg")!;
+const brakeBtn = document.getElementById("brake")!; let brakeLabel = "減速";
 const stats = { fxMs: 0, updateMs: 0, renderMs: 0, lines: 0 };
 let lastGT = 0, last = performance.now(), fpsT = 0, fpsN = 0, fps = 0, hudT = 0;
 const bp = new THREE.Vector3();
@@ -134,9 +135,10 @@ function frame(now: number) {
   const tr = performance.now(); renderer.render(scene, camera); stats.renderMs += (performance.now() - tr - stats.renderMs) * 0.05;
   fpsN++; fpsT += dt; hudT += dt;
   if (fpsT >= 0.5) { fps = fpsN / fpsT; fpsN = 0; fpsT = 0; }
+  const lab = flight.mode === "air" ? "減速" : "歩く"; if (lab !== brakeLabel) { brakeLabel = lab; brakeBtn.textContent = lab; }
   if (hudT > 0.1) {
     hudT = 0;
-    const st = flight.stun > 0 ? "衝突!" : flight.mode === "landed" ? "着地中" : flight.mode === "rollout" ? "滑走中" :
+    const st = flight.stun > 0 ? "衝突!" : flight.hopping ? "ジャンプ" : flight.walking ? "歩行中" : flight.mode === "landed" ? "着地中" : flight.mode === "rollout" ? "滑走中" :
       flight.stall ? "失速!" : flight.braking ? "減速" : flight.strokeT >= 0 ? "羽ばたき" : "滑空";
     hud.textContent = `${st}　速度 ${flight.speed.toFixed(0)} m/s　高度 ${Math.max(0, flight.agl).toFixed(0)} m　${flight.windVec.length() > 0.1 ? `　風 ${bearingName(wind.bearing)} ${flight.windVec.length().toFixed(0)}m/s${flight.windVec.y > 1 ? " 上昇気流!" : ""}` : ""}　${fps.toFixed(0)}fps Q${quality.level}`;
     msg.style.opacity = game.state === "running" && game.gameTime < 9 ? "1" : "0";

@@ -53,3 +53,6 @@ Repository and GitHub Pages URLs retain the existing `bird-flight-simulator` nam
 - 朝焼け/朝は建物の窓・街灯が消灯（夕・夜は点灯、夜明けに向けて滑らかに消える）。
 - 着地中は減速ボタンが「歩く」に。押し続けで歩行（スティックで向き）。羽ばたき短押し=小ジャンプ、長押し=離陸。
 - 0.35m以下の段差は歩いて越え、それ以上は壁扱い。ベンチ/植え込み(約0.5m)へは小ジャンプで乗れ、1mの塀は乗れない。
+
+## C3 wire perching
+- Power lines are perches (`Layout.wires`, same data as the rendered wires). Hold 減速 while slow (<=8 m/s), not rising, and within 0.8 m of a wire to land; passing through never perches. Perched: 歩く moves along the wire, short flap = hop (to the next wire ~0.9 m away), long flap = take off.

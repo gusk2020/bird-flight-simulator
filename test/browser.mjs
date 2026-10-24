@@ -141,6 +141,22 @@ try {
   check("night: lights on", (await p.evaluate(() => __game.world.lightsLevel())) === 1);
   await p.evaluate(() => __game.setHour(12));
 
+  console.log("\n# wire perching (C3)");
+  await p.evaluate(() => { const g = __game, w = g.world, id = w.wires.findIndex(q => q.alongX && q.off === 0 && Math.abs(q.ax + 14) < 0.1 && Math.abs(q.az - 33.8) < 0.1), o = { x: 0, y: 0, z: 0 }; w.perchPoint(id, 0.4, o); const d = w.wireDir(id), f = g.flight;
+    window.__wire = id; f.reset(); f.pos.set(o.x, o.y + 0.32 + 0.5, o.z); f.prevPos.copy(f.pos); f.vel.set(d[0] * 3, -1, d[1] * 3); f.yaw = Math.atan2(-d[0], -d[1]); g.input.state.brake = true; });
+  await p.waitForFunction(() => __game.flight.mode === "perch", null, { timeout: 20000 }).catch(() => {});
+  await p.evaluate(() => { __game.input.state.brake = false; }); await sleep(1500);
+  let pc = await p.evaluate(() => ({ m: __game.flight.mode, hud: document.getElementById("hud").textContent, lab: document.getElementById("brake").textContent, y: __game.flight.pos.y }));
+  check("brake near a wire at low speed: bird perches (HUD shows it)", pc.m === "perch" && pc.hud.includes("電線") && pc.lab === "歩く", JSON.stringify(pc));
+  const q1 = await S(); await sleep(1500); const q2 = await S(); check("perched bird does not slide", dist(q1, q2) < 1e-6);
+  await tp("touchStart", [{ x: 800, y: 350, id: 2 }]); await p.waitForFunction(() => __game.flight.mode === "air" && __game.flight.pos.y > 8.5, null, { timeout: 25000 }).catch(() => {}); await tp("touchEnd", []);
+  check("long press takes off from the wire", (await S()).mode === "air");
+  await p.evaluate(() => { const g = __game, f = g.flight, w = g.world, o = { x: 0, y: 0, z: 0 }; w.perchPoint(window.__wire, 0.4, o); f.reset(); f.pos.set(o.x, o.y + 0.32 + 0.5, o.z); f.prevPos.copy(f.pos); f.vel.set(0, -1, 0); f.mode = "air"; g.input.state.brake = true; });
+  await p.waitForFunction(() => __game.flight.mode === "perch", null, { timeout: 20000 }).catch(() => {});
+  await p.evaluate(() => { __game.input.state.brake = false; });
+  await p.click("#btnReset"); await sleep(400); s = await S(); check("reset while perched recovers to normal flight", s.mode === "air" && s.y > 8);
+  await p.evaluate(() => __game.setHour(12));
+
   console.log("\n# time of day (A2)");
   const seen = [];
   for (let i = 0; i < 4; i++) { await p.click("#btnTime"); await sleep(1500); seen.push(await p.evaluate(() => ({ label: document.getElementById("btnTime").textContent, e: __game.env() }))); }

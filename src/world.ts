@@ -154,14 +154,9 @@ export function buildWorld(): World {
   group.add(inst(pole, lam(0x8c8579), L.poles.map(p => ({ x: p.x, y: 0, z: p.z }))), inst(arm, lam(0x6d665c), L.poles.map(p => ({ x: p.x, y: 0, z: p.z }))));
   const lampMat = new THREE.MeshBasicMaterial({ color: 0x777777 });
   group.add(inst(new THREE.SphereGeometry(0.3, 8, 6), lampMat, L.poles.filter((_, i) => i % 2 === 0).map(p => ({ x: p.x, y: 8.9, z: p.z }))));
-  const pts: number[] = [];
-  for (const line of L.poleLines) for (let i = 0; i + 1 < line.length; i++) for (const o of [-0.9, 0, 0.9]) {
-    const [x0, z0] = line[i], [x1, z1] = line[i + 1], alongX = Math.abs(x1 - x0) > 1;
-    const ox = alongX ? 0 : o, oz = alongX ? o : 0;
-    for (let s = 0; s < 4; s++) {
-      const a = s / 4, b = (s + 1) / 4, sag = (t: number) => 8.3 - 1.2 * 4 * t * (1 - t);
-      pts.push(x0 + (x1 - x0) * a + ox, sag(a), z0 + (z1 - z0) * a + oz, x0 + (x1 - x0) * b + ox, sag(b), z0 + (z1 - z0) * b + oz);
-    }
+  const pts: number[] = [], wp = { x: 0, y: 0, z: 0 }, wq = { x: 0, y: 0, z: 0 };
+  for (let id = 0; id < L.wires.length; id++) for (let q = 0; q < 4; q++) {
+    L.perchPoint(id, q / 4, wp); L.perchPoint(id, (q + 1) / 4, wq); pts.push(wp.x, wp.y, wp.z, wq.x, wq.y, wq.z);
   }
   const wg = new THREE.BufferGeometry(); wg.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3));
   const wires = new THREE.LineSegments(wg, new THREE.LineBasicMaterial({ color: 0x222222 })); wires.frustumCulled = false; group.add(wires);

@@ -5,7 +5,11 @@ export interface House { x: number; z: number; ry: number; floors: 1 | 2; wall: 
 export interface Apt { x: number; z: number; ry: number; floors: number; wall: number; w: number; d: number }
 export interface Tree { x: number; z: number; s: number; tint: number }
 export interface Low { x: number; z: number; hw: number; hd: number; top: number; kind: "bench" | "wall" | "planter" }
+export interface Wire { ax: number; az: number; bx: number; bz: number; off: number; alongX: boolean }
+export const WIRE_TOP = 8.3, WIRE_SAG = 1.2, WIRE_SPACING = 0.9;
 export interface Layout {
+  wires: Wire[]; perchAt(x: number, y: number, z: number, r: number): { id: number; t: number } | null;
+  perchPoint(id: number, t: number, out: { x: number; y: number; z: number }): void; wireDir(id: number): [number, number];
   lows: Low[];
   colliders: Collider[]; houses: House[]; apts: Apt[]; tanks: { x: number; z: number; y: number }[];
   trees: Tree[]; poles: { x: number; z: number }[]; poleLines: [number, number][][];
@@ -27,7 +31,7 @@ export function houseHeight(floors: number) { return floors === 2 ? 6.2 : 3.2; }
 export function generateLayout(seed = 7): Layout {
   const r = rng(seed);
   const pick = <T,>(a: T[]) => a[Math.floor(r() * a.length)];
-  const L: Layout = { lows: [], colliders: [], houses: [], apts: [], tanks: [], trees: [], poles: [], poleLines: [], lots: [], roads: [], heightAt };
+  const L: Layout = { wires: [], perchAt, perchPoint, wireDir, lows: [], colliders: [], houses: [], apts: [], tanks: [], trees: [], poles: [], poleLines: [], lots: [], roads: [], heightAt };
   for (let k = 0; k < 8; k++) L.roads.push((k - 3.5) * PITCH);
   const box = (x: number, z: number, hw: number, hd: number, top: number) =>
     L.colliders.push({ minX: x - hw, maxX: x + hw, minZ: z - hd, maxZ: z + hd, top });
@@ -76,6 +80,30 @@ export function generateLayout(seed = 7): Layout {
       L.poles.push({ x: rd + 5.8, z: p }); line2.push([rd + 5.8, p]);
     }
     L.poleLines.push(line, line2);
+  }
+  // 電線: 柱の間に3本ずつ。見た目(world.ts)と止まり木判定が同じデータを使う
+  for (const line of L.poleLines) for (let i = 0; i + 1 < line.length; i++) {
+    const [x0, z0] = line[i], [x1, z1] = line[i + 1], alongX = Math.abs(x1 - x0) > 1;
+    for (const off of [-WIRE_SPACING, 0, WIRE_SPACING]) L.wires.push({ ax: x0, az: z0, bx: x1, bz: z1, off, alongX });
+  }
+  function perchPoint(id: number, t: number, out: { x: number; y: number; z: number }) {
+    const w = L.wires[id]; out.x = w.ax + (w.bx - w.ax) * t + (w.alongX ? 0 : w.off); out.z = w.az + (w.bz - w.az) * t + (w.alongX ? w.off : 0);
+    out.y = WIRE_TOP - WIRE_SAG * 4 * t * (1 - t);
+  }
+  function wireDir(id: number): [number, number] { const w = L.wires[id], dx = w.bx - w.ax, dz = w.bz - w.az, l = Math.hypot(dx, dz); return [dx / l, dz / l]; }
+  /** (x,y,z)に最も近い電線上の点。半径r以内でなければ null */
+  function perchAt(x: number, y: number, z: number, r: number) {
+    if (y < WIRE_TOP - WIRE_SAG - r || y > WIRE_TOP + r) return null;
+    let best = -1, bt = 0, bd = r * r; const pt = { x: 0, y: 0, z: 0 };
+    for (let id = 0; id < L.wires.length; id++) {
+      const w = L.wires[id], mx = (w.ax + w.bx) / 2 + (w.alongX ? 0 : w.off), mz = (w.az + w.bz) / 2 + (w.alongX ? w.off : 0);
+      if (Math.abs(x - mx) > 15 + r || Math.abs(z - mz) > 15 + r) continue;
+      const dx = w.bx - w.ax, dz = w.bz - w.az; const ox = w.alongX ? 0 : w.off, oz = w.alongX ? w.off : 0;
+      let t = ((x - w.ax - ox) * dx + (z - w.az - oz) * dz) / (dx * dx + dz * dz); t = Math.max(0.03, Math.min(0.97, t));
+      perchPoint(id, t, pt); const d = (pt.x - x) ** 2 + (pt.y - y) ** 2 + (pt.z - z) ** 2;
+      if (d < bd) { bd = d; best = id; bt = t; }
+    }
+    return best < 0 ? null : { id: best, t: bt };
   }
   // 低い障害物(歩く・小ジャンプで乗り越える練習用): 既存の乱数列を乱さないよう別系列で配置する
   const r2 = rng(seed + 999);

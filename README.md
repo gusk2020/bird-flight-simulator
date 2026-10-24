@@ -56,3 +56,8 @@ Repository and GitHub Pages URLs retain the existing `bird-flight-simulator` nam
 
 ## C3 wire perching
 - Power lines are perches (`Layout.wires`, same data as the rendered wires). Hold 減速 while slow (<=8 m/s), not rising, and within 0.8 m of a wire to land; passing through never perches. Perched: 歩く moves along the wire, short flap = hop (to the next wire ~0.9 m away), long flap = take off.
+
+## C4 living town
+- `src/npc.ts` (logic, no rendering) + `src/npcView.ts` (instanced drawing). NPC birds (pigeon/sparrow/crow: fly, perch on wires/roofs, walk on the ground, flee when you rush at them, pigeon flocks you can join by flying alongside), pedestrians (walk lot sidewalks, stop/look at low birds, back away from fast ones), cars (left-hand lanes, signals, turns, following distance).
+- Only the area around you is simulated in detail; far NPCs update at low rate or are re-placed near you. Menu: 街の動き (なし/少/標準/多), 画質 (自動/高/中/低). Activity follows the time of day.
+- Not implemented: NPC/player collisions (everything passes through), car headlights, seasons.

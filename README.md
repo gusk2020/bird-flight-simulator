@@ -43,3 +43,8 @@ Repository and GitHub Pages URLs retain the existing `bird-flight-simulator` nam
 - 時間帯: 朝・昼・夕・夜 (`src/env.ts` keyframes by hour 0-24, ready for a continuous day cycle); windows and street lamps light up at dawn/dusk/night.
 - Game flow (`src/game.ts`): 開始 / ⏸ 一時停止 / 再開. Pause freezes physics and game time, clears input, and the screen-off / app-switch / blur auto-pauses. Reset still works.
 - Tests (all fail CI on error): `npm run test:unit` (physics, camera, game flow, environment), `npm run test:browser` (Chromium, touch/pause/landing/dive), `npm test` runs everything. CI: `.github/workflows/ci.yml`.
+
+## C1 speed feel
+- Dives now reach ~35 m/s (`maxDiveSpeed`/`flapMaxSpeed` in `src/params.ts`); flapping alone tops out ~18-22 m/s; braking holds a dive at ~17 m/s.
+- 速度演出 (pause menu: なし/弱/標準/強): anime-style speed lines + vignette (2D canvas, 0 cost when off), world-space streaks, FOV/camera pull-back. Nothing is shown at normal speeds (<22 m/s). No frame skipping is used.
+- Ground now carries a fine procedural texture (optical-flow cue when diving) and tree crowns use near/far LOD (triangles 106k -> ~66k measured).

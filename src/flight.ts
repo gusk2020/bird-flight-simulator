@@ -86,13 +86,13 @@ export class Flight {
     _a.addScaledVector(_d, -P.liftK * this.dragScale * cd * q);
     if (this.strokeT >= 0) {
       const s = Math.sin(Math.PI * this.strokeT);
-      _a.addScaledVector(f, P.flapThrust * s); _a.y += P.flapLift * s;
+      _a.addScaledVector(f, P.flapThrust * s * clamp((P.flapMaxSpeed - speed) / 6, 0, 1)); _a.y += P.flapLift * s;
     }
     this.vel.addScaledVector(_a, dt);
     // 横滑りを減衰 (旋回で速度が機首方向へ曲がる)
     const side = this.vel.dot(_r);
     this.vel.addScaledVector(_r, -side * (1 - Math.exp(-P.sideDamp * dt)));
-    if (this.vel.length() > P.maxSpeed) this.vel.setLength(P.maxSpeed);
+    if (this.vel.length() > P.maxDiveSpeed) this.vel.setLength(P.maxDiveSpeed);
     this.vel.add(w);
     this.pos.addScaledVector(this.vel, dt);
 

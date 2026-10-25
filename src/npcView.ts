@@ -9,7 +9,7 @@ export class NpcView {
   group = new THREE.Group();
   private body: THREE.InstancedMesh; private wing: THREE.InstancedMesh;
   private pedBody: THREE.InstancedMesh; private pedHead: THREE.InstancedMesh; private carBody: THREE.InstancedMesh; private carCabin: THREE.InstancedMesh;
-  private o = new THREE.Object3D(); private m = new THREE.Matrix4(); private w = new THREE.Matrix4(); private c = new THREE.Color();
+  private o = new THREE.Object3D(); private m = new THREE.Matrix4(); private w = new THREE.Matrix4(); private c = new THREE.Color(); private sc = new THREE.Matrix4();
   constructor() {
     const lam = (color: number, extra: THREE.MeshLambertMaterialParameters = {}) => new THREE.MeshLambertMaterial({ color, ...extra });
     const mk = (g: THREE.BufferGeometry, mat: THREE.Material, n: number) => { const m = new THREE.InstancedMesh(g, mat, n); m.count = 0; m.frustumCulled = false; m.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3); this.group.add(m); return m; };
@@ -24,20 +24,20 @@ export class NpcView {
   update(npc: NpcWorld, camera: THREE.Vector3, maxDist = 220) {
     const o = this.o, c = this.c; let nb = 0, nw = 0;
     for (const b of npc.birds) {
-      if (!b.active || nb >= MAX_BIRDS || Math.hypot(b.x - camera.x, b.z - camera.z) > maxDist) continue;
+      if (!b.active || nb >= MAX_BIRDS || (b.x - camera.x) ** 2 + (b.z - camera.z) ** 2 > maxDist * maxDist) continue;
       o.position.set(b.x, b.y + 0.3 * b.scale, b.z); o.rotation.set(b.state === "fly" ? -0.1 : 0, b.yaw, 0); o.scale.setScalar(b.scale); o.updateMatrix();
       this.body.setMatrixAt(nb, o.matrix); this.body.setColorAt(nb, c.setHex(KIND_COLOR[b.kind])); nb++;
       const flap = b.state === "fly" ? Math.sin(b.phase) * 0.8 : -0.9; // 止まっているときは翼をたたむ
       for (const s of [1, -1]) {
         this.w.makeRotationZ(s * flap); this.w.setPosition(s * 0.18, 0.05, -0.05);
-        const sc = new THREE.Matrix4().makeScale(s, 1, 1); this.m.multiplyMatrices(o.matrix, this.w).multiply(sc);
+        this.sc.makeScale(s, 1, 1); this.m.multiplyMatrices(o.matrix, this.w).multiply(this.sc);
         if (nw < MAX_BIRDS * 2) { this.wing.setMatrixAt(nw, this.m); this.wing.setColorAt(nw, c.setHex(KIND_COLOR[b.kind])); nw++; }
       }
     }
     this.body.count = nb; this.wing.count = nw;
     let np = 0;
     for (const q of npc.visiblePeds()) {
-      if (np >= MAX_PEDS || Math.hypot(q.x - camera.x, q.z - camera.z) > maxDist) continue;
+      if (np >= MAX_PEDS || (q.x - camera.x) ** 2 + (q.z - camera.z) ** 2 > maxDist * maxDist) continue;
       const bob = q.walking ? Math.abs(Math.sin(q.phase)) * 0.03 : 0;
       o.position.set(q.x, 0.12 + bob, q.z); o.rotation.set(0, q.yaw, 0); o.scale.set(1, 1, 1); o.updateMatrix();
       this.pedBody.setMatrixAt(np, o.matrix); this.pedBody.setColorAt(np, c.setHSL(q.hue, 0.45, 0.45)); this.pedHead.setMatrixAt(np, o.matrix); this.pedHead.setColorAt(np, c.setHex(0xffffff)); np++;
@@ -45,7 +45,7 @@ export class NpcView {
     this.pedBody.count = this.pedHead.count = np;
     let nc = 0;
     for (const car of npc.visibleCars()) {
-      if (nc >= MAX_CARS || Math.hypot(car.x - camera.x, car.z - camera.z) > maxDist) continue;
+      if (nc >= MAX_CARS || (car.x - camera.x) ** 2 + (car.z - camera.z) ** 2 > maxDist * maxDist) continue;
       o.position.set(car.x, 0, car.z); o.rotation.set(0, car.yaw, 0); o.scale.set(1, 1, 1); o.updateMatrix();
       this.carBody.setMatrixAt(nc, o.matrix); this.carBody.setColorAt(nc, c.setHex(car.color)); this.carCabin.setMatrixAt(nc, o.matrix); this.carCabin.setColorAt(nc, c.setHex(0xffffff)); nc++;
     }

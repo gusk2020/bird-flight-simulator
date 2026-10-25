@@ -115,7 +115,8 @@ export function generateLayout(seed = 7): Layout {
   }
   function heightAt(x: number, z: number) {
     let h = 0;
-    for (const c of L.colliders) if (x >= c.minX && x <= c.maxX && z >= c.minZ && z <= c.maxZ && c.top > h) h = c.top;
+    const cs = L.colliders;
+    for (let i = 0; i < cs.length; i++) { const c = cs[i]; if (x >= c.minX && x <= c.maxX && z >= c.minZ && z <= c.maxZ && c.top > h) h = c.top; }
     if (h > 0) return h;
     const ix = Math.round(x / PITCH), iz = Math.round(z / PITCH);
     if (Math.abs(ix) <= HALF && Math.abs(iz) <= HALF && Math.abs(x - ix * PITCH) < LOT / 2 && Math.abs(z - iz * PITCH) < LOT / 2) return LOT_TOP;

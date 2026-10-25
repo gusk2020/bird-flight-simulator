@@ -82,7 +82,7 @@ export class BirdModel {
     // 脚: 離着陸付近で降ろす
     const ext = !air || (f.agl < 2.2 && f.speed < 13) ? 1 : 0;
     this.legExt += (ext - this.legExt) * (1 - Math.exp(-9 * dt));
-    this.legs.forEach(l => { l.rotation.x = (1 - this.legExt) * 1.4; l.scale.y = 0.6 + 0.4 * this.legExt; });
+    for (const l of this.legs) { l.rotation.x = (1 - this.legExt) * 1.4; l.scale.y = 0.6 + 0.4 * this.legExt; }
     // 歩行: 足を交互に出し、頭を前後に振る(ハトの歩き)
     const walkAmt = f.mode === "landed" ? Math.min(1, f.walkV / 1.2) : 0, ph = f.walkPhase;
     if (walkAmt > 0.01) {

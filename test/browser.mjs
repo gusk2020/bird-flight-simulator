@@ -171,6 +171,17 @@ try {
   check("街の動き=多 and 画質=低 are applied (auto quality stays out of the way)", hi.c.birds === 14 && hi.c.cars === 16 && hi.pr <= 0.8 + 1e-9 && hi.lvl === 3, JSON.stringify(hi));
   await openMenu(); await p.click('[data-set="npc"][data-val="2"]'); await p.click('[data-set="gfx"][data-val="0"]'); await p.click("#ovGo"); await sleep(300);
 
+  console.log("\n# rendering is skipped while paused (audit)");
+  const fr = () => p.evaluate(() => __game.renderer.info.render.frame);
+  await p.evaluate(() => { __game.flight.reset(); }); await sleep(600);
+  await openMenu(); await sleep(500); const f1 = await fr(); await sleep(1500); const f2 = await fr(); const sp1 = await S(); await sleep(300);
+  check("paused with nothing changing: no frames are drawn and no physics runs", f2 === f1 && (await S()).steps === sp1.steps, `frames ${f1}->${f2}`);
+  await p.click('[data-set="weather"][data-val="cloudy"]'); await sleep(500); const f3 = await fr();
+  check("a setting change while paused is redrawn behind the menu", f3 > f2, `frames ${f2}->${f3}`);
+  await sleep(1000); const f4 = await fr(); check("...and then drawing stops again", f4 === f3);
+  await p.click('[data-set="weather"][data-val="clear"]'); await p.click("#ovGo"); await sleep(800); const f5 = await fr();
+  check("resume draws every frame again", f5 > f4 + 2, `frames ${f4}->${f5}`);
+
   console.log("\n# time of day (A2)");
   const seen = [];
   for (let i = 0; i < 4; i++) { await p.click("#btnTime"); await sleep(1500); seen.push(await p.evaluate(() => ({ label: document.getElementById("btnTime").textContent, e: __game.env() }))); }

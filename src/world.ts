@@ -140,8 +140,10 @@ export function buildWorld(): World {
     if (!force && Math.hypot(x - lodX, z - lodZ) < 10) return; lodX = x; lodZ = z;
     let a = 0, b = 0;
     for (let i = 0; i < NT; i++) {
-      const near = Math.hypot(L.trees[i].x - x, L.trees[i].z - z) < LOD_NEAR, m = near ? nearCrown : farCrown, k = near ? a++ : b++;
-      (m.instanceMatrix.array as Float32Array).set(tm.subarray(i * 16, i * 16 + 16), k * 16); (m.instanceColor!.array as Float32Array).set(tc.subarray(i * 3, i * 3 + 3), k * 3);
+      const tdx = L.trees[i].x - x, tdz = L.trees[i].z - z, near = tdx * tdx + tdz * tdz < LOD_NEAR * LOD_NEAR, m = near ? nearCrown : farCrown, k = near ? a++ : b++;
+      const ma = m.instanceMatrix.array as Float32Array, ca = m.instanceColor!.array as Float32Array; // subarray は呼び出しごとに配列ビューを作るため手で複写
+      for (let j = 0; j < 16; j++) ma[k * 16 + j] = tm[i * 16 + j];
+      ca[k * 3] = tc[i * 3]; ca[k * 3 + 1] = tc[i * 3 + 1]; ca[k * 3 + 2] = tc[i * 3 + 2];
     }
     nearCrown.count = nNear = a; farCrown.count = nFar = b;
     for (const m of [nearCrown, farCrown]) { m.instanceMatrix.needsUpdate = true; m.instanceColor!.needsUpdate = true; }

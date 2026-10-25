@@ -1,0 +1,21 @@
+import { Flight, FlightInput } from "../src/flight";
+import { generateLayout } from "../src/layout";
+import { Wind } from "../src/wind";
+import { NpcWorld } from "../src/npc";
+const L = generateLayout(); const world = { colliders: L.colliders, heightAt: L.heightAt, perchAt: L.perchAt, perchPoint: L.perchPoint, wireDir: L.wireDir };
+const inp = (o: Partial<FlightInput> = {}): FlightInput => ({ x: 0, y: 0, flapHeld: false, flapTap: false, brake: false, ...o });
+const out: Record<string, string> = {};
+const fmt = (f: Flight) => [f.pos.x, f.pos.y, f.pos.z, f.vel.x, f.vel.y, f.vel.z, f.yaw, f.pitch, f.roll].map(v => v.toFixed(6)).join(",") + "|" + f.mode + "|" + f.crashes;
+function run(name: string, f: Flight, secs: number, fn: (t: number, f: Flight) => FlightInput) { let acc = ""; for (let i = 0; i < secs * 60; i++) { f.step(1 / 60, fn(i / 60, f)); if (i % 120 === 0) acc += fmt(f) + ";"; } out[name] = acc + fmt(f); }
+const mk = (x: number, y: number, z: number, vz = -10) => { const f = new Flight(world); f.pos.set(x, y, z); f.prevPos.copy(f.pos); f.vel.set(0, 0, vz); return f; };
+run("glide", mk(28, 60, 110), 20, () => inp());
+run("windy-zigzag", Object.assign(mk(28, 80, 110), { wind: Object.assign(new Wind(L.colliders), {}) }), 30, t => inp({ x: Math.sin(t), y: Math.cos(t * 0.7), flapHeld: t % 5 < 2 }));
+run("dive", mk(28, 150, 110), 10, () => inp({ y: -1 }));
+run("land-walk-hop", mk(28, 6, 110), 20, t => inp({ brake: t > 6 && t < 10, flapTap: Math.abs(t - 12) < 0.01, flapHeld: t > 12 && t < 12.1 }));
+const a = L.apts[0]; run("wall", mk(a.x, 10, a.z + 40), 8, () => inp());
+run("roof-walk", Object.assign(mk(a.x - 6, a.floors * 3.1 + 1.2, a.z, -3)), 12, t => inp({ brake: t > 4 }));
+const w0 = { x: 0, y: 0, z: 0 }; L.perchPoint(100, 0.4, w0); const pf = mk(w0.x, w0.y + 0.8, w0.z, -2); run("perch", pf, 10, t => inp({ brake: t < 6, flapTap: Math.abs(t - 7) < 0.01 }));
+const npc = new NpcWorld(L, 3), pl = { x: 28, y: 15, z: 110, speed: 8, yaw: 0, air: true }; npc.setLevel(3, pl);
+for (let i = 0; i < 3600; i++) npc.update(1 / 60, pl, 12);
+out["npc"] = JSON.stringify([npc.birds.map(b => [b.x, b.y, b.z].map(v => v.toFixed(4))), npc.peds.map(q => [q.x, q.z].map(v => v.toFixed(4))), npc.cars.map(c => [c.x, c.z].map(v => v.toFixed(4))), npc.stats]);
+console.log(JSON.stringify(out));

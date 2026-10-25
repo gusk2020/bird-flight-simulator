@@ -4,6 +4,7 @@ import type { FlightInput } from "./flight";
 export class Input {
   state: FlightInput = { x: 0, y: 0, flapHeld: false, flapTap: false, brake: false };
   onReset = () => {}; onCamera = () => {}; onTime = () => {}; onPause = () => {};
+  private out: FlightInput = { x: 0, y: 0, flapHeld: false, flapTap: false, brake: false };
   private stickId = -1; private ox = 0; private oy = 0; private R = 60;
   private keys = new Set<string>();
   private base = document.getElementById("stickBase")!; private knob = document.getElementById("stickKnob")!;
@@ -66,6 +67,7 @@ export class Input {
     const k = this.keys, s = this.state;
     const kx = (k.has("ArrowRight") || k.has("KeyD") ? 1 : 0) - (k.has("ArrowLeft") || k.has("KeyA") ? 1 : 0);
     const ky = (k.has("ArrowUp") || k.has("KeyW") ? 1 : 0) - (k.has("ArrowDown") || k.has("KeyS") ? 1 : 0);
-    return { x: s.x || kx, y: s.y || ky, flapHeld: s.flapHeld, flapTap: s.flapTap, brake: s.brake || k.has("ShiftLeft") };
+    const o = this.out; o.x = s.x || kx; o.y = s.y || ky; o.flapHeld = s.flapHeld; o.flapTap = s.flapTap; o.brake = s.brake || k.has("ShiftLeft");
+    return o; // 物理ステップごとに新しいオブジェクトを作らない(呼び出し側は読むだけ)
   }
 }

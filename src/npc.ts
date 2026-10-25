@@ -1,4 +1,4 @@
-import { Layout, PITCH, ROAD, LOT, LOT_TOP, HALF } from "./layout";
+import { Layout, ROAD } from "./layout";
 
 /**
  * 動いている街: NPC鳥・歩行者・自動車の軽量な自律行動 (描画に依存しない)。
@@ -18,7 +18,7 @@ export function activity(hour: number): number {
 function rng(seed: number) { let a = seed >>> 0; return () => { a = (a + 0x6d2b79f5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 const wrapAng = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
-const dist2 = (ax: number, az: number, bx: number, bz: number) => Math.hypot(ax - bx, az - bz);
+const dist2 = (ax: number, az: number, bx: number, bz: number) => { const dx = ax - bx, dz = az - bz; return Math.sqrt(dx * dx + dz * dz); };
 
 // ---------------------------------------------------------------- 鳥
 export type BirdKind = "pigeon" | "sparrow" | "crow";
@@ -38,9 +38,11 @@ export function signal(axis: "x" | "z", clock: number): "green" | "yellow" | "re
   const ph = ((clock % SIGNAL_CYCLE) + SIGNAL_CYCLE) % SIGNAL_CYCLE, own = axis === "x" ? ph : (ph + 9) % SIGNAL_CYCLE;
   return own < 6.5 ? "green" : own < 8 ? "yellow" : "red";
 }
-const ringPos = (s: number, H = SIDEWALK_HALF): [number, number, number] => { // 周回路 s → x,z と進行方向yaw
+const RP = { x: 0, z: 0, yaw: 0 }; // 結果の使い回し(毎回タプルを作らない)。呼び出し側はすぐ読み出すこと
+const ringPos = (s: number, H = SIDEWALK_HALF) => { // 周回路 s → x,z と進行方向yaw
   const P = 8 * H; s = ((s % P) + P) % P; const side = Math.floor(s / (2 * H)), u = s - side * 2 * H;
-  switch (side) { case 0: return [-H + u, -H, -Math.PI / 2]; case 1: return [H, -H + u, Math.PI]; case 2: return [H - u, H, Math.PI / 2]; default: return [-H, H - u, 0]; }
+  switch (side) { case 0: RP.x = -H + u; RP.z = -H; RP.yaw = -Math.PI / 2; break; case 1: RP.x = H; RP.z = -H + u; RP.yaw = Math.PI; break; case 2: RP.x = H - u; RP.z = H; RP.yaw = Math.PI / 2; break; default: RP.x = -H; RP.z = H - u; RP.yaw = 0; }
+  return RP;
 };
 
 export class NpcWorld {
@@ -68,14 +70,16 @@ export class NpcWorld {
     // プレイヤーが群れに混ざる(参加)/離れる(離脱)
     this.updateEscort(dt, p);
     const nPeds = Math.round(this.density[this.level].peds * act), nCars = Math.round(this.density[this.level].cars * act);
-    let pi = 0, ci = 0;
+    let pi = 0, ci = 0; this.vp.length = 0; this.vc.length = 0;
     for (const b of this.birds) if (b.active) this.updateBird(b, dt, p);
-    this.peds.forEach((q, i) => { q.on = i < this.density[this.level].peds && pi++ < nPeds; if (q.on) this.updatePed(q, dt, p); });
-    this.cars.forEach((c, i) => { c.on = i < this.density[this.level].cars && ci++ < nCars; if (c.on) this.updateCar(c, dt, p); });
+    for (let i = 0; i < this.peds.length; i++) { const q = this.peds[i]; q.on = i < this.density[this.level].peds && pi++ < nPeds; if (q.on) { this.updatePed(q, dt, p); this.vp.push(q); } }
+    for (let i = 0; i < this.cars.length; i++) { const c = this.cars[i]; c.on = i < this.density[this.level].cars && ci++ < nCars; if (c.on) { this.updateCar(c, dt, p); this.vc.push(c); } }
   }
   /** 現在表示すべき(活動中の)歩行者/車 */
-  visiblePeds() { return this.peds.filter(q => q.on); }
-  visibleCars() { return this.cars.filter(c => c.on); }
+  /** 直近の update() で活動中だった歩行者/車(毎フレーム配列を作らず使い回す) */
+  visiblePeds() { return this.vp; }
+  visibleCars() { return this.vc; }
+  private vp: Ped[] = []; private vc: Car[] = [];
 
   // ------------------------------------------------------------ 鳥
   private spotFor(kind: BirdKind, near?: { x: number; z: number }): { x: number; y: number; z: number; land: NpcBird["land"] } {
@@ -94,7 +98,7 @@ export class NpcWorld {
     const flockId = kind === "pigeon" ? Math.floor(i / 4) : -1, leaderOfFlock = kind === "pigeon" && i % 4 === 0;
     const b: NpcBird = { kind, x: s.x + (r() - 0.5) * 2, y: s.y, z: s.z + (r() - 0.5) * 2, yaw: r() * 6.28, speed: 0, state: s.land === "ground" ? "ground" : "perch", timer: 3 + r() * 10, tx: s.x, ty: s.y, tz: s.z, cruise: 12, land: s.land,
       flock: flockId, leader: leaderOfFlock, delay: 0, phase: r() * 6.28, walkV: 0, acc: 0, scale: k.scale, active: true };
-    if (!leaderOfFlock && flockId >= 0) { const ld = this.birds.find(q => q.flock === flockId && q.leader); if (ld) { b.x = ld.x + (r() - 0.5) * 3; b.z = ld.z + (r() - 0.5) * 3; b.y = this.L.heightAt(b.x, b.z); b.land = "ground"; b.state = "ground"; b.tx = b.x; b.ty = b.y; b.tz = b.z; } }
+    if (!leaderOfFlock && flockId >= 0) { const ld = this.leaderOf(flockId); if (ld) { b.x = ld.x + (r() - 0.5) * 3; b.z = ld.z + (r() - 0.5) * 3; b.y = this.L.heightAt(b.x, b.z); b.land = "ground"; b.state = "ground"; b.tx = b.x; b.ty = b.y; b.tz = b.z; } }
     this.birds.push(b);
   }
   private startFlight(b: NpcBird, s: { x: number; y: number; z: number; land: NpcBird["land"] }) {
@@ -105,7 +109,10 @@ export class NpcWorld {
     b.cruise = Math.max(top + 3.5, Math.max(b.y, s.y) + 4 + this.r() * 5, 9);
     b.speed = Math.max(b.speed, 3);
   }
-  private freeFlock(b: NpcBird) { return this.birds.filter(q => q.flock === b.flock && q !== b && q.active); }
+  private fs: NpcBird[] = [];
+  /** 同じ群れの他の活動中の個体(使い回し配列。呼び出しの入れ子は不可) */
+  private freeFlock(b: NpcBird) { const o = this.fs; o.length = 0; for (let i = 0; i < this.birds.length; i++) { const q = this.birds[i]; if (q.flock === b.flock && q !== b && q.active) o.push(q); } return o; }
+  private leaderOf(flock: number) { for (let i = 0; i < this.birds.length; i++) { const q = this.birds[i]; if (q.flock === flock && q.leader) return q; } return undefined; }
   private updateBird(b: NpcBird, dt: number, p: Player) {
     const d = dist2(b.x, b.z, p.x, p.z);
     if (d > 260) { this.relocateBird(b, p); return; }
@@ -121,7 +128,7 @@ export class NpcWorld {
         else if (this.r() < dt * 0.25) { b.walkV = 0.7; b.yaw += (this.r() - 0.5) * 2; const nx = b.x - Math.sin(b.yaw) * 2, nz = b.z - Math.cos(b.yaw) * 2; if (this.L.heightAt(nx, nz) > this.L.heightAt(b.x, b.z) + 0.3) b.walkV = 0; }
       }
       if (b.timer <= 0 && !(b.flock >= 0 && !b.leader && b.delay > 0 && (b.delay -= dt) > 0)) {
-        if (b.flock >= 0 && !b.leader) { const ld = this.birds.find(q => q.flock === b.flock && q.leader); if (ld && ld.state === "fly") this.startFlight(b, { x: ld.tx + (this.r() - 0.5) * 3, y: this.L.heightAt(ld.tx, ld.tz), z: ld.tz + (this.r() - 0.5) * 3, land: "ground" }); else b.timer = 1; }
+        if (b.flock >= 0 && !b.leader) { const ld = this.leaderOf(b.flock); if (ld && ld.state === "fly") this.startFlight(b, { x: ld.tx + (this.r() - 0.5) * 3, y: this.L.heightAt(ld.tx, ld.tz), z: ld.tz + (this.r() - 0.5) * 3, land: "ground" }); else b.timer = 1; }
         else { const s = this.escort && b.leader ? this.escortTarget(p) : this.spotFor(b.kind, p); this.startFlight(b, s); if (b.leader) this.freeFlock(b).forEach(q => { if (q.state !== "fly") { q.timer = 0; q.delay = 0.1 + this.r() * 0.6; } }); }
       }
       return;
@@ -151,9 +158,10 @@ export class NpcWorld {
   private escortTarget(p: Player) { const a = p.yaw; return { x: p.x - Math.sin(a) * 18, y: 0, z: p.z - Math.cos(a) * 18, land: "ground" as const }; }
   /** プレイヤーが群れの近くを同じ向きで飛び続けると群れが付いてくる。離れる/止まると離脱。 */
   private updateEscort(dt: number, p: Player) {
-    const flock = this.birds.filter(b => b.active && b.flock === 0 && b.state === "fly"), ld = this.birds.find(b => b.flock === 0 && b.leader);
-    if (!ld) return;
-    const near = flock.some(b => dist2(b.x, b.z, p.x, p.z) < 10 && Math.abs(b.y - p.y) < 8), same = Math.cos(wrapAng(ld.yaw - p.yaw)) > 0.5;
+    const ld = this.leaderOf(0); if (!ld) return;
+    let near = false;
+    for (let i = 0; i < this.birds.length && !near; i++) { const b = this.birds[i]; near = b.active && b.flock === 0 && b.state === "fly" && dist2(b.x, b.z, p.x, p.z) < 10 && Math.abs(b.y - p.y) < 8; }
+    const same = Math.cos(wrapAng(ld.yaw - p.yaw)) > 0.5;
     if (!this.escort) { this.escortT = p.air && p.speed > 4 && near && same ? this.escortT + dt : 0; if (this.escortT > 2) { this.escort = true; this.escortT = 0; this.stats.escorts++; } }
     else { const far = dist2(ld.x, ld.z, p.x, p.z) > 35, slow = !p.air || p.speed < 3; this.escortT = far || slow ? this.escortT + dt : 0; if (this.escortT > 1.5) { this.escort = false; this.escortT = 0; } }
   }
@@ -165,7 +173,7 @@ export class NpcWorld {
     const q: Ped = { lx: l.x, lz: l.z, s: r() * 8 * SIDEWALK_HALF, dir: r() < 0.5 ? 1 : -1, v: 1.1 + r() * 0.5, pause: r() < 0.3 ? r() * 4 : 0, react: 0, flee: 0, x: 0, z: 0, yaw: 0, hue: r(), phase: r() * 6, active: true, walking: true, on: true };
     this.placePed(q); this.peds.push(q);
   }
-  private placePed(q: Ped) { const [x, z, yaw] = ringPos(q.s); q.x = q.lx + x; q.z = q.lz + z; q.yaw = q.dir > 0 ? yaw : yaw + Math.PI; }
+  private placePed(q: Ped) { const r = ringPos(q.s); q.x = q.lx + r.x; q.z = q.lz + r.z; q.yaw = q.dir > 0 ? r.yaw : r.yaw + Math.PI; }
   private updatePed(q: Ped, dt: number, p: Player) {
     const d = dist2(q.x, q.z, p.x, p.z);
     if (d > 170) { const cells = this.lotCells.filter(l => { const dd = dist2(l.x, l.z, p.x, p.z); return dd > 20 && dd < 120; }), l = cells.length ? cells[Math.floor(this.r() * cells.length)] : this.lotCells[0]; q.lx = l.x; q.lz = l.z; q.s = this.r() * 8 * SIDEWALK_HALF; this.placePed(q); return; }
@@ -254,4 +262,3 @@ export class NpcWorld {
     c.turn = { p0, p1, p2, t: 0, len: len * 0.82, nAxis, nDir, nRoad: cc };
   }
 }
-export const _ringPos = ringPos; void PITCH; void LOT; void LOT_TOP; void HALF;

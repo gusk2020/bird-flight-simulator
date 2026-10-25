@@ -28,7 +28,9 @@ export class Wind {
     out.x += -this.toward.z * g * 0.4; out.z += this.toward.x * g * 0.4; // 横風の揺らぎ
     // 建物の風上側: 壁に当たった風が上へ抜ける
     const fx = this.from.x, fz = this.from.z, FACE = 12;
-    for (const b of this.blds) {
+    const bl = this.blds;
+    for (let i = 0; i < bl.length; i++) {
+      const b = bl[i];
       const dx = x - b.x, dz = z - b.z;
       if (Math.abs(dx) > b.hw + FACE + 6 || Math.abs(dz) > b.hd + FACE + 6) continue;
       const along = dx * fx + dz * fz, across = dx * -fz + dz * fx;

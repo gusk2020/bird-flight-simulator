@@ -225,12 +225,14 @@ export class Flight {
   /** 建物の壁との衝突。上面は heightAt が受け持つ。 */
   private collide(grounded = false) {
     const R = P.bodyRadius, prevFeet = this.prevPos.y - P.feetOffset;
-    for (const c of this.world.colliders) {
+    const cs = this.world.colliders;
+    for (let i = 0; i < cs.length; i++) { // for-of は反復子オブジェクトを毎回作るためホットパスでは添字で回す
+      const c = cs[i];
       if (prevFeet >= c.top - 0.05) continue;
       if (grounded && c.top - prevFeet <= P.stepUp) continue; // 低い段差は壁にせず、そのまま乗り上がる
       const cx = clamp(this.pos.x, c.minX, c.maxX), cz = clamp(this.pos.z, c.minZ, c.maxZ);
       let nx = this.pos.x - cx, nz = this.pos.z - cz, pen: number;
-      const d = Math.hypot(nx, nz);
+      const d = Math.sqrt(nx * nx + nz * nz);
       if (d >= R || this.pos.y - P.feetOffset >= c.top) continue;
       if (d < 1e-6) {
         const l = this.pos.x - c.minX, r = c.maxX - this.pos.x, b = this.pos.z - c.minZ, fr = c.maxZ - this.pos.z;

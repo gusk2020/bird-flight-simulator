@@ -74,6 +74,8 @@ export function npcTests() {
   { const w = new NpcWorld(L, 9), p = P(); w.setLevel(3, p); const far = P(-150, 30, -150); for (let i = 0; i < 300; i++) w.update(1 / 60, far, 12);
     const near = w.visibleCars().filter(c => Math.hypot(c.x - far.x, c.z - far.z) < 190).length;
     check("cars/pedestrians concentrate around the player (re-placed when far)", near === w.visibleCars().length, `${near}/${w.visibleCars().length}`); }
+  { const w = new NpcWorld(L, 4), p = P(); w.setLevel(3, p); w.update(1 / 60, p, 12); const vp = w.visiblePeds(), vc = w.visibleCars(); w.update(1 / 60, p, 12);
+    check("per-frame view lists are reused (no allocation) and reflect the latest update", w.visiblePeds() === vp && w.visibleCars() === vc && vp.length === DENSITY[3].peds && vc.length === DENSITY[3].cars); }
   // 負荷
   { const w = new NpcWorld(L, 6), p = P(); w.setLevel(3, p); for (let i = 0; i < 600; i++) w.update(1 / 60, p, 12); const t0 = performance.now(); const N = 3000; for (let i = 0; i < N; i++) w.update(1 / 60, p, 12); const ms = (performance.now() - t0) / N;
     check("CPU budget: dense level (14 birds, 40 pedestrians, 16 cars) < 1 ms per update (node)", ms < 1, `${ms.toFixed(3)} ms`); }

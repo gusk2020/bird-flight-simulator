@@ -11,7 +11,7 @@ export function speedIntensity(speed: number): number {
  * 強度0のときは何も描かない。線は約14Hzで描き直して手描きアニメ風にする。
  */
 export class SpeedLines {
-  private ctx: CanvasRenderingContext2D; private seeds: number[] = []; private t = 0; private lastDrawn = 0;
+  private ctx: CanvasRenderingContext2D; private seeds: number[] = []; private t = 0; private lastDrawn = 0; private vo = -1;
   constructor(private canvas: HTMLCanvasElement, private vignette: HTMLElement) {
     this.ctx = canvas.getContext("2d")!;
     for (let i = 0; i < 64 * 4; i++) this.seeds.push(Math.random());
@@ -19,7 +19,8 @@ export class SpeedLines {
   resize(w: number, h: number) { this.canvas.width = Math.max(2, Math.round(w / 3)); this.canvas.height = Math.max(2, Math.round(h / 3)); }
   /** @returns 描いた線の数 */
   update(dt: number, intensity: number): number {
-    this.vignette.style.opacity = String(Math.min(0.6, intensity * 0.6));
+    const vo = Math.round(Math.min(0.6, intensity * 0.6) * 100) / 100; // 値が変わったときだけDOMを触る(毎フレームの文字列生成・スタイル更新を避ける)
+    if (vo !== this.vo) { this.vo = vo; this.vignette.style.opacity = String(vo); }
     const c = this.canvas, g = this.ctx;
     if (intensity < 0.02) { if (this.lastDrawn > 0) { g.clearRect(0, 0, c.width, c.height); this.lastDrawn = 0; } return 0; }
     this.t += dt;

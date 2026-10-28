@@ -19,12 +19,17 @@ canvas{display:block;width:100%;height:100%}
 #brake{right:calc(max(18px,env(safe-area-inset-right)) + clamp(76px,22vmin,112px) + 14px);bottom:max(18px,env(safe-area-inset-bottom));width:clamp(60px,16vmin,84px);height:clamp(60px,16vmin,84px);font-size:14px}
 #top{position:fixed;top:max(8px,env(safe-area-inset-top));right:max(10px,env(safe-area-inset-right));display:flex;gap:8px}
 #btnPause{min-width:40px!important}
-#overlay{position:fixed;inset:0;background:#000a;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:#fff;z-index:10}
+/* 片手操作: 画面の半分全体をスティック領域にし、羽ばたき/減速ボタンは使わない */
+body[data-ctl=right] #stick{left:50%;width:50%;height:100%;bottom:0}
+body[data-ctl=left] #stick{left:0;width:50%;height:100%;bottom:0}
+body[data-ctl=right] #flap,body[data-ctl=right] #brake,body[data-ctl=left] #flap,body[data-ctl=left] #brake{display:none}
+#overlay{overflow-y:auto;position:fixed;inset:0;background:#000a;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:#fff;z-index:10}
 #overlay[hidden]{display:none}
-#overlay h1{margin:0;font-size:26px;text-shadow:0 0 6px #000}
+#overlay h1{margin:0;font-size:24px;text-shadow:0 0 6px #000}
 #overlay p{margin:0;font-size:13px;opacity:.85;text-align:center;line-height:1.6}
-#overlay button{font-size:20px;padding:12px 36px;border-radius:28px;border:2px solid #fff;background:#fff3;color:#fff;font-family:inherit}
-.set{display:flex;flex-direction:column;gap:6px;font-size:14px}
+#overlay button{font-size:18px;padding:8px 30px;border-radius:28px;border:2px solid #fff;background:#fff3;color:#fff;font-family:inherit}
+.set{display:grid;grid-template-columns:auto auto;gap:5px 22px;font-size:13px}
+@media (max-width:640px){.set{grid-template-columns:auto}}
 .set div{display:flex;gap:6px;align-items:center;justify-content:center}
 .set div[hidden]{display:none}
 #overlay .set button{font-size:14px;padding:5px 14px;border-radius:16px;border-width:1px}
@@ -34,9 +39,10 @@ canvas{display:block;width:100%;height:100%}
 </style></head><body>
 <div id="vig"></div><canvas id="fx"></canvas><div id="hud"></div><div id="msg">左:ドラッグで旋回・上下　右:羽ばたき(押し続けで連続)・減速　着地中に羽ばたくと離陸</div>
 <div id="stick"></div><div id="stickBase"></div><div id="stickKnob"></div>
-<div id="top"><button class="btn" id="btnPause">⏸</button><button class="btn" id="btnTime">昼</button><button class="btn" id="btnCam">三人称</button><button class="btn" id="btnReset">リセット</button></div>
+<div id="top"><button class="btn" id="btnPause">⏸</button><button class="btn" id="btnCtl">両手</button><button class="btn" id="btnTime">昼</button><button class="btn" id="btnCam">三人称</button><button class="btn" id="btnReset">リセット</button></div>
 <button class="btn" id="brake">減速</button><button class="btn" id="flap">羽ばたき</button>
-<div id="overlay"><h1 id="ovTitle"></h1><p>左:ドラッグで旋回・上下　右:羽ばたき(押し続けで連続)・減速<br>着地中: 歩く(押し続け)・羽ばたき短押しで小ジャンプ・長押しで離陸　⏸で一時停止</p><div class="set" id="settings">
+<div id="overlay"><h1 id="ovTitle"></h1><p>左:ドラッグで旋回・上下　右:羽ばたき(押し続けで連続)・減速<br>着地中: 歩く(押し続け)・羽ばたき短押しで小ジャンプ・長押しで離陸　⏸で一時停止<br>片手: スライド=旋回/上下　タップ=羽ばたき　長押し=減速(地上は歩く)</p><div class="set" id="settings">
+<div>操作 <button data-set="ctl" data-val="both">両手</button><button data-set="ctl" data-val="right">右手</button><button data-set="ctl" data-val="left">左手</button></div>
 <div>天気 <button data-set="weather" data-val="clear">晴</button><button data-set="weather" data-val="cloudy">曇</button><button data-set="weather" data-val="rain">雨</button></div>
 <div>風 <button data-set="wind" data-val="0">なし</button><button data-set="wind" data-val="1">弱</button><button data-set="wind" data-val="2">強</button></div>
 <div id="rowBearing">風向 <button data-set="bearing" data-val="0">北</button><button data-set="bearing" data-val="90">東</button><button data-set="bearing" data-val="180">南</button><button data-set="bearing" data-val="270">西</button></div>

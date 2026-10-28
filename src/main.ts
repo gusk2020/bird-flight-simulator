@@ -10,6 +10,8 @@ import { Wind, bearingName } from "./wind";
 import { WEATHER, applyWeather, Weather } from "./weather";
 import { Rain } from "./rain";
 import { Quality } from "./quality";
+import { loadPrefs, savePrefs, ControlMode } from "./settings";
+import { FlapAssist } from "./assist";
 import { SpeedLines, Streaks, speedIntensity } from "./speedfx";
 import { NpcWorld } from "./npc";
 import { NpcView } from "./npcView";
@@ -43,7 +45,8 @@ const sky = new THREE.Mesh(skyGeo, new THREE.MeshBasicMaterial({ vertexColors: t
 sky.renderOrder = -1; scene.add(sky);
 const cloudMat = (world.clouds.children[0] as THREE.Mesh).material as THREE.MeshBasicMaterial;
 let hour: number = TIME_PRESETS[1].hour, preset = 1, targetHour: number | null = null;
-const settings = { weather: "clear" as Weather, wind: 1, bearing: 270, time: 0, fx: 2, npc: 2, gfx: 0 };
+const prefs = loadPrefs(); // 前回の操作方式など(壊れていれば既定値)。ゲーム自体は必ず開始待ちで始まる
+const settings = { weather: "clear" as Weather, wind: 1, bearing: 270, time: 0, fx: 2, npc: 2, gfx: 0, ctl: prefs.control as string };
 const WIND_SPEED = [0, 3, 7], WIND_GUST = [0, 0.3, 0.6], TIME_RATE = [0, 24 / 1800, 24 / 180]; // 時間: 停止 / 等速(24h=30分) / 高速(24h=3分)
 let dirty = true; // 一時停止中は、見た目が変わったときだけ再描画する(バッテリー・発熱対策)
 let envHour = -1;
@@ -62,7 +65,17 @@ function applyEnv() {
 const npcP = { x: 0, y: 0, z: 0, speed: 0, yaw: 0, air: false }; // 毎フレーム新しいオブジェクトを作らず使い回す
 const npcPlayer = () => { npcP.x = flight.pos.x; npcP.y = flight.pos.y; npcP.z = flight.pos.z; npcP.speed = flight.speed; npcP.yaw = flight.yaw; npcP.air = flight.mode === "air"; return npcP; };
 function applyQuality() { renderer.setPixelRatio(Math.min(devicePixelRatio, quality.pixelRatio)); resize(); rain.setDensity(quality.rainDensity); }
+const assist = new FlapAssist();
+const CTL_NAMES: Record<ControlMode, string> = { both: "両手", right: "右手", left: "左手" };
+function applyControl() {
+  const m = settings.ctl as ControlMode;
+  input.setMode(m); assist.enabled = m !== "both"; assist.reset();
+  document.body.dataset.ctl = m; document.getElementById("btnCtl")!.textContent = CTL_NAMES[m];
+  if (prefs.control !== m) { prefs.control = m; savePrefs(prefs); }
+  dirty = true;
+}
 function applySettings() {
+  applyControl();
   const wd = WEATHER[settings.weather];
   wind.set(settings.bearing, Math.min(12, WIND_SPEED[settings.wind] * wd.windMul), WIND_GUST[settings.wind]);
   flight.liftScale = wd.liftScale; flight.dragScale = wd.dragScale;
@@ -71,7 +84,7 @@ function applySettings() {
   document.getElementById("rowBearing")!.hidden = settings.wind === 0;
 }
 document.querySelectorAll<HTMLElement>("[data-set]").forEach(b => b.addEventListener("click", () => {
-  (settings as Record<string, unknown>)[b.dataset.set!] = b.dataset.set === "weather" ? b.dataset.val : Number(b.dataset.val); applySettings();
+  (settings as Record<string, unknown>)[b.dataset.set!] = b.dataset.set === "weather" || b.dataset.set === "ctl" ? b.dataset.val : Number(b.dataset.val); applySettings();
 }));
 applyEnv();
 input.onTime = () => {
@@ -86,7 +99,8 @@ input.onCamera = () => {
 };
 
 // --- 開始 / 一時停止 ---
-const game = new Game(flight, () => input.read(), () => { input.state.flapTap = false; });
+const game = new Game(flight, () => assist.apply(input.read(), flight), () => { input.state.flapTap = false; });
+document.getElementById("btnCtl")!.addEventListener("pointerdown", e => { e.preventDefault(); const order: ControlMode[] = ["both", "right", "left"]; settings.ctl = order[(order.indexOf(settings.ctl as ControlMode) + 1) % 3]; applySettings(); });
 const overlay = document.getElementById("overlay")!, ovTitle = document.getElementById("ovTitle")!, ovGo = document.getElementById("ovGo")!, ovReset = document.getElementById("ovReset")!;
 function showOverlay() {
   const ready = game.state === "ready";
@@ -162,4 +176,4 @@ function updateHud(dt: number, now: number) {
 }
 renderer.setAnimationLoop(frame);
 // テスト・デバッグ用
-(window as unknown as Record<string, unknown>).__game = { game, flight, world, input, cam, camera, renderer, scene, frame, env: () => envAt(hour), stats, npc, lines, streaks, speedIntensity, setHour: (h: number) => { hour = h; targetHour = null; applyEnv(); }, settings, applySettings, wind, rain, quality };
+(window as unknown as Record<string, unknown>).__game = { game, flight, world, input, cam, camera, renderer, scene, frame, env: () => envAt(hour), stats, npc, lines, streaks, speedIntensity, setHour: (h: number) => { hour = h; targetHour = null; applyEnv(); }, settings, applySettings, assist, prefs, wind, rain, quality };

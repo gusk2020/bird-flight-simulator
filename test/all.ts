@@ -8,5 +8,6 @@ import { speedFxTests } from "./speedfx";
 import { walkTests } from "./walk";
 import { perchTests } from "./perch";
 import { npcTests } from "./npc";
-physicsTests(); cameraTests(); gameTests(); envTests(); stageBTests(); speedFxTests(); walkTests(); perchTests(); npcTests();
+import { oneHandTests } from "./onehand";
+physicsTests(); cameraTests(); gameTests(); envTests(); stageBTests(); speedFxTests(); walkTests(); perchTests(); npcTests(); oneHandTests();
 finish();

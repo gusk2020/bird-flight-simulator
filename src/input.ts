@@ -1,10 +1,13 @@
 import type { FlightInput } from "./flight";
+import { GESTURE, OneHandGesture } from "./gesture";
+import type { ControlMode } from "./settings";
 
 /** タッチ/キーボード入力。指を離す・取消・画面外・アプリ切替で必ず解除する。 */
 export class Input {
   state: FlightInput = { x: 0, y: 0, flapHeld: false, flapTap: false, brake: false };
   onReset = () => {}; onCamera = () => {}; onTime = () => {}; onPause = () => {};
   private out: FlightInput = { x: 0, y: 0, flapHeld: false, flapTap: false, brake: false };
+  mode: ControlMode = "both"; readonly gesture = new OneHandGesture();
   private stickId = -1; private ox = 0; private oy = 0; private R = 60;
   private keys = new Set<string>();
   private base = document.getElementById("stickBase")!; private knob = document.getElementById("stickKnob")!;
@@ -12,13 +15,27 @@ export class Input {
   constructor() {
     const zone = document.getElementById("stick")!;
     zone.addEventListener("pointerdown", e => {
+      if (this.mode !== "both") { // 片手操作: スライド=スティック、短いタップ=羽ばたき、長押し=減速(地上では歩く)
+        if (this.gesture.down(e.pointerId, e.clientX, e.clientY, e.timeStamp, GESTURE.radiusPx(innerWidth, innerHeight))) {
+          try { zone.setPointerCapture(e.pointerId); } catch { /* 合成イベントなど */ }
+          this.ox = e.clientX; this.oy = e.clientY; this.R = this.gesture.R; this.showStick(true); this.syncKnob();
+        }
+        return;
+      }
       if (this.stickId >= 0) return;
       this.stickId = e.pointerId; try { zone.setPointerCapture(e.pointerId); } catch { /* 合成イベントなど */ }
       this.R = Math.max(45, Math.min(75, Math.min(innerWidth, innerHeight) * 0.13));
       this.ox = e.clientX; this.oy = e.clientY; this.move(e.clientX, e.clientY); this.showStick(true);
     });
-    zone.addEventListener("pointermove", e => { if (e.pointerId === this.stickId) this.move(e.clientX, e.clientY); });
-    const end = (e: PointerEvent) => { if (e.pointerId === this.stickId) this.endStick(); };
+    zone.addEventListener("pointermove", e => {
+      if (this.mode !== "both") { if (e.pointerId === this.gesture.id) { this.gesture.move(e.pointerId, e.clientX, e.clientY); this.syncKnob(); } return; }
+      if (e.pointerId === this.stickId) this.move(e.clientX, e.clientY);
+    });
+    // 描画が重くても、タップ/長押しは指が触れた実際の時刻(e.timeStamp)で判定する
+    const end = (e: PointerEvent) => {
+      if (this.mode !== "both") { if (e.pointerId === this.gesture.id) { if (e.type === "pointerup") this.gesture.up(e.pointerId, e.timeStamp); else this.gesture.cancel(); this.showStick(false); } return; }
+      if (e.pointerId === this.stickId) this.endStick();
+    };
     zone.addEventListener("pointerup", end); zone.addEventListener("pointercancel", end); zone.addEventListener("lostpointercapture", end);
 
     this.hold("flap", d => { this.state.flapHeld = d; if (d) this.state.flapTap = true; });
@@ -57,14 +74,20 @@ export class Input {
     this.state.x = dz(dx); this.state.y = dz(-dy);
     this.knob.style.left = this.ox + dx * this.R + "px"; this.knob.style.top = this.oy + dy * this.R + "px";
   }
+  /** 操作方式の切替。押しっぱなし・途中のスティックを残さない */
+  setMode(m: ControlMode) { if (m === this.mode) return; this.releaseAll(); this.mode = m; this.gesture.clearTaps(); }
+  private syncKnob() { const g = this.gesture; this.knob.style.left = this.ox + g.x * this.R + "px"; this.knob.style.top = this.oy - g.y * this.R + "px"; }
   private endStick() { this.stickId = -1; this.state.x = this.state.y = 0; this.showStick(false); }
   releaseAll() {
-    this.endStick(); this.releasers.forEach(r => r()); this.keys.clear();
+    this.endStick(); this.gesture.cancel(); this.gesture.clearTaps(); this.releasers.forEach(r => r()); this.keys.clear();
     this.state.flapHeld = this.state.flapTap = this.state.brake = false;
   }
   /** 毎物理ステップ前に呼ぶ: キーボード分を合成した入力を返す */
   read(): FlightInput {
     const k = this.keys, s = this.state;
+    if (this.mode !== "both") { // 片手: ジェスチャの結果を状態へ反映(長押し判定もここで進める)
+      const g = this.gesture; g.poll(performance.now()); s.x = g.x; s.y = g.y; s.brake = g.brake; if (g.consumeTap()) s.flapTap = true;
+    }
     const kx = (k.has("ArrowRight") || k.has("KeyD") ? 1 : 0) - (k.has("ArrowLeft") || k.has("KeyA") ? 1 : 0);
     const ky = (k.has("ArrowUp") || k.has("KeyW") ? 1 : 0) - (k.has("ArrowDown") || k.has("KeyS") ? 1 : 0);
     const o = this.out; o.x = s.x || kx; o.y = s.y || ky; o.flapHeld = s.flapHeld; o.flapTap = s.flapTap; o.brake = s.brake || k.has("ShiftLeft");

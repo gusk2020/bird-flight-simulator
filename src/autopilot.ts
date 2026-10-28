@@ -17,6 +17,7 @@ export const WEIGHTS: Record<Exclude<AutoPolicy, "random">, Weights> = {
   adventure: { alt: [9, 22],  leg: [40, 90],   landP: 0.55, rest: [3, 9],  walkP: 0.4, walk: [4, 10], spots: [0.2, 0.35] },  // 冒険探索: 低く、屋根・電線を巡る
 };
 const SUB: Exclude<AutoPolicy, "random">[] = ["life", "scenic", "adventure"];
+const RESCUE_AFTER = 14; // 3秒ごとの見張りで14回(約42秒)連続で動けないときだけ最終手段
 const BOUND = 165; // これより外へは向かわない(物理の境界は205)
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
@@ -24,13 +25,13 @@ function rng(seed: number) { let a = seed >>> 0; return () => { a = (a + 0x6d2b7
 
 export class Autopilot {
   state: PilotState = "cruise"; policy: AutoPolicy = "random"; active: Exclude<AutoPolicy, "random"> = "life"; enabled = false;
-  stats = { landings: 0, walks: 0, perches: 0, takeoffs: 0, flaps: 0, replans: 0, teleports: 0, avoids: 0, switches: 0 };
+  stats = { landings: 0, walks: 0, perches: 0, takeoffs: 0, flaps: 0, replans: 0, teleports: 0, recoveries: 0, avoids: 0, switches: 0 }; // teleports=最終手段の再配置回数(通常0)  recoveries=物理入力による固着復帰の回数
   private r: () => number; private t = 0; private decideT = 0; private stateT = 0; private policyT = 0;
   private wx = 0; private wz = 0; private alt = 20; private tgt: Target | null = null;
   private sx = 0; private sy = 0; private lastFlap = -10; private lastGoal = 0;
   private px = 0; private pz = 0; private progT = 0; private watchT = 0; private wpx = 0; private wpz = 0;
   private restFor = 5; private walkFor = 0; private walkYaw = 0; private blocked = 0; private takeoffT = 0; private hopped = false;
-  private lastCrashes = 0; private emerg = 0; private emergDir = 1;
+  private lastPath = 0; private lastCrashes = 0; private emerg = 0; private emergDir = 1;
   constructor(private L: Layout, seed = 1) { this.r = rng(seed); }
 
   setPolicy(p: AutoPolicy) { this.policy = p; if (p !== "random") this.active = p; else this.policyT = 0; } // 次の判断から変わるだけ(位置・速度は変えない)
@@ -125,7 +126,9 @@ export class Autopilot {
       if (airborne && this.state !== "takeoff" && moved < 6) { this.blocked++; this.stats.replans++; this.newWaypoint(f, true); this.alt = Math.max(this.alt, f.pos.y + 10); if (this.state === "approach") { this.tgt = null; this.enter("cruise"); } }
       else if (still && (this.state === "walk" || this.state === "takeoff")) this.blocked++;
       else if (!still || this.state === "rest") this.blocked = 0;
-      if (this.blocked >= 10) { this.blocked = 0; this.stats.teleports++; this.teleport(f); }
+      // 固着の復帰は段階的: ①物理入力で何度もやり直す(離陸再試行・向き替え・目標再選択) → ②それでも約40秒動けない場合のみ最終手段
+      if (this.blocked >= 3 && this.blocked < RESCUE_AFTER) this.recover(f);
+      if (this.blocked >= RESCUE_AFTER) { this.blocked = 0; this.stats.teleports++; this.rescue(f); }
     }
     switch (this.state) {
       case "cruise": this.fly(f, o, this.wx, this.wz, this.alt); break;
@@ -150,20 +153,46 @@ export class Autopilot {
       const l = this.heightsAhead(f, f.yaw + 0.8, look, ignore), rr = this.heightsAhead(f, f.yaw - 0.8, look, ignore); this.emergDir = l < rr ? -1 : 1; this.stats.avoids++;
       sx = this.emergDir; want = Math.max(want, top + 3);
     }
+    // 遠くの高い建物: 越えられない高さなら、早めに低い側へゆるやかに回り込む(急な回避を減らす)
+    const far = clamp(f.speed * 5, 30, 60), farTop = this.heightsAhead(f, f.yaw, far, ignore);
+    if (farTop > f.pos.y + 6 && this.emerg <= 0 && Math.abs(sx) < 0.6) {
+      const l = this.heightsAhead(f, f.yaw + 0.6, far, ignore), rr = this.heightsAhead(f, f.yaw - 0.6, far, ignore);
+      sx = (l < rr ? -1 : 1) * 0.7; want = Math.max(want, farTop + 6);
+    }
     if (this.emerg > 0) sx = this.emergDir;
     const err = want - f.pos.y;
     o.x = sx; o.y = clamp(err * 0.07, -0.5, 0.8);
     const slow = f.speed < 7.5, needLift = err > 1.5 && f.vel.y < 0.8;
     if (slow || needLift || (f.agl < 6 && f.vel.y < -1)) this.flap(f, o);
     // 低速で機首を上げると失速する: 遅いときは機首を上げず、羽ばたきで速度・高度を得る
+    // 落下中(衝突後の気絶明けなど): 地面が近いなら機首を上げて羽ばたき、衝撃を減らす。速度が十分あるので失速しにくい
+    if (f.vel.y < -5 && f.agl < 16 && f.stun <= 0) { this.flap(f, o, true); o.y = Math.max(o.y, 0.9); return; }
     if (f.speed < 8.5) o.y = Math.min(o.y, 0.05);
     if (f.speed < 6.5 || f.stall) o.y = Math.min(o.y, -0.15);
   }
 
+  /** 目標までの直線の途中に、降下しながらでは越えられない建物がないか(目標自身の建物は除く) */
+  private pathClear(f: Flight, g: Target) {
+    const dx = g.x - f.pos.x, dz = g.z - f.pos.z, d = Math.hypot(dx, dz);
+    for (let k = 1; k <= 7; k++) {
+      const s = k / 8, x = f.pos.x + dx * s, z = f.pos.z + dz * s;
+      if (g.box > 0 ? Math.abs(x - g.x) < g.box + 3 && Math.abs(z - g.z) < g.box + 3 : (1 - s) * d < 6) continue;
+      const h = Math.max(this.L.heightAt(x, z), this.L.heightAt(x + dz / d * 3, z - dx / d * 3), this.L.heightAt(x - dz / d * 3, z + dx / d * 3));
+      const dist = (1 - s) * d, slope = g.kind === "roof" ? 0.3 : 0.22, prof = g.y + 0.9 + Math.max(0, dist - 4) * slope + (g.kind === "roof" ? 2.5 : 0); // approach() が実際に飛ぶ降下線
+      if (h + 0.8 > prof && h + 0.8 > f.pos.y - 2) return false; // 降下線上でも、いまの高さからでも越えられない場合だけ
+    }
+    return true;
+  }
+  private abortApproach(f: Flight, rise = 12) { this.tgt = null; this.stats.replans++; this.enter("cruise"); this.newWaypoint(f); this.alt = Math.max(this.alt, f.pos.y + rise); }
   private approach(f: Flight, o: FlightInput) {
     const g = this.tgt; if (!g) { this.enter("cruise"); this.newWaypoint(f); return; }
     if (f.mode !== "air") { this.afterLanding(f); return; }
     const dx = g.x - f.pos.x, dz = g.z - f.pos.z, d = Math.hypot(dx, dz);
+    // 着地進入の安全確認: 途中に越えられない建物がある / 屋根より低い位置で建物へ近づいた → 諦めて高度を取り直す
+    if (g.kind !== "wire") {
+      if (g.kind === "roof" && d < g.box + 6 && f.pos.y < g.y - 1.5) { this.abortApproach(f, g.y - f.pos.y + 8); return; }
+      if (this.t - this.lastPath > 0.4) { this.lastPath = this.t; if (!this.pathClear(f, g)) { this.abortApproach(f); return; } }
+    }
     if (g.kind === "wire") return this.approachWire(f, o, g, d);
     const slope = g.kind === "roof" ? 0.3 : 0.22, alt = g.y + 0.9 + Math.max(0, d - 4) * slope + (g.kind === "roof" ? 2.5 : 0); // 目標へ向けて浅く降りる
     this.fly(f, o, g.x, g.z, d > 70 ? Math.max(alt, 12) : alt, g);
@@ -215,10 +244,10 @@ export class Autopilot {
     this.takeoffT += 1 / 60;
     if (f.mode === "air" && !f.hopping && f.pos.y - f.agl >= -1 && f.agl > 7 && f.speed > 8) { this.stats.takeoffs++; this.enter("cruise"); this.newWaypoint(f); return; }
     if (!this.hopped && f.mode !== "air" && this.takeoffT < 5) { // 壁に向いたまま飛ぶと衝突して失速する: まず開けた向きへ体を回す
-      const lim = f.pos.y + 2.5;
-      if (this.heightsAhead(f, f.yaw, 18, null) > lim) { // 向きを回しながら、最も回転の少ない「開けた向き」を探す
+      const lim = f.pos.y + 2.5, blockedAhead = (y: number) => this.heightsAhead(f, y, 18, null) > lim || this.heightsAhead(f, y, 32, null) > f.pos.y + 8; // 近くの壁と、遠くの高い建物の両方を避ける
+      if (blockedAhead(f.yaw)) { // 向きを回しながら、最も回転の少ない「開けた向き」を探す
         let best = 0, bd = 9;
-        for (let k = 0; k < 16; k++) { const y = f.yaw + (k / 16) * Math.PI * 2, d = Math.abs(wrap(y - f.yaw)); if (d < bd && this.heightsAhead(f, y, 18, null) <= lim) { bd = d; best = y; } }
+        for (let k = 0; k < 16; k++) { const y = f.yaw + (k / 16) * Math.PI * 2, d = Math.abs(wrap(y - f.yaw)); if (d < bd && !blockedAhead(y)) { bd = d; best = y; } }
         if (bd < 9) { o.x = this.steer(f, f.pos.x - Math.sin(best) * 30, f.pos.z - Math.cos(best) * 30); if (Math.abs(o.x) < 0.2) o.x = Math.sign(o.x || 1) * 0.2; return; }
       }
     }
@@ -230,7 +259,23 @@ export class Autopilot {
     }
     if (this.takeoffT > 12) { this.hopped = false; this.takeoffT = 0; if (f.speed < 4) this.blocked += 3; }
   }
-  private teleport(f: Flight) { // 最終手段: 安全な空中へ(通常は発生しない)
-    f.reset(); f.pos.set((this.r() - 0.5) * 100, 30, (this.r() - 0.5) * 100); f.prevPos.copy(f.pos); this.enter("cruise"); this.newWaypoint(f);
+  /** 物理入力による復帰。位置も速度も触らず、次の判断だけを変える。 */
+  private recover(f: Flight) {
+    this.stats.recoveries++;
+    if (this.state === "takeoff") { this.hopped = false; this.takeoffT = 0; this.walkYaw = f.yaw + (this.r() < 0.5 ? 1 : -1) * (1.2 + this.r() * 1.5); }
+    else if (this.state === "walk") { this.walkYaw = f.yaw + (this.r() < 0.5 ? 1 : -1) * (1.6 + this.r() * 1.4); this.stateT = 0; }
+    else if (f.mode === "air") { this.tgt = null; if (this.state !== "cruise") this.enter("cruise"); this.newWaypoint(f, true); this.alt = Math.max(this.alt, f.pos.y + 14); this.emerg = 1.5; this.emergDir = this.r() < 0.5 ? -1 : 1; }
+  }
+  /**
+   * 最終手段(通常は発生しない): 同じ水平位置のまま、周囲の建物より上の空中へ持ち上げて巡航速度を与える。
+   * 触るのは位置・速度・飛行モード・気絶/ジャンプ/止まり木の状態だけ。クラッシュ数・羽ばたき数・時計など統計は消さない(Flight.reset()は使わない)。
+   */
+  private rescue(f: Flight) {
+    let top = this.L.heightAt(f.pos.x, f.pos.z);
+    for (let a = 0; a < 8; a++) for (const d of [8, 20]) top = Math.max(top, this.L.heightAt(f.pos.x - Math.sin(a * 0.785) * d, f.pos.z - Math.cos(a * 0.785) * d));
+    f.pos.y = Math.max(f.pos.y, top + 8); f.prevPos.copy(f.pos);
+    f.vel.set(-Math.sin(f.yaw) * 12, 0, -Math.cos(f.yaw) * 12); f.pitch = 0.05; f.roll = 0;
+    f.mode = "air"; f.stun = 0; f.stall = false; f.strokeT = -1; f.hopping = false; f.hopT = -1; f.perchId = -1; f.perchCool = 0; f.walkV = 0;
+    this.tgt = null; this.enter("cruise"); this.newWaypoint(f, true); this.alt = Math.max(this.alt, f.pos.y + 6);
   }
 }

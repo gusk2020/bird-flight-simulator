@@ -1,8 +1,7 @@
 /** 片手操作のタッチ判定(DOM非依存)。しきい値はここに集約: 実機で調整するときはこの定数だけ触る。 */
 export const GESTURE = {
   moveThresholdPx: 12,   // これ以上動いたら「スティック操作」(タップ・長押しにはならない)
-  tapMaxMs: 250,         // これより短く離したらタップ(羽ばたき/小ジャンプ)
-  longPressMs: 300,      // 動かさずこれ以上押し続けたら長押し(減速/地上では歩く)
+  longPressMs: 300,      // 動かさずこれ以上押し続けたら長押し(減速/地上では歩く)。これより短く離せばタップ(羽ばたき/小ジャンプ)=間に「どちらでもない」空白時間は作らない
   deadzone: 0.12,
   radiusPx(w: number, h: number) { return Math.max(45, Math.min(75, Math.min(w, h) * 0.13)); },
 };
@@ -35,7 +34,7 @@ export class OneHandGesture {
   poll(t: number) { if (this.phase === "pending" && t - this.t0 >= GESTURE.longPressMs) { this.phase = "brake"; this.brake = true; } }
   up(id: number, t: number) {
     if (id !== this.id || this.phase === "idle") return;
-    if (this.phase === "pending" && t - this.t0 <= GESTURE.tapMaxMs) this.taps++; // 長押し成立後・スティック後は羽ばたかない
+    if (this.phase === "pending" && t - this.t0 < GESTURE.longPressMs) this.taps++; // 長押し成立後・スティック後は羽ばたかない
     this.reset();
   }
   cancel() { this.reset(); }

@@ -23,7 +23,9 @@ export function oneHandTests() {
     check("moving during a long press switches to stick and releases the brake", g.phase === "stick" && !g.brake); }
   { const g = new OneHandGesture(); check("only the first finger is accepted", g.down(1, 500, 300, t0) && !g.down(2, 600, 300, t0 + 10)); g.move(2, 800, 300); check("other fingers' moves are ignored", g.x === 0); g.up(2, t0 + 20); check("other fingers' release is ignored", g.active); g.up(1, t0 + 50); check("then the first finger can finish as a tap", g.consumeTap()); }
   { const g = new OneHandGesture(); g.down(1, 500, 300, t0); g.move(1, 560, 300); g.cancel(); check("cancel (pointercancel / pause / app switch) clears everything", !g.active && g.x === 0 && g.y === 0 && !g.brake && !g.consumeTap()); }
-  { const g = new OneHandGesture(); g.down(1, 500, 300, t0); g.up(1, t0 + GESTURE.tapMaxMs + 10); check("a touch held longer than tapMax but shorter than the long press makes neither a tap nor a brake", !g.consumeTap() && !g.brake); }
+  { const g = new OneHandGesture(); g.down(1, 500, 300, t0); g.up(1, t0 + 270); check("no dead zone: a release at 270 ms (between the old 250 ms tap limit and the 300 ms long press) is a tap", g.consumeTap() && !g.brake); }
+  { const g = new OneHandGesture(); g.down(1, 500, 300, t0); g.up(1, t0 + GESTURE.longPressMs - 1); check("release 1 ms before the long press is a tap", g.consumeTap()); }
+  { const g = new OneHandGesture(); g.down(1, 500, 300, t0); g.up(1, t0 + GESTURE.longPressMs); check("release at exactly the long-press time is not a tap (it is a long press)", !g.consumeTap()); }
   { const g = new OneHandGesture(); for (let i = 0; i < 50; i++) { g.down(i + 1, 500, 300, t0 + i * 10); g.up(i + 1, t0 + i * 10 + 20); } let n = 0; while (g.consumeTap()) n++; check("rapid tapping: every tap counts once", n === 50, `${n}`); }
 
   suite("flap assist (D1)");

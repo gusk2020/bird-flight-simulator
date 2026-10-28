@@ -38,6 +38,7 @@ export class PerchAssist {
     for (const s of this.near) {
       const cx = clamp(px, s.minX, s.maxX), cz = clamp(pz, s.minZ, s.maxZ), dx = cx - px, dz = cz - pz, d = Math.hypot(dx, dz);
       if (d > PERCH.range) continue;
+      if (s.kind === "balcony" || s.kind === "rail") continue; // 壁際の足場は、誘導すると壁へ突っ込みやすいので自力で降りてもらう(補助なしの方が成功率が高いことを計測済み)
       const above = feet - s.top; // 面より上にいる高さ
       if (above < -0.4 || above > 2.5 + d * 0.5) continue;      // 面より低い/高すぎる(降りられない)候補は除く
       let bearing = 0; if (d > 0.4) bearing = Math.acos(clamp((dx * hx + dz * hz) / d, -1, 1));

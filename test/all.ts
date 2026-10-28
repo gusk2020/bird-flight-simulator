@@ -13,5 +13,6 @@ import { autopilotTests } from "./autopilot";
 import { autoViewTests } from "./autoview";
 import { cameraStableTests } from "./camerastable";
 import { perchAssistTests } from "./perchassist";
-physicsTests(); cameraTests(); gameTests(); envTests(); stageBTests(); speedFxTests(); walkTests(); perchTests(); npcTests(); oneHandTests(); autopilotTests(); autoViewTests(); cameraStableTests(); perchAssistTests();
+import { structureTests } from "./structures";
+physicsTests(); cameraTests(); gameTests(); envTests(); stageBTests(); speedFxTests(); walkTests(); perchTests(); npcTests(); oneHandTests(); autopilotTests(); autoViewTests(); cameraStableTests(); perchAssistTests(); structureTests();
 finish();

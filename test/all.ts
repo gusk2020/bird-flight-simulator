@@ -11,5 +11,6 @@ import { npcTests } from "./npc";
 import { oneHandTests } from "./onehand";
 import { autopilotTests } from "./autopilot";
 import { autoViewTests } from "./autoview";
-physicsTests(); cameraTests(); gameTests(); envTests(); stageBTests(); speedFxTests(); walkTests(); perchTests(); npcTests(); oneHandTests(); autopilotTests(); autoViewTests();
+import { cameraStableTests } from "./camerastable";
+physicsTests(); cameraTests(); gameTests(); envTests(); stageBTests(); speedFxTests(); walkTests(); perchTests(); npcTests(); oneHandTests(); autopilotTests(); autoViewTests(); cameraStableTests();
 finish();

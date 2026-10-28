@@ -262,6 +262,7 @@ try {
 
   console.log("\n# auto view (D3)");
   await p.evaluate(() => { localStorage.clear(); }); await p.reload(); await p.waitForFunction(() => window.__game, null, { timeout: 30000 }); await sleep(500);
+  if (await p.evaluate(() => document.getElementById("overlay").hidden)) { await p.evaluate(() => __game.input.onPause()); await sleep(300); }
   await p.click('[data-set="ats"][data-val="fast"]'); await p.click('[data-set="ahide"][data-val="1"]');
   check("auto time speed + UI-hide are saved in prefs", await p.evaluate(() => { const o = JSON.parse(localStorage.getItem("vindving.prefs.v1")); return o.autoTimeSpeed === "fast" && o.autoHideUi === true; }));
   await p.evaluate(() => __game.setHour(6)); await p.click("#ovAuto"); await sleep(300);
@@ -286,6 +287,16 @@ try {
   await p.click("#btnAutoOff"); await sleep(300);
   const R2 = await p.evaluate(() => ({ h: __game.hour(), w: __game.wxLevel(), auto: __game.autopilot.enabled, vis: __game.cam.mode }));
   check("after オート解除 the reached time and weather are kept", !R2.auto && Math.abs(R2.h - R.h) < 0.5 && Math.abs(R2.w - R.w) < 0.1, JSON.stringify([R, R2]));
+  // 監査対応: UI非表示中の一時停止・再開、一時停止中の描画省略(PR #11)
+  await p.evaluate(() => { __game.setAuto(true); __game.uiHider.idle = 4.95; });
+  await p.waitForFunction(() => document.body.classList.contains("ui-hidden"), null, { timeout: 20000 });
+  await p.evaluate(() => __game.input.onPause()); await sleep(400);
+  check("UI hidden + pause: the UI comes back and the timer is reset", await p.evaluate(() => !document.body.classList.contains("ui-hidden") && __game.uiHider.idle === 0 && !document.getElementById("overlay").hidden));
+  await sleep(600); const fr0 = await p.evaluate(() => __game.renderer.info.render.frame); await sleep(800); const fr1 = await p.evaluate(() => __game.renderer.info.render.frame);
+  check("paused: no rendering while nothing changes (PR #11 optimisation kept)", fr1 === fr0, `${fr0}->${fr1}`);
+  await p.click("#ovGo"); await sleep(400);
+  check("resume: auto still on, UI shown, timer restarted (not instantly hidden)", await p.evaluate(() => __game.autopilot.enabled && !document.body.classList.contains("ui-hidden") && __game.uiHider.idle < 3));
+  await p.evaluate(() => __game.setAuto(false)); await sleep(200);
   await p.click("#btnPause"); await sleep(300);
   check("paused: UI is shown", await p.evaluate(() => !document.body.classList.contains("ui-hidden")));
   await p.click("#ovGo"); await sleep(300);

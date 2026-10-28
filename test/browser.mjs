@@ -183,7 +183,7 @@ try {
   check("resume draws every frame again", f5 > f4 + 2, `frames ${f4}->${f5}`);
 
   console.log("\n# one-hand controls (D1)");
-  const G = () => p.evaluate(() => { const g = __game, i = g.input; return { ctl: document.body.dataset.ctl, x: i.state.x, y: i.state.y, brake: i.state.brake, tap: i.state.flapTap, ph: i.gesture.phase, strokes: g.flight.strokes, mode: g.flight.mode, hop: g.flight.hopping, flapDisp: getComputedStyle(document.getElementById("flap")).display, zone: (() => { const r = document.getElementById("stick").getBoundingClientRect(); return { l: Math.round(r.left), w: Math.round(r.width), h: Math.round(r.height) }; })() }; });
+  const G = () => p.evaluate(() => { const g = __game, i = g.input; return { ctl: document.body.dataset.ctl, x: i.state.x, y: i.state.y, brake: i.state.brake, tap: i.state.flapTap, ph: i.gesture.phase, strokes: g.flight.strokes, af: g.assist.autoFlaps, mode: g.flight.mode, hop: g.flight.hopping, flapDisp: getComputedStyle(document.getElementById("flap")).display, zone: (() => { const r = document.getElementById("stick").getBoundingClientRect(); return { l: Math.round(r.left), w: Math.round(r.width), h: Math.round(r.height) }; })() }; });
   // 一瞬のタップは、ソフトウェアGLの遅い描画でCDPの2回の送信が数百msずれないよう、同一タスク内の合成イベントで行う(長押し・スライドは実タッチ)
   const tapAt = (x, y, id) => p.evaluate(([x, y, id]) => { const z = document.getElementById("stick"), o = { bubbles: true, pointerId: id, clientX: x, clientY: y, pointerType: "touch" }; z.dispatchEvent(new PointerEvent("pointerdown", o)); z.dispatchEvent(new PointerEvent("pointerup", o)); }, [x, y, id]);
   const fly = () => p.evaluate(() => { const g = __game; g.flight.reset(); g.flight.pos.set(28, 60, 150); g.flight.prevPos.copy(g.flight.pos); g.input.releaseAll(); });
@@ -198,10 +198,10 @@ try {
   await fly(); await sleep(300); const st0 = (await G()).strokes;
   await tapAt(650, 250, 6); await sleep(400); d = await G();
   check("short tap = exactly one flap", d.strokes === st0 + 1, `strokes ${st0}->${d.strokes}`);
-  await tp("touchStart", [{ x: 650, y: 250, id: 7 }]); await sleep(550); d = await G(); const stL = d.strokes;
+  await tp("touchStart", [{ x: 650, y: 250, id: 7 }]); await sleep(550); d = await G(); const stL = d.strokes - d.af;
   check("long press = brake (physics sees it)", d.brake && d.ph === "brake" && (await p.evaluate(() => __game.flight.braking)));
   await tp("touchEnd", []); await sleep(400); d = await G();
-  check("releasing after a long press gives no flap and clears the brake", !d.brake && d.strokes === stL, `strokes ${stL}->${d.strokes}`);
+  check("releasing after a long press gives no flap and clears the brake", !d.brake && d.strokes - d.af === stL, `manual strokes ${stL}->${d.strokes - d.af}`); // 減速後の速度低下で自動羽ばたき(assist)が入るのは正常
   const hit = (x, y) => p.evaluate(([x, y]) => document.elementFromPoint(x, y)?.id || document.elementFromPoint(x, y)?.tagName, [x, y]);
   check("the unused (left) half is not part of the stick area in right-hand mode", (await hit(200, 250)) !== "stick" && (await hit(650, 250)) === "stick", `${await hit(200, 250)} / ${await hit(650, 250)}`);
   await tp("touchStart", [{ x: 650, y: 250, id: 9 }, { x: 700, y: 300, id: 10 }]); await tp("touchMove", [{ x: 700, y: 250, id: 9 }, { x: 760, y: 340, id: 10 }]); await sleep(200); d = await G();

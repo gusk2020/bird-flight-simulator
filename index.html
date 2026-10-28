@@ -36,13 +36,16 @@ body[data-ctl=right] #flap,body[data-ctl=right] #brake,body[data-ctl=left] #flap
 #overlay .set button.on{background:#fffa;color:#123}
 #overlay button[hidden]{display:none}
 #top .btn{position:static;border-radius:18px;height:36px;min-width:58px;font-size:13px}
+#autoBar{position:fixed;left:0;right:0;bottom:max(14px,env(safe-area-inset-bottom));display:flex;gap:10px;justify-content:center;z-index:6;pointer-events:none}#autoBar .btn{position:static;pointer-events:auto;height:44px;min-width:96px;font-size:14px}#autoBar [hidden]{display:none}body[data-auto="1"] #flap,body[data-auto="1"] #brake,body[data-auto="1"] #stick{display:none}#ovAuto{margin-top:8px}
 </style></head><body>
 <div id="vig"></div><canvas id="fx"></canvas><div id="hud"></div><div id="msg">左:ドラッグで旋回・上下　右:羽ばたき(押し続けで連続)・減速　着地中に羽ばたくと離陸</div>
 <div id="stick"></div><div id="stickBase"></div><div id="stickKnob"></div>
 <div id="top"><button class="btn" id="btnPause">⏸</button><button class="btn" id="btnCtl">両手</button><button class="btn" id="btnTime">昼</button><button class="btn" id="btnCam">三人称</button><button class="btn" id="btnReset">リセット</button></div>
+<div id="autoBar"><button class="btn" id="btnAutoOff" hidden>オート解除</button><button class="btn" id="btnPol" hidden>おまかせ</button></div>
 <button class="btn" id="brake">減速</button><button class="btn" id="flap">羽ばたき</button>
 <div id="overlay"><h1 id="ovTitle"></h1><p>左:ドラッグで旋回・上下　右:羽ばたき(押し続けで連続)・減速<br>着地中: 歩く(押し続け)・羽ばたき短押しで小ジャンプ・長押しで離陸　⏸で一時停止<br>片手: スライド=旋回/上下　タップ=羽ばたき　長押し=減速(地上は歩く)</p><div class="set" id="settings">
 <div>操作 <button data-set="ctl" data-val="both">両手</button><button data-set="ctl" data-val="right">右手</button><button data-set="ctl" data-val="left">左手</button></div>
+<div>行動 <button data-set="apol" data-val="life">自然生活</button><button data-set="apol" data-val="scenic">景色</button><button data-set="apol" data-val="adventure">冒険</button><button data-set="apol" data-val="random">おまかせ</button></div>
 <div>天気 <button data-set="weather" data-val="clear">晴</button><button data-set="weather" data-val="cloudy">曇</button><button data-set="weather" data-val="rain">雨</button></div>
 <div>風 <button data-set="wind" data-val="0">なし</button><button data-set="wind" data-val="1">弱</button><button data-set="wind" data-val="2">強</button></div>
 <div id="rowBearing">風向 <button data-set="bearing" data-val="0">北</button><button data-set="bearing" data-val="90">東</button><button data-set="bearing" data-val="180">南</button><button data-set="bearing" data-val="270">西</button></div>
@@ -50,5 +53,5 @@ body[data-ctl=right] #flap,body[data-ctl=right] #brake,body[data-ctl=left] #flap
 <div>街の動き <button data-set="npc" data-val="0">なし</button><button data-set="npc" data-val="1">少</button><button data-set="npc" data-val="2">標準</button><button data-set="npc" data-val="3">多</button></div>
 <div>画質 <button data-set="gfx" data-val="0">自動</button><button data-set="gfx" data-val="1">高</button><button data-set="gfx" data-val="2">中</button><button data-set="gfx" data-val="3">低</button></div>
 <div>時間 <button data-set="time" data-val="0">停止</button><button data-set="time" data-val="1">等速</button><button data-set="time" data-val="2">高速</button></div></div>
-<button id="ovGo"></button><button id="ovReset" hidden>リセット</button></div>
+<button id="ovGo"></button><button id="ovAuto">オートで飛ぶ</button><button id="ovReset" hidden>リセット</button></div>
 <script type="module" src="/src/main.ts"></script></body></html>

@@ -12,6 +12,8 @@ import { Rain } from "./rain";
 import { Quality } from "./quality";
 import { loadPrefs, savePrefs, ControlMode } from "./settings";
 import { FlapAssist } from "./assist";
+import { Autopilot } from "./autopilot";
+import type { AutoPolicy } from "./settings";
 import { SpeedLines, Streaks, speedIntensity } from "./speedfx";
 import { NpcWorld } from "./npc";
 import { NpcView } from "./npcView";
@@ -46,7 +48,7 @@ sky.renderOrder = -1; scene.add(sky);
 const cloudMat = (world.clouds.children[0] as THREE.Mesh).material as THREE.MeshBasicMaterial;
 let hour: number = TIME_PRESETS[1].hour, preset = 1, targetHour: number | null = null;
 const prefs = loadPrefs(); // 前回の操作方式など(壊れていれば既定値)。ゲーム自体は必ず開始待ちで始まる
-const settings = { weather: "clear" as Weather, wind: 1, bearing: 270, time: 0, fx: 2, npc: 2, gfx: 0, ctl: prefs.control as string };
+const settings = { weather: "clear" as Weather, wind: 1, bearing: 270, time: 0, fx: 2, npc: 2, gfx: 0, ctl: prefs.control as string, apol: prefs.autoPolicy as string };
 const WIND_SPEED = [0, 3, 7], WIND_GUST = [0, 0.3, 0.6], TIME_RATE = [0, 24 / 1800, 24 / 180]; // 時間: 停止 / 等速(24h=30分) / 高速(24h=3分)
 let dirty = true; // 一時停止中は、見た目が変わったときだけ再描画する(バッテリー・発熱対策)
 let envHour = -1;
@@ -72,6 +74,9 @@ function applyControl() {
   input.setMode(m); assist.enabled = m !== "both"; assist.reset();
   document.body.dataset.ctl = m; document.getElementById("btnCtl")!.textContent = CTL_NAMES[m];
   if (prefs.control !== m) { prefs.control = m; savePrefs(prefs); }
+  const p = settings.apol as AutoPolicy;
+  if (p !== autopilot.policy) autopilot.setPolicy(p);
+  if (prefs.autoPolicy !== p) { prefs.autoPolicy = p; savePrefs(prefs); }
   dirty = true;
 }
 function applySettings() {
@@ -84,14 +89,14 @@ function applySettings() {
   document.getElementById("rowBearing")!.hidden = settings.wind === 0;
 }
 document.querySelectorAll<HTMLElement>("[data-set]").forEach(b => b.addEventListener("click", () => {
-  (settings as Record<string, unknown>)[b.dataset.set!] = b.dataset.set === "weather" || b.dataset.set === "ctl" ? b.dataset.val : Number(b.dataset.val); applySettings();
+  (settings as Record<string, unknown>)[b.dataset.set!] = b.dataset.set === "weather" || b.dataset.set === "ctl" || b.dataset.set === "apol" ? b.dataset.val : Number(b.dataset.val); applySettings();
 }));
 applyEnv();
 input.onTime = () => {
   preset = (preset + 1) % TIME_PRESETS.length; targetHour = TIME_PRESETS[preset].hour;
   document.getElementById("btnTime")!.textContent = TIME_PRESETS[preset].name;
 };
-input.onReset = () => { dirty = true; game.reset(); input.releaseAll(); cam.snap(); };
+input.onReset = () => { if (autopilot.enabled) setAuto(false); dirty = true; game.reset(); input.releaseAll(); cam.snap(); };
 input.onCamera = () => {
   dirty = true;
   cam.mode = cam.mode === "third" ? "first" : "third"; bird.setVisible(cam.mode === "third");
@@ -99,7 +104,28 @@ input.onCamera = () => {
 };
 
 // --- 開始 / 一時停止 ---
-const game = new Game(flight, () => assist.apply(input.read(), flight), () => { input.state.flapTap = false; });
+const autopilot = new Autopilot(world, (Date.now() & 0xffff) + 1); autopilot.setPolicy(prefs.autoPolicy);
+const autoIn = { x: 0, y: 0, flapHeld: false, flapTap: false, brake: false };
+const POL_NAMES: Record<AutoPolicy, string> = { life: "自然生活", scenic: "景色観賞", adventure: "冒険探索", random: "おまかせ" };
+// オート中は手動入力を読まない(スティックやタップは無視)。解除しても飛行状態はそのまま続く
+const readInput = () => { if (autopilot.enabled) { autoIn.flapTap = false; autoIn.flapHeld = false; autoIn.brake = false; return autopilot.drive(flight, autoIn, 1 / 60); } return assist.apply(input.read(), flight); };
+const game = new Game(flight, readInput, () => { input.state.flapTap = false; });
+function applyAuto() {
+  const on = autopilot.enabled;
+  document.body.dataset.auto = on ? "1" : "0";
+  document.getElementById("btnAutoOff")!.hidden = !on; document.getElementById("btnPol")!.hidden = !on;
+  document.getElementById("btnPol")!.textContent = POL_NAMES[autopilot.policy];
+  dirty = true;
+}
+function setAuto(on: boolean) {
+  if (on === autopilot.enabled) return;
+  if (on) { autopilot.setPolicy(settings.apol as AutoPolicy); autopilot.start(flight); } else autopilot.stop();
+  input.releaseAll(); applyAuto();
+}
+const POLS: AutoPolicy[] = ["life", "scenic", "adventure", "random"];
+function setPolicy(p: AutoPolicy) { settings.apol = p; applySettings(); applyAuto(); }
+document.getElementById("btnAutoOff")!.addEventListener("pointerdown", e => { e.preventDefault(); e.stopPropagation(); setAuto(false); });
+document.getElementById("btnPol")!.addEventListener("pointerdown", e => { e.preventDefault(); e.stopPropagation(); setPolicy(POLS[(POLS.indexOf(autopilot.policy) + 1) % 4]); });
 document.getElementById("btnCtl")!.addEventListener("pointerdown", e => { e.preventDefault(); const order: ControlMode[] = ["both", "right", "left"]; settings.ctl = order[(order.indexOf(settings.ctl as ControlMode) + 1) % 3]; applySettings(); });
 const overlay = document.getElementById("overlay")!, ovTitle = document.getElementById("ovTitle")!, ovGo = document.getElementById("ovGo")!, ovReset = document.getElementById("ovReset")!;
 function showOverlay() {
@@ -113,6 +139,7 @@ const go = () => { if (game.state === "ready") game.start(); else game.resume();
 const pause = () => { game.pause(); showOverlay(); };
 ovGo.addEventListener("click", go);
 ovReset.addEventListener("click", () => { input.onReset(); go(); });
+document.getElementById("ovAuto")!.addEventListener("click", () => { go(); setAuto(true); });
 document.getElementById("btnPause")!.addEventListener("pointerdown", e => { e.preventDefault(); pause(); });
 input.onPause = () => (game.state === "running" ? pause() : go());
 // 画面OFF・アプリ切替・バックグラウンドでは必ず一時停止
@@ -176,4 +203,4 @@ function updateHud(dt: number, now: number) {
 }
 renderer.setAnimationLoop(frame);
 // テスト・デバッグ用
-(window as unknown as Record<string, unknown>).__game = { game, flight, world, input, cam, camera, renderer, scene, frame, env: () => envAt(hour), stats, npc, lines, streaks, speedIntensity, setHour: (h: number) => { hour = h; targetHour = null; applyEnv(); }, settings, applySettings, assist, prefs, wind, rain, quality };
+(window as unknown as Record<string, unknown>).__game = { game, flight, world, input, cam, camera, renderer, scene, frame, env: () => envAt(hour), stats, npc, lines, streaks, speedIntensity, setHour: (h: number) => { hour = h; targetHour = null; applyEnv(); }, settings, applySettings, assist, prefs, autopilot, setAuto, wind, rain, quality };

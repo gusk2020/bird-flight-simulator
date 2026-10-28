@@ -239,6 +239,26 @@ try {
   check("a corrupted saved value starts safely with defaults", (await p.evaluate(() => document.body.dataset.ctl)) === "both");
   await p.click("#ovGo"); await sleep(500);
 
+  console.log("\n# autopilot (D2)");
+  await p.setViewportSize({ width: 892, height: 412 });
+  await p.evaluate(() => { localStorage.clear(); }); await p.reload(); await p.waitForFunction(() => window.__game, null, { timeout: 30000 }); await sleep(500);
+  const A = () => p.evaluate(() => { const g = __game; return { auto: g.autopilot.enabled, st: g.game.state, ap: document.body.dataset.auto, off: !document.getElementById("btnAutoOff").hidden, pol: document.getElementById("btnPol").textContent, steps: g.game.steps, mode: g.flight.mode, x: g.flight.pos.x, z: g.flight.pos.z, finite: Number.isFinite(g.flight.pos.x + g.flight.pos.y + g.flight.pos.z) }; });
+  let a = await A(); check("auto never starts by itself (waiting at the start screen)", !a.auto && a.st === "ready" && !a.off);
+  await p.click('[data-set="apol"][data-val="scenic"]'); check("policy selectable from the menu", (await p.evaluate(() => __game.autopilot.policy)) === "scenic");
+  await p.click("#ovAuto"); await sleep(300); a = await A(); check("オートで飛ぶ starts the game with auto on and shows オート解除", a.auto && a.st === "running" && a.off && a.ap === "1");
+  const ast0 = a.steps; await p.waitForFunction(s => __game.game.steps > s + 240, ast0, { timeout: 60000 }); a = await A();
+  check("auto flies by itself (steps advance, state finite)", a.finite && a.steps > ast0);
+  await tapAt(650, 250, 31); await sleep(200); a = await A(); check("tapping the screen does not cancel auto", a.auto);
+  await p.click("#btnPol"); a = await A(); check("policy button cycles the policy during auto without stopping", a.auto && a.pol !== "景色観賞");
+  const abef = await p.evaluate(() => ({ p: __game.flight.pos.clone(), v: __game.flight.vel.clone() }));
+  await p.click("#btnAutoOff"); a = await A(); const aaft = await p.evaluate(() => ({ p: __game.flight.pos.clone(), v: __game.flight.vel.clone() }));
+  check("オート解除 stops auto; flight state continues (no jump)", !a.auto && !a.off && a.ap === "0" && Math.hypot(aaft.p.x - abef.p.x, aaft.p.z - abef.p.z) < 40);
+  await p.evaluate(() => __game.setAuto(true)); await p.evaluate(() => { __game.input.state.x = 1; __game.input.state.y = 1; });
+  const ayaw0 = await p.evaluate(() => __game.flight.yaw); await sleep(300); a = await A(); check("auto can be turned on again and ignores manual stick state", a.auto);
+  await p.evaluate(() => __game.setAuto(false));
+  check("policy was saved in prefs", (await p.evaluate(() => JSON.parse(localStorage.getItem("vindving.prefs.v1") || "{}").autoPolicy)) !== undefined);
+  await p.reload(); await p.waitForFunction(() => window.__game, null, { timeout: 30000 }); await sleep(500); a = await A(); check("aaft reload auto is off and the game waits at the start", !a.auto && a.st === "ready");
+
   console.log("\n# time of day (A2)");
   const seen = [];
   for (let i = 0; i < 4; i++) { await p.click("#btnTime"); await sleep(1500); seen.push(await p.evaluate(() => ({ label: document.getElementById("btnTime").textContent, e: __game.env() }))); }

@@ -9,5 +9,6 @@ import { walkTests } from "./walk";
 import { perchTests } from "./perch";
 import { npcTests } from "./npc";
 import { oneHandTests } from "./onehand";
-physicsTests(); cameraTests(); gameTests(); envTests(); stageBTests(); speedFxTests(); walkTests(); perchTests(); npcTests(); oneHandTests();
+import { autopilotTests } from "./autopilot";
+physicsTests(); cameraTests(); gameTests(); envTests(); stageBTests(); speedFxTests(); walkTests(); perchTests(); npcTests(); oneHandTests(); autopilotTests();
 finish();

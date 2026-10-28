@@ -13,7 +13,11 @@ export class FollowCam {
   private yaw = 0; private cp = 0; private dist = 5.2; private t = 1; private ready = false;
   private _o = new THREE.Vector3(); private _b = new THREE.Vector3(); private _p = new THREE.Vector3();
   constructor(public cam: THREE.PerspectiveCamera, private world: { heightAt(x: number, z: number): number }) {}
-  snap() { this.ready = false; }
+  snap() { this.ready = false; this.sYaw = this.tYaw = 0; this.sDist = this.tDist = 1; this.sH = this.tH = 0; }
+  // オートのカット(演出): 目標値へなめらかに寄せる。既定(0,1,0)は従来の追従と完全に同じ
+  private sYaw = 0; private tYaw = 0; private sDist = 1; private tDist = 1; private sH = 0; private tH = 0;
+  setShot(yaw: number, dist: number, h: number) { this.tYaw = yaw; this.tDist = dist; this.tH = h; }
+  get shotDist() { return this.sDist; }
 
   update(dt: number, f: Flight, bp: THREE.Vector3, fx = 0) {
     const k = (rate: number) => 1 - Math.exp(-rate * dt);
@@ -29,8 +33,13 @@ export class FollowCam {
       return;
     }
     this.dist += ((f.mode === "air" ? 5.2 + 2.2 * fx : 4.0) - this.dist) * k(3);
-    const cc = Math.cos(this.cp), dx = -Math.sin(this.yaw) * cc, dy = Math.sin(this.cp), dz = -Math.cos(this.yaw) * cc;
-    this._o.set(-dx * this.dist, -dy * this.dist + 1.3, -dz * this.dist);
+    if (this.sYaw !== this.tYaw || this.sDist !== this.tDist || this.sH !== this.tH) { // カットの切替も、角度・距離・高さを連続的に動かす
+      const ks = k(1.4); this.sYaw += wrap(this.tYaw - this.sYaw) * ks; this.sDist += (this.tDist - this.sDist) * ks; this.sH += (this.tH - this.sH) * ks;
+      if (Math.abs(wrap(this.tYaw - this.sYaw)) < 1e-3 && Math.abs(this.tDist - this.sDist) < 1e-3 && Math.abs(this.tH - this.sH) < 1e-3) { this.sYaw = this.tYaw; this.sDist = this.tDist; this.sH = this.tH; }
+    }
+    const vyaw = this.yaw + this.sYaw, d = this.dist * this.sDist;
+    const cc = Math.cos(this.cp), dx = -Math.sin(vyaw) * cc, dy = Math.sin(this.cp), dz = -Math.cos(vyaw) * cc;
+    this._o.set(-dx * d, -dy * d + 1.3 * Math.max(0.3, this.sDist) + this.sH, -dz * d);
     // 遮蔽: 鳥からカメラへ線を引き、建物・地面に入る手前で止める
     let free = 1;
     for (let i = 1; i <= 10; i++) {

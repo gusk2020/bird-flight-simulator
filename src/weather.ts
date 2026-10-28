@@ -13,8 +13,8 @@ function greyer(c: number, t: number, dark: number) {
   return (ch((c >> 16) & 255) << 16) | (ch((c >> 8) & 255) << 8) | ch(c & 255);
 }
 /** 時刻の環境に天気を重ねる(純関数) */
-export function applyWeather(e: Env, w: Weather): Env {
-  const d = WEATHER[w];
+export function applyWeather(e: Env, w: Weather): Env { return applyWeatherDef(e, WEATHER[w]); }
+export function applyWeatherDef(e: Env, d: WeatherDef): Env {
   return { ...e,
     top: greyer(e.top, d.grey, 0.9), hor: greyer(e.hor, d.grey, 0.95), fog: greyer(e.fog, d.grey, 0.95),
     hemiSky: greyer(e.hemiSky, d.grey, 1), sun: greyer(e.sun, d.grey, 1), cloud: greyer(e.cloud, d.grey > 0 ? Math.min(1, d.grey + 0.2) : 0, d.grey > 0 ? 0.8 : 1),

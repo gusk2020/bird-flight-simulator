@@ -61,3 +61,8 @@ Repository and GitHub Pages URLs retain the existing `bird-flight-simulator` nam
 - `src/npc.ts` (logic, no rendering) + `src/npcView.ts` (instanced drawing). NPC birds (pigeon/sparrow/crow: fly, perch on wires/roofs, walk on the ground, flee when you rush at them, pigeon flocks you can join by flying alongside), pedestrians (walk lot sidewalks, stop/look at low birds, back away from fast ones), cars (left-hand lanes, signals, turns, following distance).
 - Only the area around you is simulated in detail; far NPCs update at low rate or are re-placed near you. Menu: 街の動き (なし/少/標準/多), 画質 (自動/高/中/低). Activity follows the time of day.
 - Not implemented: NPC/player collisions (everything passes through), car headlights, seasons.
+
+## D1 one-hand controls
+- 操作: 両手 / 右手 / 左手 (top button 操作 or pause menu; saved in localStorage `vindving.prefs.v1`, restored on start; the game always waits at the start screen).
+- One-hand: touch anywhere on your half of the screen = floating stick (slide: turn / up-down). Tap = flap (on the ground: small hop). Long press = brake (on the ground: walk). Slid-then-held never becomes a brake; a long press never flaps on release.
+- Thresholds live in `src/gesture.ts` (`GESTURE`), flap assist in `src/assist.ts` (`ASSIST`). The assist only adds `flapTap` when slow or low (never while braking, on the ground, hopping, perched, or just after a crash).

@@ -86,7 +86,7 @@ try {
   await p.click('[data-set="weather"][data-val="rain"]'); await p.click('[data-set="wind"][data-val="2"]'); await p.click('[data-set="bearing"][data-val="90"]');
   let B = await p.evaluate(() => ({ rain: __game.rain.mesh.visible, lift: __game.flight.liftScale, fog: __game.scene.fog.far, bear: __game.wind.bearing, sp: __game.wind.speed, on: [...document.querySelectorAll("[data-set].on")].length }));
   check("rain: particles on, lift reduced, visibility shortened", B.rain && B.lift < 1 && B.fog < 500, JSON.stringify(B));
-  check("wind: strong east wind set, buttons highlighted", B.bear === 90 && B.sp > 7 && B.on === 7);
+  check("wind: strong east wind set, buttons highlighted", B.bear === 90 && B.sp > 7 && B.on === 8);
   await p.click('[data-set="time"][data-val="2"]'); await p.click("#ovGo"); await sleep(300);
   const h0 = await p.evaluate(() => __game.env().lights + "|" + __game.game.gameTime);
   await sleep(2500); const w1 = await p.evaluate(() => ({ wv: __game.flight.windVec.length(), rc: __game.rain.count, q: __game.quality.level, hud: document.getElementById("hud").textContent }));
@@ -181,6 +181,63 @@ try {
   await sleep(1000); const f4 = await fr(); check("...and then drawing stops again", f4 === f3);
   await p.click('[data-set="weather"][data-val="clear"]'); await p.click("#ovGo"); await sleep(800); const f5 = await fr();
   check("resume draws every frame again", f5 > f4 + 2, `frames ${f4}->${f5}`);
+
+  console.log("\n# one-hand controls (D1)");
+  const G = () => p.evaluate(() => { const g = __game, i = g.input; return { ctl: document.body.dataset.ctl, x: i.state.x, y: i.state.y, brake: i.state.brake, tap: i.state.flapTap, ph: i.gesture.phase, strokes: g.flight.strokes, mode: g.flight.mode, hop: g.flight.hopping, flapDisp: getComputedStyle(document.getElementById("flap")).display, zone: (() => { const r = document.getElementById("stick").getBoundingClientRect(); return { l: Math.round(r.left), w: Math.round(r.width), h: Math.round(r.height) }; })() }; });
+  // 一瞬のタップは、ソフトウェアGLの遅い描画でCDPの2回の送信が数百msずれないよう、同一タスク内の合成イベントで行う(長押し・スライドは実タッチ)
+  const tapAt = (x, y, id) => p.evaluate(([x, y, id]) => { const z = document.getElementById("stick"), o = { bubbles: true, pointerId: id, clientX: x, clientY: y, pointerType: "touch" }; z.dispatchEvent(new PointerEvent("pointerdown", o)); z.dispatchEvent(new PointerEvent("pointerup", o)); }, [x, y, id]);
+  const fly = () => p.evaluate(() => { const g = __game; g.flight.reset(); g.flight.pos.set(28, 60, 150); g.flight.prevPos.copy(g.flight.pos); g.input.releaseAll(); });
+  let d = await G(); check("default is two-hand: left stick zone, flap/brake buttons visible", d.ctl === "both" && d.zone.l === 0 && d.flapDisp !== "none", JSON.stringify(d.zone));
+  await p.evaluate(() => document.getElementById("btnCtl").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }))); await sleep(200);
+  d = await G(); check("top button switches to right-hand: right half is the stick area, flap/brake buttons hidden", d.ctl === "right" && d.zone.l >= 440 && d.zone.w >= 440 && d.zone.h >= 400 && d.flapDisp === "none", JSON.stringify(d));
+  await fly(); await sleep(300);
+  await tp("touchStart", [{ x: 650, y: 250, id: 5 }]); await tp("touchMove", [{ x: 720, y: 200, id: 5 }]); await sleep(250); d = await G();
+  check("right-hand: sliding right/up gives stick x>0, y>0", d.x > 0.5 && d.y > 0.2 && d.ph === "stick", JSON.stringify({ x: d.x, y: d.y, ph: d.ph }));
+  await sleep(900); d = await G(); check("holding a slid stick for a long time never turns into a brake", !d.brake && d.ph === "stick");
+  await tp("touchEnd", []); await sleep(200); d = await G(); check("release returns the stick to neutral", d.x === 0 && d.y === 0 && d.ph === "idle");
+  await fly(); await sleep(300); const st0 = (await G()).strokes;
+  await tapAt(650, 250, 6); await sleep(400); d = await G();
+  check("short tap = exactly one flap", d.strokes === st0 + 1, `strokes ${st0}->${d.strokes}`);
+  await tp("touchStart", [{ x: 650, y: 250, id: 7 }]); await sleep(550); d = await G(); const stL = d.strokes;
+  check("long press = brake (physics sees it)", d.brake && d.ph === "brake" && (await p.evaluate(() => __game.flight.braking)));
+  await tp("touchEnd", []); await sleep(400); d = await G();
+  check("releasing after a long press gives no flap and clears the brake", !d.brake && d.strokes === stL, `strokes ${stL}->${d.strokes}`);
+  const hit = (x, y) => p.evaluate(([x, y]) => document.elementFromPoint(x, y)?.id || document.elementFromPoint(x, y)?.tagName, [x, y]);
+  check("the unused (left) half is not part of the stick area in right-hand mode", (await hit(200, 250)) !== "stick" && (await hit(650, 250)) === "stick", `${await hit(200, 250)} / ${await hit(650, 250)}`);
+  await tp("touchStart", [{ x: 650, y: 250, id: 9 }, { x: 700, y: 300, id: 10 }]); await tp("touchMove", [{ x: 700, y: 250, id: 9 }, { x: 760, y: 340, id: 10 }]); await sleep(200); d = await G();
+  check("a second finger is ignored (touch id tracked)", d.ph === "stick" && d.x > 0.3 && d.y >= -0.2, JSON.stringify({ x: d.x, y: d.y }));
+  await tp("touchEnd", []); await sleep(150);
+  await tp("touchStart", [{ x: 650, y: 250, id: 11 }]); await tp("touchMove", [{ x: 740, y: 250, id: 11 }]); await sleep(150);
+  await p.evaluate(() => document.getElementById("btnPause").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }))); await sleep(200); d = await G();
+  check("pausing while the stick is held clears the input", d.x === 0 && d.ph === "idle" && !d.brake);
+  await tp("touchEnd", []); await p.click("#ovGo"); await sleep(300);
+  await tp("touchStart", [{ x: 650, y: 250, id: 12 }]); await tp("touchMove", [{ x: 740, y: 250, id: 12 }]); await sleep(150);
+  await p.evaluate(() => document.getElementById("btnCtl").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }))); await sleep(200); d = await G();
+  check("switching the control mode mid-game releases the stick (right -> left)", d.ctl === "left" && d.x === 0 && d.ph === "idle" && d.zone.l === 0 && d.zone.w >= 440, JSON.stringify({ ctl: d.ctl, ph: d.ph }));
+  await tp("touchEnd", []); await sleep(100);
+  await fly(); await sleep(300); const stR = (await G()).strokes;
+  await tapAt(200, 250, 13); await sleep(400); d = await G();
+  check("left-hand: a tap on the left half flaps", d.strokes === stR + 1, `strokes ${stR}->${d.strokes}`);
+  check("left-hand: the right half is not part of the stick area", (await hit(800, 250)) !== "stick" && (await hit(200, 250)) === "stick");
+  // 地上: タップは小ジャンプ、長押しは歩く
+  await p.evaluate(() => { const g = __game, f = g.flight; f.pos.set(28, 0.32, 60); f.prevPos.copy(f.pos); f.vel.set(0, 0, 0); f.mode = "landed"; f.walkV = 0; g.input.releaseAll(); }); await sleep(300);
+  await tp("touchStart", [{ x: 200, y: 250, id: 15 }]); await sleep(700); const gw0 = await S(); await sleep(500); const gw1 = await S(); await tp("touchEnd", []);
+  check("on the ground a long press walks (no auto flapping)", Math.hypot(gw1.x - gw0.x, gw1.z - gw0.z) > 0.3 && gw1.mode === "landed", `moved=${Math.hypot(gw1.x - gw0.x, gw1.z - gw0.z).toFixed(2)}`);
+  await sleep(600); await p.evaluate(() => { const f = __game.flight; f.vel.set(0, 0, 0); f.walkV = 0; }); await sleep(300);
+  await tapAt(200, 250, 16); await p.waitForFunction(() => __game.flight.hopping || __game.flight.mode === "air", null, { timeout: 5000 }).catch(() => {});
+  d = await G(); check("on the ground a tap becomes a small hop (not swallowed by the assist)", d.hop || d.mode === "air", JSON.stringify({ hop: d.hop, mode: d.mode }));
+  // UIボタンの上のタッチはスティックにならない
+  await sleep(1500);
+  await tp("touchStart", [{ x: 840, y: 25, id: 17 }]); await sleep(100); d = await G(); await tp("touchEnd", []);
+  check("a touch on a top UI button never starts a stick", d.ph === "idle");
+  // 保存と復元: 再読み込みしても開始待ち
+  const saved = await p.evaluate(() => localStorage.getItem("vindving.prefs.v1")); check("the control mode is saved", !!saved && JSON.parse(saved).control === "left", saved);
+  await p.reload(); await p.waitForFunction(() => window.__game, null, { timeout: 30000 }); await sleep(800);
+  const rs = await p.evaluate(() => ({ ctl: document.body.dataset.ctl, st: __game.game.state, ov: !document.getElementById("overlay").hidden, on: document.querySelector('[data-set="ctl"].on')?.dataset.val }));
+  check("reload restores the control mode but waits at the start screen", rs.ctl === "left" && rs.st === "ready" && rs.ov && rs.on === "left", JSON.stringify(rs));
+  await p.evaluate(() => localStorage.setItem("vindving.prefs.v1", "{broken")); await p.reload(); await p.waitForFunction(() => window.__game, null, { timeout: 30000 }); await sleep(600);
+  check("a corrupted saved value starts safely with defaults", (await p.evaluate(() => document.body.dataset.ctl)) === "both");
+  await p.click("#ovGo"); await sleep(500);
 
   console.log("\n# time of day (A2)");
   const seen = [];

@@ -104,7 +104,7 @@ export class NpcWorld {
   private startFlight(b: NpcBird, s: { x: number; y: number; z: number; land: NpcBird["land"] }) {
     b.tx = s.x; b.ty = s.y; b.tz = s.z; b.land = s.land; b.state = "fly"; this.stats.flights++;
     // 経路上の最も高い建物 + 余裕 を巡航高度にして、建物へ突っ込まない
-    let top = 0; const n = Math.max(2, Math.ceil(dist2(b.x, b.z, s.x, s.z) / 6));
+    let top = 0; const n = Math.max(2, Math.ceil(dist2(b.x, b.z, s.x, s.z) / 1.5)); // 細い障害物(電柱の頭・手すり)を飛ばさない間隔
     for (let i = 0; i <= n; i++) { const t = i / n; top = Math.max(top, this.L.heightAt(b.x + (s.x - b.x) * t, b.z + (s.z - b.z) * t)); }
     b.cruise = Math.max(top + 3.5, Math.max(b.y, s.y) + 4 + this.r() * 5, 9);
     b.speed = Math.max(b.speed, 3);
@@ -140,7 +140,7 @@ export class NpcWorld {
     // 前方の建物の上を越えられる高さがなければ、その場で上昇してから進む(壁へ突っ込まない)
     const ax = -Math.sin(b.yaw), az = -Math.cos(b.yaw);
     const hh = (x: number, z: number) => this.L.heightAt(x, z); // 旋回中でも側方の建物に入らないよう周囲1.5mも見る
-    const ahead = dh > 3 ? Math.max(hh(b.x, b.z), hh(b.x + 1.5, b.z), hh(b.x - 1.5, b.z), hh(b.x, b.z + 1.5), hh(b.x, b.z - 1.5), this.L.heightAt(b.x + ax * 3, b.z + az * 3), this.L.heightAt(b.x + ax * 6, b.z + az * 6), this.L.heightAt(b.x + ax * 9, b.z + az * 9)) : 0;
+    const ahead = dh > 3 ? Math.max(hh(b.x, b.z), hh(b.x + 1.5, b.z), hh(b.x - 1.5, b.z), hh(b.x, b.z + 1.5), hh(b.x, b.z - 1.5), this.L.heightAt(b.x + ax * 3, b.z + az * 3), this.L.heightAt(b.x + ax * 6, b.z + az * 6), this.L.heightAt(b.x + ax * 9, b.z + az * 9), this.L.heightAt(b.x + ax * 3 + az * 1.2, b.z + az * 3 - ax * 1.2), this.L.heightAt(b.x + ax * 3 - az * 1.2, b.z + az * 3 + ax * 1.2), this.L.heightAt(b.x + ax * 6 + az * 1.2, b.z + az * 6 - ax * 1.2), this.L.heightAt(b.x + ax * 6 - az * 1.2, b.z + az * 6 + ax * 1.2)) : 0;
     const blocked = dh > 3 && b.y < ahead + 1;
     if (!blocked) { b.x += ax * b.speed * dt; b.z += az * b.speed * dt; }
     b.phase += k.flap * dt;

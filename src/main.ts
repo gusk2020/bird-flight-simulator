@@ -16,6 +16,7 @@ import { loadPrefs, savePrefs, ControlMode } from "./settings";
 import { FlapAssist } from "./assist";
 import { Autopilot } from "./autopilot";
 import { buildSurfaces } from "./perches";
+import { Forage } from "./forage";
 import { PerchAssist, PERCH } from "./perchassist";
 import type { AutoPolicy } from "./settings";
 import { SpeedLines, Streaks, speedIntensity } from "./speedfx";
@@ -77,6 +78,8 @@ function applyQuality() { renderer.setPixelRatio(Math.min(devicePixelRatio, qual
 const assist = new FlapAssist();
 // 着地補助: 常時オン(切替UIなし)。手動操作のときだけ働き、オート周遊は自分の判断で降りる
 const perchAssist = new PerchAssist(buildSurfaces(world));
+// 自動ついばみ(草地・土・あぜ道で、数歩ごとに止まって頭を下げる)。手動もオートも同じ仕組みで、強い入力(羽ばたき・大きなスティック)があれば中断する
+const forage = new Forage(world.groundAt, (Date.now() & 0xffff) + 11);
 // 着地できそうな場所を示す、控えめな半透明の目印(最も狙っている候補だけ)
 const perchMarker = new THREE.Mesh(new THREE.RingGeometry(0.42, 0.55, 24).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xfff1b0, transparent: true, opacity: 0.4, depthWrite: false, fog: false }));
 perchMarker.visible = false; perchMarker.renderOrder = 2; scene.add(perchMarker);
@@ -116,7 +119,7 @@ input.onTime = () => {
   preset = (preset + 1) % TIME_PRESETS.length; targetHour = TIME_PRESETS[preset].hour;
   document.getElementById("btnTime")!.textContent = TIME_PRESETS[preset].name;
 };
-input.onReset = () => { if (autopilot.enabled) setAuto(false); dirty = true; game.reset(); input.releaseAll(); cam.snap(); };
+input.onReset = () => { forage.reset(); if (autopilot.enabled) setAuto(false); dirty = true; game.reset(); input.releaseAll(); cam.snap(); };
 input.onCamera = () => {
   dirty = true;
   cam.mode = cam.mode === "third" ? "first" : "third"; bird.setVisible(cam.mode === "third");
@@ -130,7 +133,10 @@ const TS_NAMES: Record<TimeSpeed, string> = { slow: "ゆったり", normal: "標
 const autoIn = { x: 0, y: 0, flapHeld: false, flapTap: false, brake: false };
 const POL_NAMES: Record<AutoPolicy, string> = { life: "自然生活", scenic: "景色観賞", adventure: "冒険探索", random: "おまかせ" };
 // オート中は手動入力を読まない(スティックやタップは無視)。解除しても飛行状態はそのまま続く
-const readInput = () => { if (autopilot.enabled) { autoIn.flapTap = false; autoIn.flapHeld = false; autoIn.brake = false; return autopilot.drive(flight, autoIn, 1 / 60); } return assist.apply(perchAssist.apply(input.read(), flight), flight); };
+const readInput = () => {
+  if (autopilot.enabled) { autoIn.flapTap = false; autoIn.flapHeld = false; autoIn.brake = false; autopilot.busy = forage.active; return forage.apply(autopilot.drive(flight, autoIn, 1 / 60), flight, false); }
+  return forage.apply(assist.apply(perchAssist.apply(input.read(), flight), flight), flight, true);
+};
 const game = new Game(flight, readInput, () => { input.state.flapTap = false; });
 function applyAuto() {
   const on = autopilot.enabled;
@@ -212,7 +218,7 @@ function frame(now: number) {
   if (!running && game.state === "paused") bp.copy(flight.pos);
   const gh = world.heightAt(bp.x, bp.z);
   const vdt = running ? dt : 0;
-  bird.update(vdt, flight, bp, gh);
+  bird.update(vdt, flight, bp, gh, forage.head);
   // 速度演出: 高速時のみ。強度は急に変えず滑らかに追従
   const fxTarget = flight.mode === "air" ? speedIntensity(flight.speed) * fxLevel : 0;
   fxSmooth += (fxTarget - fxSmooth) * (1 - Math.exp(-6 * vdt));
@@ -249,4 +255,4 @@ function updateHud(dt: number, now: number) {
 }
 renderer.setAnimationLoop(frame);
 // テスト・デバッグ用
-(window as unknown as Record<string, unknown>).__game = { game, flight, world, input, cam, camera, renderer, scene, frame, env: () => envAt(hour), stats, npc, lines, streaks, speedIntensity, setHour: (h: number) => { hour = h; targetHour = null; applyEnv(); }, settings, applySettings, assist, prefs, autopilot, setAuto, perchAssist, perchMarker, hour: () => hour, director, drift, uiHider, wxLevel: () => wxLevel, wind, rain, quality };
+(window as unknown as Record<string, unknown>).__game = { game, flight, world, input, cam, camera, renderer, scene, frame, env: () => envAt(hour), stats, npc, lines, streaks, speedIntensity, setHour: (h: number) => { hour = h; targetHour = null; applyEnv(); }, settings, applySettings, assist, prefs, autopilot, setAuto, forage, perchAssist, perchMarker, hour: () => hour, director, drift, uiHider, wxLevel: () => wxLevel, wind, rain, quality };

@@ -5,7 +5,7 @@ import { generateLayout } from "../src/layout";
 import { Wind } from "../src/wind";
 import { FollowCam } from "../src/camera";
 import { NpcWorld } from "../src/npc";
-const L = generateLayout(); const world = { colliders: L.colliders, heightAt: L.heightAt, perchAt: L.perchAt, perchPoint: L.perchPoint, wireDir: L.wireDir };
+const L = generateLayout(); const world = { colliders: L.colliders, heightAt: L.heightAt, perchAt: L.perchAt, perchPoint: L.perchPoint, wireDir: L.wireDir, waterAt: L.waterAt };
 const inp = { x: 0.3, y: 0, flapHeld: false, flapTap: false, brake: false };
 function bench(name: string, n: number, fn: (i: number) => void) {
   for (let i = 0; i < Math.min(2000, n); i++) fn(i); // warm up

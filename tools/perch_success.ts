@@ -7,12 +7,12 @@ import { PerchAssist } from "../src/perchassist";
 import { PHYS as P } from "../src/params";
 
 const L = generateLayout();
-const world = { colliders: L.colliders, heightAt: L.heightAt, perchAt: L.perchAt, perchPoint: L.perchPoint, wireDir: L.wireDir };
+const world = { colliders: L.colliders, heightAt: L.heightAt, perchAt: L.perchAt, perchPoint: L.perchPoint, wireDir: L.wireDir, waterAt: L.waterAt };
 const idx = buildSurfaces(L);
 const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 export interface Outcome { ok: boolean; why: string }
 let seed = 3; const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
-const open = (s: Surface) => !L.colliders.some(c => c.top > s.top + 0.3 && c.maxX > s.minX - 7 && c.minX < s.maxX + 7 && c.maxZ > s.minZ - 7 && c.minZ < s.maxZ + 7); // 周囲に背の高い建物がない面だけ
+const open = (s: Surface) => !L.colliders.some(c => c.maxX - c.minX > 3 && c.maxZ - c.minZ > 3 && c.top > s.top + 0.3 && c.maxX > s.minX - 7 && c.minX < s.maxX + 7 && c.maxZ > s.minZ - 7 && c.minZ < s.maxZ + 7); // 周囲に背の高い建物がない面だけ
 
 /** 空中から減速して降りる(人の操作の代わりの簡易モデル: 目標へ目で合わせた舵+誤差、近づいたら減速) */
 export function airApproach(s: Surface, assist: boolean): Outcome {

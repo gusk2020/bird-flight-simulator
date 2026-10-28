@@ -24,6 +24,8 @@ const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 function rng(seed: number) { let a = seed >>> 0; return () => { a = (a + 0x6d2b79f5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 
 export class Autopilot {
+  /** 自動ついばみの最中(止まって頭を下げている)。固着と見なさない */
+  busy = false;
   state: PilotState = "cruise"; policy: AutoPolicy = "random"; active: Exclude<AutoPolicy, "random"> = "life"; enabled = false;
   stats = { landings: 0, walks: 0, perches: 0, takeoffs: 0, flaps: 0, replans: 0, teleports: 0, recoveries: 0, avoids: 0, switches: 0 }; // teleports=最終手段の再配置回数(通常0)  recoveries=物理入力による固着復帰の回数
   private r: () => number; private t = 0; private decideT = 0; private stateT = 0; private policyT = 0;
@@ -31,7 +33,7 @@ export class Autopilot {
   private sx = 0; private sy = 0; private lastFlap = -10; private lastGoal = 0;
   private px = 0; private pz = 0; private progT = 0; private watchT = 0; private wpx = 0; private wpz = 0;
   private restFor = 5; private walkFor = 0; private walkYaw = 0; private blocked = 0; private takeoffT = 0; private hopped = false;
-  private lastPath = 0; private lastCrashes = 0; private emerg = 0; private emergDir = 1;
+  private busyWin = false; private lastPath = 0; private lastCrashes = 0; private emerg = 0; private emergDir = 1;
   constructor(private L: Layout, seed = 1) { this.r = rng(seed); }
 
   setPolicy(p: AutoPolicy) { this.policy = p; if (p !== "random") this.active = p; else this.policyT = 0; } // 次の判断から変わるだけ(位置・速度は変えない)
@@ -73,6 +75,8 @@ export class Autopilot {
       if (Math.abs(x) > BOUND || Math.abs(z) > BOUND) continue;
       if (roll < w.spots[0]) { // 地面(歩道・敷地): 周囲に建物がない開けた場所
         const gy = this.L.heightAt(x, z); if (gy > 0.2 || [[4, 0], [-4, 0], [0, 4], [0, -4]].some(([ox, oz]) => this.L.heightAt(x + ox, z + oz) > 0.2)) continue;
+        if (this.L.waterAt(x, z) || [[3, 0], [-3, 0], [0, 3], [0, -3]].some(([ox, oz]) => this.L.waterAt(x + ox, z + oz))) continue; // 田んぼの水の上・すぐ脇には降りない
+        const gk = this.L.groundAt(x, z); if (this.active !== "scenic" && gk !== "grass" && gk !== "soil" && gk !== "ridge" && r() < (this.active === "life" ? 0.8 : 0.5)) continue; // 草地・土・あぜ道(ついばめる地面)を好む
         return { x, y: gy, z, kind: "ground", wire: -1, dirx: 0, dirz: 0, box: 0, tries: 0 };
       }
       if (roll < w.spots[0] + w.spots[1]) { // 屋根
@@ -116,6 +120,7 @@ export class Autopilot {
   drive(f: Flight, o: FlightInput, dt: number): FlightInput {
     o.x = o.y = 0; o.flapTap = o.flapHeld = o.brake = false;
     if (!this.enabled) return o;
+    if (this.busy) this.busyWin = true;
     this.t += dt; this.stateT += dt; this.decideT += dt; this.watchT += dt; this.progT += dt;
     if (this.decideT >= 0.2) { this.decideT = 0; this.decide(f); }
     if (f.crashes !== this.lastCrashes) { this.lastCrashes = f.crashes; this.emerg = 1.2; this.stats.avoids++; if (this.state === "cruise" || this.state === "approach") { this.alt = Math.max(this.alt, f.pos.y + 12); } }
@@ -123,7 +128,7 @@ export class Autopilot {
     // 見張り: 動かなくなったら新しい目標へ。最終手段のみ安全な空中へ戻す(テレポート)
     if (this.watchT >= 3) {
       const moved = Math.hypot(f.pos.x - this.px, f.pos.z - this.pz); this.px = f.pos.x; this.pz = f.pos.z; this.watchT = 0;
-      const airborne = f.mode === "air", still = moved < 2.5;
+      const airborne = f.mode === "air", still = moved < 2.5 && !this.busyWin; this.busyWin = false;
       if (airborne && this.state !== "takeoff" && moved < 6) { this.blocked++; this.stats.replans++; this.newWaypoint(f, true); this.alt = Math.max(this.alt, f.pos.y + 10); if (this.state === "approach") { this.tgt = null; this.enter("cruise"); } }
       else if (still && (this.state === "walk" || this.state === "takeoff")) this.blocked++;
       else if (!still || this.state === "rest") this.blocked = 0;
@@ -239,6 +244,7 @@ export class Autopilot {
     if (this.stateT > this.walkFor) { this.enter("rest"); this.restFor = 1 + this.r() * 4; if (this.r() < 0.5) { this.enter("takeoff"); this.takeoffT = 0; this.hopped = false; } return; }
     // 向きを保って前進。壁・段差で止まったら向きを変えるか、低い段なら小ジャンプ
     const e = wrap(this.walkYaw - f.yaw); o.x = -clamp(e * 2, -1, 1); o.brake = Math.abs(e) < 0.5;
+    if (this.busy) return; // ついばみ中は止まっていて正常
     if (f.walkV < 0.3 && this.stateT > 1) { this.blocked += dt; if (this.blocked > 1.2) { this.blocked = 0; if (this.r() < 0.4) o.flapTap = true; else this.walkYaw = f.yaw + (this.r() < 0.5 ? 1 : -1) * (1.6 + this.r() * 1.4); } } else this.blocked = 0;
   }
   private takeoff(f: Flight, o: FlightInput) {

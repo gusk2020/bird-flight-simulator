@@ -2,7 +2,7 @@ import { Flight, FlightInput } from "../src/flight";
 import { generateLayout } from "../src/layout";
 import { Wind } from "../src/wind";
 import { NpcWorld } from "../src/npc";
-const L = generateLayout(); const world = { colliders: L.colliders, heightAt: L.heightAt, perchAt: L.perchAt, perchPoint: L.perchPoint, wireDir: L.wireDir };
+const L = generateLayout(); const world = { colliders: L.colliders, heightAt: L.heightAt, perchAt: L.perchAt, perchPoint: L.perchPoint, wireDir: L.wireDir, waterAt: L.waterAt };
 const inp = (o: Partial<FlightInput> = {}): FlightInput => ({ x: 0, y: 0, flapHeld: false, flapTap: false, brake: false, ...o });
 const out: Record<string, string> = {};
 const fmt = (f: Flight) => [f.pos.x, f.pos.y, f.pos.z, f.vel.x, f.vel.y, f.vel.z, f.yaw, f.pitch, f.roll].map(v => v.toFixed(6)).join(",") + "|" + f.mode + "|" + f.crashes;

@@ -88,9 +88,9 @@ export function buildWorld(): World {
       for (let k = 0; k < 14; k++) { const r = 1.5 + rn() * 3.2; patches.push({ x: l.x + (rn() - 0.5) * 40, y: LOT_TOP + 0.012, z: l.z + (rn() - 0.5) * 40, sx: r, sz: r * (0.6 + rn() * 0.5), color: rn() < 0.7 ? 0x6f9a4a : 0x8aa457 }); }
       for (let k = 0; k < 90; k++) tufts.push({ x: l.x + (rn() - 0.5) * 42, y: LOT_TOP, z: l.z + (rn() - 0.5) * 42, ry: rn() * 6, sy: 0.6 + rn() * 1.2, color: rn() < 0.5 ? 0x5f8a3c : 0x7a9a45 });
     }
-    const disc = new THREE.CircleGeometry(1, 10); disc.rotateX(-Math.PI / 2);
+    const disc = new THREE.CircleGeometry(1, 7); disc.rotateX(-Math.PI / 2);
     group.add(inst(disc, lam(0xffffff), patches));
-    const tuft = new THREE.ConeGeometry(0.18, 0.7, 5); tuft.translate(0, 0.35, 0);
+    const tuft = new THREE.ConeGeometry(0.2, 0.7, 3, 1, true); tuft.translate(0, 0.35, 0);
     group.add(inst(tuft, lam(0xffffff), tufts)); }
   // 田んぼ: 3×3 の水面(あぜで仕切る)と、その上の稲。稲と水は setPaddyLook で季節に合わせて変える
   const e = LOT / 2 - PADDY.border, cell = (2 * e - 2 * PADDY.ridge) / PADDY.plots, pr = cell / 2 + PADDY.ridge / 2;
@@ -98,10 +98,10 @@ export function buildWorld(): World {
   const plots: { x: number; y: number; z: number }[] = [], rice: { x: number; y: number; z: number; ry: number; sy: number }[] = []; let sd2 = 77; const rn2 = () => ((sd2 = (sd2 * 1664525 + 1013904223) >>> 0) / 4294967296);
   for (const l of L.lots.filter(q => q.use === "paddy")) for (const ix of [-1, 0, 1]) for (const iz of [-1, 0, 1]) {
     const px = l.x + ix * 2 * pr, pz = l.z + iz * 2 * pr; plots.push({ x: px, y: LOT_TOP + 0.014, z: pz });
-    for (let a = 0; a < 8; a++) for (let b = 0; b < 8; b++) rice.push({ x: px + (a - 3.5) * (cell / 8) + (rn2() - 0.5) * 0.5, y: LOT_TOP, z: pz + (b - 3.5) * (cell / 8) + (rn2() - 0.5) * 0.5, ry: rn2() * 6, sy: 0.85 + rn2() * 0.3 });
+    for (let a = 0; a < 6; a++) for (let b = 0; b < 6; b++) rice.push({ x: px + (a - 2.5) * (cell / 6) + (rn2() - 0.5) * 0.6, y: LOT_TOP, z: pz + (b - 2.5) * (cell / 6) + (rn2() - 0.5) * 0.6, ry: rn2() * 6, sy: 0.85 + rn2() * 0.3 });
   }
   const waterMesh = inst(waterGeo, waterMat, plots); waterMesh.renderOrder = 1; group.add(waterMesh);
-  const riceGeo = new THREE.ConeGeometry(0.16, 0.9, 5); riceGeo.translate(0, 0.45, 0);
+  const riceGeo = new THREE.ConeGeometry(0.2, 0.9, 3, 1, true); riceGeo.translate(0, 0.45, 0); // 稲は三角の筒(3枚)で足りる
   const riceMat = lam(0x6fae4a), riceMesh = inst(riceGeo, riceMat, rice); riceMesh.scale.y = 0.8; group.add(riceMesh);
   const setPaddyLook = (p: PaddyLook) => { riceMesh.scale.set(1, Math.max(0.02, p.growth), 1); riceMesh.visible = p.growth > 0.03; riceMat.color.setHex(p.rice); waterMat.opacity = p.water; waterMesh.visible = p.water > 0.02; if (p.waterColor !== undefined) waterMat.color.setHex(p.waterColor); };
   // 道路標示

@@ -332,7 +332,7 @@ try {
   check("walking on a vacant lot (soil): the bird stops and pecks", fg.pecks >= 2 && fg.seq >= 1 && fg.ground === "soil", JSON.stringify(fg));
   const pad = await p.evaluate(() => { const l = __game.world.lots.find(q => q.use === "paddy"); return { x: l.x, z: l.z }; });
   await p.evaluate(v => { const f = __game.flight; f.reset(); f.pos.set(v.x + 21.5, __game.world.heightAt(v.x + 21.5, v.z) + 0.32, v.z); f.prevPos.copy(f.pos); f.mode = "landed"; f.vel.set(0, 0, 0); f.yaw = Math.PI / 2; __game.input.state.brake = true; }, pad);
-  await p.waitForFunction(() => __game.game.steps > 0, null, { timeout: 5000 }); const st0 = await p.evaluate(() => __game.game.steps); await p.waitForFunction(s => __game.game.steps > s + 300, st0, { timeout: 60000 });
+  await p.waitForFunction(() => __game.game.steps > 0, null, { timeout: 5000 }); const pst0 = await p.evaluate(() => __game.game.steps); await p.waitForFunction(s => __game.game.steps > s + 300, pst0, { timeout: 60000 });
   check("walking toward a paddy: the bird stays out of the water", await p.evaluate(() => !__game.world.waterAt(__game.flight.pos.x, __game.flight.pos.z) && __game.flight.mode === "landed"));
   await p.evaluate(() => { __game.input.state.brake = false; });
   check("E4: no page errors", errs.length === 0, errs.join(" | "));

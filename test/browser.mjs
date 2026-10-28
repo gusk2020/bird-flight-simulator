@@ -86,7 +86,7 @@ try {
   await p.click('[data-set="weather"][data-val="rain"]'); await p.click('[data-set="wind"][data-val="2"]'); await p.click('[data-set="bearing"][data-val="90"]');
   let B = await p.evaluate(() => ({ rain: __game.rain.mesh.visible, lift: __game.flight.liftScale, fog: __game.scene.fog.far, bear: __game.wind.bearing, sp: __game.wind.speed, on: [...document.querySelectorAll("[data-set].on")].length }));
   check("rain: particles on, lift reduced, visibility shortened", B.rain && B.lift < 1 && B.fog < 500, JSON.stringify(B));
-  check("wind: strong east wind set, buttons highlighted", B.bear === 90 && B.sp > 7 && B.on === 8);
+  check("wind: strong east wind set, buttons highlighted", B.bear === 90 && B.sp > 7 && B.on === 9);
   await p.click('[data-set="time"][data-val="2"]'); await p.click("#ovGo"); await sleep(300);
   const h0 = await p.evaluate(() => __game.env().lights + "|" + __game.game.gameTime);
   await sleep(2500); const w1 = await p.evaluate(() => ({ wv: __game.flight.windVec.length(), rc: __game.rain.count, q: __game.quality.level, hud: document.getElementById("hud").textContent }));
@@ -257,7 +257,8 @@ try {
   const ayaw0 = await p.evaluate(() => __game.flight.yaw); await sleep(300); a = await A(); check("auto can be turned on again and ignores manual stick state", a.auto);
   await p.evaluate(() => __game.setAuto(false));
   check("policy was saved in prefs", (await p.evaluate(() => JSON.parse(localStorage.getItem("vindving.prefs.v1") || "{}").autoPolicy)) !== undefined);
-  await p.reload(); await p.waitForFunction(() => window.__game, null, { timeout: 30000 }); await sleep(500); a = await A(); check("aaft reload auto is off and the game waits at the start", !a.auto && a.st === "ready");
+  await p.reload(); await p.waitForFunction(() => window.__game, null, { timeout: 30000 }); await sleep(500); a = await A(); check("after reload auto is off and the game waits at the start", !a.auto && a.st === "ready");
+  await p.click("#ovGo"); await sleep(500);
 
   console.log("\n# time of day (A2)");
   const seen = [];

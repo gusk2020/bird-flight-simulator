@@ -42,6 +42,8 @@ export const PHYS = {
   walkSpeed: 2.0,      // 歩行の最高速度 m/s
   walkAccel: 8, walkDecel: 14,
   stepUp: 0.35,        // これ以下の段差は歩いて越える。超えると壁として止まる
+  edgeForgive: 0.45,   // 空中の足が上面の下この距離以内なら壁ではなく上面への着地として扱う(縁すれすれの着地を許容)
+  edgeForgiveSpeed: 9, // …ただし水平速度がこれ未満のとき
   stepDown: 0.2,       // これ以下の段差は歩いて降りる(超えると落下)
   hopUp: 3.4,          // 小ジャンプの初速(頂点約0.6m)
   hopForward: 1.6,

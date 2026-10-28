@@ -15,6 +15,8 @@ import { Quality } from "./quality";
 import { loadPrefs, savePrefs, ControlMode } from "./settings";
 import { FlapAssist } from "./assist";
 import { Autopilot } from "./autopilot";
+import { buildSurfaces } from "./perches";
+import { PerchAssist, PERCH } from "./perchassist";
 import type { AutoPolicy } from "./settings";
 import { SpeedLines, Streaks, speedIntensity } from "./speedfx";
 import { NpcWorld } from "./npc";
@@ -73,6 +75,11 @@ const npcP = { x: 0, y: 0, z: 0, speed: 0, yaw: 0, air: false }; // 毎フレー
 const npcPlayer = () => { npcP.x = flight.pos.x; npcP.y = flight.pos.y; npcP.z = flight.pos.z; npcP.speed = flight.speed; npcP.yaw = flight.yaw; npcP.air = flight.mode === "air"; return npcP; };
 function applyQuality() { renderer.setPixelRatio(Math.min(devicePixelRatio, quality.pixelRatio)); resize(); rain.setDensity(quality.rainDensity); }
 const assist = new FlapAssist();
+// 着地補助: 常時オン(切替UIなし)。手動操作のときだけ働き、オート周遊は自分の判断で降りる
+const perchAssist = new PerchAssist(buildSurfaces(world));
+// 着地できそうな場所を示す、控えめな半透明の目印(最も狙っている候補だけ)
+const perchMarker = new THREE.Mesh(new THREE.RingGeometry(0.42, 0.55, 24).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xfff1b0, transparent: true, opacity: 0.4, depthWrite: false, fog: false }));
+perchMarker.visible = false; perchMarker.renderOrder = 2; scene.add(perchMarker);
 const CTL_NAMES: Record<ControlMode, string> = { both: "両手", right: "右手", left: "左手" };
 function applyControl() {
   const m = settings.ctl as ControlMode;
@@ -123,7 +130,7 @@ const TS_NAMES: Record<TimeSpeed, string> = { slow: "ゆったり", normal: "標
 const autoIn = { x: 0, y: 0, flapHeld: false, flapTap: false, brake: false };
 const POL_NAMES: Record<AutoPolicy, string> = { life: "自然生活", scenic: "景色観賞", adventure: "冒険探索", random: "おまかせ" };
 // オート中は手動入力を読まない(スティックやタップは無視)。解除しても飛行状態はそのまま続く
-const readInput = () => { if (autopilot.enabled) { autoIn.flapTap = false; autoIn.flapHeld = false; autoIn.brake = false; return autopilot.drive(flight, autoIn, 1 / 60); } return assist.apply(input.read(), flight); };
+const readInput = () => { if (autopilot.enabled) { autoIn.flapTap = false; autoIn.flapHeld = false; autoIn.brake = false; return autopilot.drive(flight, autoIn, 1 / 60); } return assist.apply(perchAssist.apply(input.read(), flight), flight); };
 const game = new Game(flight, readInput, () => { input.state.flapTap = false; });
 function applyAuto() {
   const on = autopilot.enabled;
@@ -216,6 +223,11 @@ function frame(now: number) {
     const sh = director.update(vdt, flight); cam.setShot(sh.yaw, sh.dist, sh.h); bird.setVisible(cam.shotDist >= FIRST_PERSON_BELOW);
   }
   cam.update(vdt, flight, bp, fxc);
+  { // 着地候補の目印: 手動・空中・近くに候補があるときだけ
+    const tg = perchAssist.target, show = !!tg && !autopilot.enabled && flight.mode === "air" && !flight.hopping && perchAssist.aimD < PERCH.showRange && flight.stun <= 0;
+    if (show !== perchMarker.visible) { perchMarker.visible = show; dirty = true; }
+    if (show) { const k = 1 + 0.12 * Math.sin(now * 0.006); perchMarker.position.set(perchAssist.aimX, tg!.top + 0.05, perchAssist.aimZ); perchMarker.scale.setScalar(k * Math.min(1.6, Math.max(0.8, Math.min(tg!.maxX - tg!.minX, tg!.maxZ - tg!.minZ) + 0.6))); }
+  }
   const tfx = performance.now();
   streaks.update(camera.position, flight.vel, running ? fxc : 0); stats.fxMs += (performance.now() - tfx - stats.fxMs) * 0.05;
   if (running || fxc === 0) lines.update(vdt, running ? fxc : 0);
@@ -237,4 +249,4 @@ function updateHud(dt: number, now: number) {
 }
 renderer.setAnimationLoop(frame);
 // テスト・デバッグ用
-(window as unknown as Record<string, unknown>).__game = { game, flight, world, input, cam, camera, renderer, scene, frame, env: () => envAt(hour), stats, npc, lines, streaks, speedIntensity, setHour: (h: number) => { hour = h; targetHour = null; applyEnv(); }, settings, applySettings, assist, prefs, autopilot, setAuto, hour: () => hour, director, drift, uiHider, wxLevel: () => wxLevel, wind, rain, quality };
+(window as unknown as Record<string, unknown>).__game = { game, flight, world, input, cam, camera, renderer, scene, frame, env: () => envAt(hour), stats, npc, lines, streaks, speedIntensity, setHour: (h: number) => { hour = h; targetHour = null; applyEnv(); }, settings, applySettings, assist, prefs, autopilot, setAuto, perchAssist, perchMarker, hour: () => hour, director, drift, uiHider, wxLevel: () => wxLevel, wind, rain, quality };

@@ -302,6 +302,27 @@ try {
   await p.click("#ovGo"); await sleep(300);
   check("D3: no page errors", errs.length === 0, errs.join(" | "));
 
+  console.log("\n# perch assist (E2)");
+  if (await p.evaluate(() => document.getElementById("overlay").hidden === false)) { await p.click("#ovGo"); await sleep(300); }
+  await p.evaluate(() => { __game.setAuto(false); __game.settings.weather = "clear"; });
+  const house = await p.evaluate(() => { const a = __game.world.apts[0]; return { x: a.x, z: a.z, top: __game.world.heightAt(a.x, a.z) }; });
+  await p.evaluate(h => { const f = __game.flight; f.reset(); f.pos.set(h.x + 20, h.top + 3, h.z); f.prevPos.copy(f.pos); f.yaw = Math.PI / 2; f.vel.set(-9, -0.5, 0); __game.input.state.brake = true; }, house);
+  await p.waitForFunction(() => __game.perchAssist.stats.guided > 0, null, { timeout: 15000 }).catch(() => {}); await sleep(100);
+  const mk = await p.evaluate(() => ({ vis: __game.perchMarker.visible, tgt: __game.perchAssist.target && __game.perchAssist.target.kind, guided: __game.perchAssist.stats.guided }));
+  check("approaching a roof with the brake held: a candidate marker is shown and guidance is active", mk.vis && mk.tgt === "roof" && mk.guided > 0, JSON.stringify(mk));
+  await p.evaluate(() => { __game.input.state.brake = false; __game.setAuto(true); }); await sleep(400);
+  check("the marker is hidden during auto flight", await p.evaluate(() => !__game.perchMarker.visible));
+  await p.evaluate(() => { __game.setAuto(false); const f = __game.flight; f.reset(); f.pos.set(-60, 30, -60); f.prevPos.copy(f.pos); f.vel.set(0, 0, -10); });
+  await sleep(500);
+  check("far from any landing candidate the marker is not shown", await p.evaluate(() => !__game.perchMarker.visible));
+  // 着地中のカメラは鳥を近く(大きく)映す
+  const dAir = await p.evaluate(() => __game.camera.position.distanceTo(__game.flight.pos));
+  await p.evaluate(() => { const f = __game.flight; f.reset(); f.pos.set(0, __game.world.heightAt(0, 0) + 0.5, 0); f.prevPos.copy(f.pos); f.mode = "landed"; f.vel.set(0, 0, 0); __game.cam.snap(); });
+  await sleep(1500);
+  const dGround = await p.evaluate(() => __game.camera.position.distanceTo(__game.flight.pos));
+  check("landed: the camera is closer to the bird than in flight", dGround < dAir - 0.8, `${dAir.toFixed(2)} -> ${dGround.toFixed(2)}`);
+  check("E2: no page errors", errs.length === 0, errs.join(" | "));
+
   console.log("\n# time of day (A2)");
   const seen = [];
   for (let i = 0; i < 4; i++) { await p.click("#btnTime"); await sleep(1500); seen.push(await p.evaluate(() => ({ label: document.getElementById("btnTime").textContent, e: __game.env() }))); }

@@ -86,7 +86,7 @@ export class NpcWorld {
     const r = this.r, roll = r(), w = kind === "pigeon" ? [0.5, 0.3] : kind === "sparrow" ? [0.3, 0.1] : [0.2, 0.5]; // 地面/屋根の確率、残りは電線
     for (let tries = 0; tries < 12; tries++) {
       let s: { x: number; y: number; z: number; land: NpcBird["land"] };
-      if (roll < w[0]) { const l = this.lotCells[Math.floor(r() * this.lotCells.length)], px = l.x + (r() - 0.5) * 40, pz = l.z + (r() - 0.5) * 40, gy = this.L.heightAt(px, pz); if (gy > 0.2 || [[3, 0], [-3, 0], [0, 3], [0, -3]].some(([ox, oz]) => this.L.heightAt(px + ox, pz + oz) > 0.2)) continue; s = { x: px, y: gy, z: pz, land: "ground" }; }
+      if (roll < w[0]) { const l = this.lotCells[Math.floor(r() * this.lotCells.length)], px = l.x + (r() - 0.5) * 40, pz = l.z + (r() - 0.5) * 40, gy = this.L.heightAt(px, pz); if (gy > 0.2 || this.L.waterAt(px, pz) || [[3, 0], [-3, 0], [0, 3], [0, -3]].some(([ox, oz]) => this.L.heightAt(px + ox, pz + oz) > 0.2)) continue; s = { x: px, y: gy, z: pz, land: "ground" }; }
       else if (roll < w[0] + w[1]) { const q = this.roofs[Math.floor(r() * this.roofs.length)]; const px = q.x0 + r() * Math.max(0, q.x1 - q.x0), pz = q.z0 + r() * Math.max(0, q.z1 - q.z0); s = { x: px, y: this.L.heightAt(px, pz), z: pz, land: "roof" }; }
       else { const id = Math.floor(r() * this.L.wires.length), t = 0.12 + r() * 0.76, o = { x: 0, y: 0, z: 0 }; this.L.perchPoint(id, t, o); if ([[4, 0], [-4, 0], [0, 4], [0, -4], [3, 3], [-3, 3], [3, -3], [-3, -3]].some(([ox, oz]) => this.L.heightAt(o.x + ox, o.z + oz) > o.y - 0.5)) continue; s = { x: o.x, y: o.y, z: o.z, land: "wire" }; }
       if (!near || dist2(s.x, s.z, near.x, near.z) < 140) return s;

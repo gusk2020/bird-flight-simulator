@@ -7,7 +7,9 @@ import { FollowCam } from "./camera";
 import { Game } from "./game";
 import { envAt, TIME_PRESETS } from "./env";
 import { Wind, bearingName } from "./wind";
-import { WEATHER, applyWeather, Weather } from "./weather";
+import { WEATHER, applyWeatherDef, Weather } from "./weather";
+import { CameraDirector, WeatherDrift, UiHider, weatherAtLevel, autoHoursPerSecond, FIRST_PERSON_BELOW } from "./autoview";
+import type { TimeSpeed } from "./settings";
 import { Rain } from "./rain";
 import { Quality } from "./quality";
 import { loadPrefs, savePrefs, ControlMode } from "./settings";
@@ -48,13 +50,16 @@ sky.renderOrder = -1; scene.add(sky);
 const cloudMat = (world.clouds.children[0] as THREE.Mesh).material as THREE.MeshBasicMaterial;
 let hour: number = TIME_PRESETS[1].hour, preset = 1, targetHour: number | null = null;
 const prefs = loadPrefs(); // 前回の操作方式など(壊れていれば既定値)。ゲーム自体は必ず開始待ちで始まる
-const settings = { weather: "clear" as Weather, wind: 1, bearing: 270, time: 0, fx: 2, npc: 2, gfx: 0, ctl: prefs.control as string, apol: prefs.autoPolicy as string };
+const settings = { weather: "clear" as Weather, wind: 1, bearing: 270, time: 0, fx: 2, npc: 2, gfx: 0, ctl: prefs.control as string, apol: prefs.autoPolicy as string, ats: prefs.autoTimeSpeed as string, ahide: prefs.autoHideUi ? "1" : "0" };
+const WX_INDEX: Record<Weather, number> = { clear: 0, cloudy: 1, rain: 2 }, WX_NAMES: Weather[] = ["clear", "cloudy", "rain"];
+// 天気の連続値(0晴/1曇/2雨)。手動ではボタンの値、オート中はゆっくり移り変わる
+let wxLevel = 0, appliedWeather: Weather = "clear";
 const WIND_SPEED = [0, 3, 7], WIND_GUST = [0, 0.3, 0.6], TIME_RATE = [0, 24 / 1800, 24 / 180]; // 時間: 停止 / 等速(24h=30分) / 高速(24h=3分)
 let dirty = true; // 一時停止中は、見た目が変わったときだけ再描画する(バッテリー・発熱対策)
 let envHour = -1;
 function applyEnv() {
   dirty = true; envHour = hour;
-  const wd = WEATHER[settings.weather], e = applyWeather(envAt(hour), settings.weather), top = new THREE.Color(e.top), hor = new THREE.Color(e.hor), c = new THREE.Color();
+  const wd = weatherAtLevel(wxLevel), e = applyWeatherDef(envAt(hour), wd), top = new THREE.Color(e.top), hor = new THREE.Color(e.hor), c = new THREE.Color();
   const pos = skyGeo.attributes.position, col = skyGeo.attributes.color as THREE.BufferAttribute;
   for (let i = 0; i < pos.count; i++) { const h = Math.max(0, pos.getY(i) / 1500); c.lerpColors(hor, top, Math.pow(h, 0.6)); col.setXYZ(i, c.r, c.g, c.b); }
   col.needsUpdate = true;
@@ -79,9 +84,17 @@ function applyControl() {
   if (prefs.autoPolicy !== p) { prefs.autoPolicy = p; savePrefs(prefs); }
   dirty = true;
 }
+function syncWeatherLevel() { if (settings.weather !== appliedWeather) { appliedWeather = settings.weather; wxLevel = WX_INDEX[settings.weather]; drift.level = drift.target = wxLevel; } }
+function applyWeatherOnly() {
+  const wd = weatherAtLevel(wxLevel);
+  wind.set(settings.bearing, Math.min(12, WIND_SPEED[settings.wind] * wd.windMul), WIND_GUST[settings.wind]);
+  flight.liftScale = wd.liftScale; flight.dragScale = wd.dragScale; rain.setIntensity(wd.rain); applyEnv();
+}
 function applySettings() {
-  applyControl();
-  const wd = WEATHER[settings.weather];
+  applyControl(); syncWeatherLevel();
+  const ts = settings.ats as TimeSpeed, hide = settings.ahide === "1";
+  if (prefs.autoTimeSpeed !== ts || prefs.autoHideUi !== hide) { prefs.autoTimeSpeed = ts; prefs.autoHideUi = hide; savePrefs(prefs); }
+  const wd = weatherAtLevel(wxLevel);
   wind.set(settings.bearing, Math.min(12, WIND_SPEED[settings.wind] * wd.windMul), WIND_GUST[settings.wind]);
   flight.liftScale = wd.liftScale; flight.dragScale = wd.dragScale;
   rain.setIntensity(wd.rain); fxLevel = FX_MUL[settings.fx]; npc.setLevel(settings.npc, npcPlayer()); quality.force(settings.gfx === 0 ? null : [0, 0, 2, 3][settings.gfx]); applyQuality(); applyEnv();
@@ -89,7 +102,7 @@ function applySettings() {
   document.getElementById("rowBearing")!.hidden = settings.wind === 0;
 }
 document.querySelectorAll<HTMLElement>("[data-set]").forEach(b => b.addEventListener("click", () => {
-  (settings as Record<string, unknown>)[b.dataset.set!] = b.dataset.set === "weather" || b.dataset.set === "ctl" || b.dataset.set === "apol" ? b.dataset.val : Number(b.dataset.val); applySettings();
+  (settings as Record<string, unknown>)[b.dataset.set!] = b.dataset.set === "weather" || b.dataset.set === "ctl" || b.dataset.set === "apol" || b.dataset.set === "ats" || b.dataset.set === "ahide" ? b.dataset.val : Number(b.dataset.val); applySettings();
 }));
 applyEnv();
 input.onTime = () => {
@@ -105,6 +118,8 @@ input.onCamera = () => {
 
 // --- 開始 / 一時停止 ---
 const autopilot = new Autopilot(world, (Date.now() & 0xffff) + 1); autopilot.setPolicy(prefs.autoPolicy);
+const director = new CameraDirector((Date.now() >>> 3) + 7), drift = new WeatherDrift(0, (Date.now() >>> 5) + 3), uiHider = new UiHider();
+const TS_NAMES: Record<TimeSpeed, string> = { slow: "ゆったり", normal: "標準", fast: "高速" }, TS_ORDER: TimeSpeed[] = ["slow", "normal", "fast"];
 const autoIn = { x: 0, y: 0, flapHeld: false, flapTap: false, brake: false };
 const POL_NAMES: Record<AutoPolicy, string> = { life: "自然生活", scenic: "景色観賞", adventure: "冒険探索", random: "おまかせ" };
 // オート中は手動入力を読まない(スティックやタップは無視)。解除しても飛行状態はそのまま続く
@@ -115,15 +130,25 @@ function applyAuto() {
   document.body.dataset.auto = on ? "1" : "0";
   document.getElementById("btnAutoOff")!.hidden = !on; document.getElementById("btnPol")!.hidden = !on;
   document.getElementById("btnPol")!.textContent = POL_NAMES[autopilot.policy];
+  document.getElementById("btnTs")!.hidden = !on; document.getElementById("btnTs")!.textContent = "時間 " + TS_NAMES[settings.ats as TimeSpeed];
+  document.body.classList.toggle("ui-hidden", on && uiHider.hidden);
   dirty = true;
 }
 function setAuto(on: boolean) {
   if (on === autopilot.enabled) return;
-  if (on) { autopilot.setPolicy(settings.apol as AutoPolicy); autopilot.start(flight); } else autopilot.stop();
+  if (on) { autopilot.setPolicy(settings.apol as AutoPolicy); autopilot.start(flight); drift.level = drift.target = wxLevel; director.reset(); uiHider.touch(); }
+  else { // 解除: 到達した時刻・天気はそのまま。カメラは追従へなめらかに戻る
+    autopilot.stop(); director.reset(); cam.setShot(0, 1, 0); if (cam.mode === "third") bird.setVisible(true);
+    settings.weather = appliedWeather = WX_NAMES[Math.round(wxLevel)]; applySettingsLight();
+  }
   input.releaseAll(); applyAuto();
 }
+// 解除時: 天気ボタンの見た目だけ合わせる(連続値の天気はそのまま保つ)
+function applySettingsLight() { document.querySelectorAll<HTMLElement>("[data-set]").forEach(b => b.classList.toggle("on", String(settings[b.dataset.set as keyof typeof settings]) === b.dataset.val)); }
+document.getElementById("btnTs")!.addEventListener("pointerdown", e => { e.preventDefault(); e.stopPropagation(); settings.ats = TS_ORDER[(TS_ORDER.indexOf(settings.ats as TimeSpeed) + 1) % 3]; applySettings(); applyAuto(); });
 const POLS: AutoPolicy[] = ["life", "scenic", "adventure", "random"];
 function setPolicy(p: AutoPolicy) { settings.apol = p; applySettings(); applyAuto(); }
+addEventListener("pointerdown", () => { if (uiHider.hidden) { uiHider.touch(); document.body.classList.remove("ui-hidden"); dirty = true; } else uiHider.touch(); }, true);
 document.getElementById("btnAutoOff")!.addEventListener("pointerdown", e => { e.preventDefault(); e.stopPropagation(); setAuto(false); });
 document.getElementById("btnPol")!.addEventListener("pointerdown", e => { e.preventDefault(); e.stopPropagation(); setPolicy(POLS[(POLS.indexOf(autopilot.policy) + 1) % 4]); });
 document.getElementById("btnCtl")!.addEventListener("pointerdown", e => { e.preventDefault(); const order: ControlMode[] = ["both", "right", "left"]; settings.ctl = order[(order.indexOf(settings.ctl as ControlMode) + 1) % 3]; applySettings(); });
@@ -166,7 +191,13 @@ function frame(now: number) {
     const diff = (targetHour - hour + 24) % 24;
     if (diff < 1e-3) { hour = targetHour; targetHour = null; } else hour = (hour + Math.min(diff, 10 * dt)) % 24;
     applyEnv();
-  } else if (gdt > 0 && TIME_RATE[settings.time] > 0) { hour = (hour + gdt * TIME_RATE[settings.time]) % 24; const dh = Math.abs(hour - envHour); if (Math.min(dh, 24 - dh) >= 0.01) applyEnv(); } // 0.01時間(36秒/高速で4.5秒)ごとに空の色などを更新
+  } else if (gdt > 0 && (autopilot.enabled || TIME_RATE[settings.time] > 0)) { hour = (hour + gdt * (autopilot.enabled ? autoHoursPerSecond(settings.ats as TimeSpeed) : TIME_RATE[settings.time])) % 24; const dh = Math.abs(hour - envHour); if (Math.min(dh, 24 - dh) >= 0.01) applyEnv(); } // 0.01時間(36秒/高速で4.5秒)ごとに空の色などを更新
+  if (autopilot.enabled && gdt > 0) { // オート中の天気: ゆっくり連続的に変化(0.02以上動いたときだけ反映)
+    const lv = drift.update(gdt);
+    if (Math.abs(lv - wxLevel) >= 0.02 || (lv === drift.target && lv !== wxLevel)) { wxLevel = lv; applyWeatherOnly(); }
+  }
+  if (autopilot.enabled && running && uiHider.update(dt, settings.ahide === "1") !== document.body.classList.contains("ui-hidden")) { document.body.classList.toggle("ui-hidden", uiHider.hidden); dirty = true; }
+  if (!running && document.body.classList.contains("ui-hidden")) { uiHider.touch(); document.body.classList.remove("ui-hidden"); }
   if (running && quality.update(dt)) applyQuality();
   if (!running && !dirty) { updateHud(dt, now); return; } // 一時停止中で見た目が変わっていなければ、物理・NPC・描画をすべて省く
   rain.update(running ? dt : 0, camera.position, flight.windVec);
@@ -181,6 +212,9 @@ function frame(now: number) {
   const fxc = Math.min(1, fxSmooth);
   world.updateLOD(bp.x, bp.z);
   const tn = performance.now(); if (running) npc.update(dt, npcPlayer(), hour); npcView.update(npc, camera.position); stats.npcMs += (performance.now() - tn - stats.npcMs) * 0.05;
+  if (autopilot.enabled && cam.mode === "third") { // オートのカット(危険な場面では自動で追従へ戻る)
+    const sh = director.update(vdt, flight); cam.setShot(sh.yaw, sh.dist, sh.h); bird.setVisible(cam.shotDist >= FIRST_PERSON_BELOW);
+  }
   cam.update(vdt, flight, bp, fxc);
   const tfx = performance.now();
   streaks.update(camera.position, flight.vel, running ? fxc : 0); stats.fxMs += (performance.now() - tfx - stats.fxMs) * 0.05;
@@ -203,4 +237,4 @@ function updateHud(dt: number, now: number) {
 }
 renderer.setAnimationLoop(frame);
 // テスト・デバッグ用
-(window as unknown as Record<string, unknown>).__game = { game, flight, world, input, cam, camera, renderer, scene, frame, env: () => envAt(hour), stats, npc, lines, streaks, speedIntensity, setHour: (h: number) => { hour = h; targetHour = null; applyEnv(); }, settings, applySettings, assist, prefs, autopilot, setAuto, wind, rain, quality };
+(window as unknown as Record<string, unknown>).__game = { game, flight, world, input, cam, camera, renderer, scene, frame, env: () => envAt(hour), stats, npc, lines, streaks, speedIntensity, setHour: (h: number) => { hour = h; targetHour = null; applyEnv(); }, settings, applySettings, assist, prefs, autopilot, setAuto, hour: () => hour, director, drift, uiHider, wxLevel: () => wxLevel, wind, rain, quality };

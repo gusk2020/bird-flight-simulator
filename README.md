@@ -66,3 +66,10 @@ Repository and GitHub Pages URLs retain the existing `bird-flight-simulator` nam
 - 操作: 両手 / 右手 / 左手 (top button 操作 or pause menu; saved in localStorage `vindving.prefs.v1`, restored on start; the game always waits at the start screen).
 - One-hand: touch anywhere on your half of the screen = floating stick (slide: turn / up-down). Tap = flap (on the ground: small hop). Long press = brake (on the ground: walk). Slid-then-held never becomes a brake; a long press never flaps on release.
 - Thresholds live in `src/gesture.ts` (`GESTURE`), flap assist in `src/assist.ts` (`ASSIST`). The assist only adds `flapTap` when slow or low (never while braking, on the ground, hopping, perched, or just after a crash).
+
+## D3: オート中の見せ方(カメラ・時間・天気・UI)
+- カメラ: オート中だけ、10〜20秒ごとにカット(後方/ワイド/左右/高所/前方/一人称)をなめらかに切り替え。急降下・低空・着地・衝突では自動で通常の追従へ戻る。地面や屋根の下には入らない。
+- 時間: オート中は 1日 = ゆったり20分 / 標準10分 / 高速3分。解除すると到達した時刻のまま(速度設定は保存)。
+- 天気: 晴/曇/雨の間を連続的にゆっくり移り変わる(約60秒かけて変化)。解除しても到達した天気を維持。
+- UI: オート中は約5秒操作がないと操作UIを隠し、タップで再表示(オート解除・行動方針・時間速度)。隠しても動作は止まらない。メニューでオフにできる。
+- 設定(操作方式・行動方針・オート時間・UI自動非表示)は保存されるが、起動時に勝手にオートは始まらない。

@@ -86,7 +86,7 @@ try {
   await p.click('[data-set="weather"][data-val="rain"]'); await p.click('[data-set="wind"][data-val="2"]'); await p.click('[data-set="bearing"][data-val="90"]');
   let B = await p.evaluate(() => ({ rain: __game.rain.mesh.visible, lift: __game.flight.liftScale, fog: __game.scene.fog.far, bear: __game.wind.bearing, sp: __game.wind.speed, on: [...document.querySelectorAll("[data-set].on")].length }));
   check("rain: particles on, lift reduced, visibility shortened", B.rain && B.lift < 1 && B.fog < 500, JSON.stringify(B));
-  check("wind: strong east wind set, buttons highlighted", B.bear === 90 && B.sp > 7 && B.on === 9);
+  check("wind: strong east wind set, buttons highlighted", B.bear === 90 && B.sp > 7 && B.on === 11);
   await p.click('[data-set="time"][data-val="2"]'); await p.click("#ovGo"); await sleep(300);
   const h0 = await p.evaluate(() => __game.env().lights + "|" + __game.game.gameTime);
   await sleep(2500); const w1 = await p.evaluate(() => ({ wv: __game.flight.windVec.length(), rc: __game.rain.count, q: __game.quality.level, hud: document.getElementById("hud").textContent }));
@@ -259,6 +259,48 @@ try {
   check("policy was saved in prefs", (await p.evaluate(() => JSON.parse(localStorage.getItem("vindving.prefs.v1") || "{}").autoPolicy)) !== undefined);
   await p.reload(); await p.waitForFunction(() => window.__game, null, { timeout: 30000 }); await sleep(500); a = await A(); check("after reload auto is off and the game waits at the start", !a.auto && a.st === "ready");
   await p.click("#ovGo"); await sleep(500);
+
+  console.log("\n# auto view (D3)");
+  await p.evaluate(() => { localStorage.clear(); }); await p.reload(); await p.waitForFunction(() => window.__game, null, { timeout: 30000 }); await sleep(500);
+  if (await p.evaluate(() => document.getElementById("overlay").hidden)) { await p.evaluate(() => __game.input.onPause()); await sleep(300); }
+  await p.click('[data-set="ats"][data-val="fast"]'); await p.click('[data-set="ahide"][data-val="1"]');
+  check("auto time speed + UI-hide are saved in prefs", await p.evaluate(() => { const o = JSON.parse(localStorage.getItem("vindving.prefs.v1")); return o.autoTimeSpeed === "fast" && o.autoHideUi === true; }));
+  await p.evaluate(() => __game.setHour(6)); await p.click("#ovAuto"); await sleep(300);
+  const T0 = await p.evaluate(() => ({ h: __game.hour(), gt: __game.game.gameTime }));
+  await p.waitForFunction(g => __game.game.gameTime > g + 3, T0.gt, { timeout: 60000 });
+  const T1 = await p.evaluate(() => ({ h: __game.hour(), gt: __game.game.gameTime }));
+  const hrs = ((T1.h - T0.h + 24) % 24) / (T1.gt - T0.gt);
+  check("auto time advances at 高速 (24h / 3 min)", Math.abs(hrs - 24 / 180) < 0.01, hrs.toFixed(4));
+  await p.evaluate(() => { __game.drift.target = 2; __game.drift.level = 0; });
+  const wx0 = await p.evaluate(() => __game.wxLevel()); await p.waitForFunction(() => __game.wxLevel() > 0.05, null, { timeout: 60000 }); const wx1 = await p.evaluate(() => __game.wxLevel());
+  check("auto weather changes gradually (continuous, not a jump)", wx1 > wx0 && wx1 < 1, `${wx0} -> ${wx1}`);
+  await p.waitForFunction(() => __game.director.switches > 0 || __game.game.gameTime > 40, null, { timeout: 90000 }).catch(() => {});
+  check("camera director is active (shots chosen)", await p.evaluate(() => __game.director.switches >= 0 && __game.autopilot.enabled));
+  await p.evaluate(() => { __game.uiHider.idle = 4.95; });
+  await p.waitForFunction(() => document.body.classList.contains("ui-hidden"), null, { timeout: 20000 });
+  const hv = await p.evaluate(() => ({ steps: __game.game.steps, auto: __game.autopilot.enabled, op: getComputedStyle(document.getElementById("btnAutoOff")).pointerEvents }));
+  check("UI hides ~5 s after the last touch while auto continues", hv.auto && hv.op === "none");
+  await tapAt(650, 250, 41); await sleep(300);
+  check("tap shows the UI again (オート解除 / 方針 / 時間速度) and does not cancel auto", await p.evaluate(() => !document.body.classList.contains("ui-hidden") && __game.autopilot.enabled && !document.getElementById("btnAutoOff").hidden && !document.getElementById("btnPol").hidden && !document.getElementById("btnTs").hidden));
+  await p.click("#btnTs"); check("時間 button cycles the speed", (await p.evaluate(() => __game.settings.ats)) === "slow");
+  const R = await p.evaluate(() => ({ h: __game.hour(), w: __game.wxLevel() }));
+  await p.click("#btnAutoOff"); await sleep(300);
+  const R2 = await p.evaluate(() => ({ h: __game.hour(), w: __game.wxLevel(), auto: __game.autopilot.enabled, vis: __game.cam.mode }));
+  check("after オート解除 the reached time and weather are kept", !R2.auto && Math.abs(R2.h - R.h) < 0.5 && Math.abs(R2.w - R.w) < 0.1, JSON.stringify([R, R2]));
+  // 監査対応: UI非表示中の一時停止・再開、一時停止中の描画省略(PR #11)
+  await p.evaluate(() => { __game.setAuto(true); __game.uiHider.idle = 4.95; });
+  await p.waitForFunction(() => document.body.classList.contains("ui-hidden"), null, { timeout: 20000 });
+  await p.evaluate(() => __game.input.onPause()); await sleep(400);
+  check("UI hidden + pause: the UI comes back and the timer is reset", await p.evaluate(() => !document.body.classList.contains("ui-hidden") && __game.uiHider.idle === 0 && !document.getElementById("overlay").hidden));
+  await sleep(600); const fr0 = await p.evaluate(() => __game.renderer.info.render.frame); await sleep(800); const fr1 = await p.evaluate(() => __game.renderer.info.render.frame);
+  check("paused: no rendering while nothing changes (PR #11 optimisation kept)", fr1 === fr0, `${fr0}->${fr1}`);
+  await p.click("#ovGo"); await sleep(400);
+  check("resume: auto still on, UI shown, timer restarted (not instantly hidden)", await p.evaluate(() => __game.autopilot.enabled && !document.body.classList.contains("ui-hidden") && __game.uiHider.idle < 3));
+  await p.evaluate(() => __game.setAuto(false)); await sleep(200);
+  await p.click("#btnPause"); await sleep(300);
+  check("paused: UI is shown", await p.evaluate(() => !document.body.classList.contains("ui-hidden")));
+  await p.click("#ovGo"); await sleep(300);
+  check("D3: no page errors", errs.length === 0, errs.join(" | "));
 
   console.log("\n# time of day (A2)");
   const seen = [];

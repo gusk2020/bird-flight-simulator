@@ -10,5 +10,6 @@ import { perchTests } from "./perch";
 import { npcTests } from "./npc";
 import { oneHandTests } from "./onehand";
 import { autopilotTests } from "./autopilot";
-physicsTests(); cameraTests(); gameTests(); envTests(); stageBTests(); speedFxTests(); walkTests(); perchTests(); npcTests(); oneHandTests(); autopilotTests();
+import { autoViewTests } from "./autoview";
+physicsTests(); cameraTests(); gameTests(); envTests(); stageBTests(); speedFxTests(); walkTests(); perchTests(); npcTests(); oneHandTests(); autopilotTests(); autoViewTests();
 finish();

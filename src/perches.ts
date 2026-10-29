@@ -10,6 +10,8 @@ export interface Surface { id: number; kind: SurfaceKind; minX: number; maxX: nu
 const CELL = 16;
 export class SurfaceIndex {
   readonly all: Surface[] = [];
+  /** 街の高さ(上に別の物が重なっていないかの確認用。buildSurfaces が設定) */
+  heightAt?: (x: number, z: number) => number;
   private cells = new Map<number, Surface[]>();
   private key(cx: number, cz: number) { return (cx + 64) * 256 + (cz + 64); }
   add(kind: SurfaceKind, minX: number, maxX: number, minZ: number, maxZ: number, top: number, edge?: boolean, outward?: [number, number]): Surface {
@@ -40,7 +42,7 @@ export class SurfaceIndex {
 
 /** 既存の街(屋根・タンク・低い障害物)から着地面を作る。E3で増える構造物は layout 側に足せば自動で含まれる。 */
 export function buildSurfaces(L: Layout): SurfaceIndex {
-  const idx = new SurfaceIndex();
+  const idx = new SurfaceIndex(); idx.heightAt = L.heightAt;
   for (const l of L.lows) { const w = Math.max(l.hw, MIN_HALF), d = Math.max(l.hd, MIN_HALF); idx.add(l.kind, l.x - w, l.x + w, l.z - d, l.z + d, l.top, l.kind === "planter" ? false : l.kind === "balcony" ? true : undefined, l.out ? [0, l.out] : undefined); } // 当たり判定と同じ幅
   for (const h of L.houses) { const w = 5, d = 4, t = L.heightAt(h.x, h.z); if (t > 0) idx.add("roof", h.x - w, h.x + w, h.z - d, h.z + d, t, false); }
   for (const a of L.apts) { const t = L.heightAt(a.x, a.z); if (t > 0) idx.add("roof", a.x - a.w / 2, a.x + a.w / 2, a.z - a.d / 2, a.z + a.d / 2, t, false); }

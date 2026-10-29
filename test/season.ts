@@ -1,5 +1,9 @@
 import { check, suite } from "./harness";
 import { SEASON_NAMES, SEASON_YEAR_SECONDS, SNOW_MAX, SeasonClock, seasonBias, seasonIndex, seasonLook, wrap01 } from "../src/season";
+import { Flight } from "../src/flight";
+import { Autopilot } from "../src/autopilot";
+import { Forage } from "../src/forage";
+import { L, world, inp } from "./common";
 import { DEFAULT_PREFS, PREFS_KEY, loadPrefs, sanitizePrefs, savePrefs } from "../src/settings";
 
 const chan = (c: number) => [(c >> 16) & 255, (c >> 8) & 255, c & 255];
@@ -36,4 +40,13 @@ export function seasonTests() {
     const q = loadPrefs(st); check("season position and speed are saved and restored", Math.abs(q.seasonPhase - 0.62) < 1e-12 && q.seasonSpeed === "fast" && JSON.parse(store[PREFS_KEY]).seasonPhase === 0.62);
     check("bad saved values fall back (speed->標準, phase->spring, wraps into 0..1)", sanitizePrefs({ seasonSpeed: "x", seasonPhase: "y" }).seasonSpeed === "normal" && sanitizePrefs({ seasonPhase: NaN }).seasonPhase === 0 && Math.abs(sanitizePrefs({ seasonPhase: 1.25 }).seasonPhase - 0.25) < 1e-12 && Math.abs(sanitizePrefs({ seasonPhase: -0.25 }).seasonPhase - 0.75) < 1e-12);
     check("old saved prefs (without season keys) still load with spring/標準", loadPrefs({ getItem: () => JSON.stringify({ control: "right" }), setItem: () => {} }).seasonPhase === 0); }
+  // 行動の偏り(オート周遊): 冬は屋根で休む割合が増え、春・秋は草地・土へ降りる割合が増える。どの季節でも飛行・着地・歩行ができ、テレポートはしない
+  { const run = (ph: number) => { let roof = 0, n = 0, nat = 0, tele = 0, crashes = 0;
+      for (const sd of [34, 35, 36, 37]) { const f = new Flight(world); f.pos.set(28, 30, 110); f.prevPos.copy(f.pos); f.vel.set(0, 0, -10); const ap = new Autopilot(L, sd); ap.setPolicy("life"); ap.setSeasonBias(seasonBias(ph)); ap.start(f); const fg = new Forage(L.groundAt, sd); const o = inp();
+        for (let i = 0; i < 60 * 600; i++) { o.flapTap = false; ap.busy = fg.active; f.step(1 / 60, fg.apply(ap.drive(f, o, 1 / 60), f, false)); if (f.mode === "landed") { n++; if (L.heightAt(f.pos.x, f.pos.z) > 3) roof++; else { const g = L.groundAt(f.pos.x, f.pos.z); if (g === "grass" || g === "soil" || g === "ridge") nat++; } } }
+        tele += ap.stats.teleports; crashes += f.crashes; }
+      return { roof: roof / Math.max(1, n), nat: nat / Math.max(1, n), n, tele, crashes }; };
+    const su = run(0.3), wi = run(0.9), au = run(0.55);
+    check("autopilot (life, 4 seeds x 10 min): winter rests on roofs more than summer; every season lands, walks and never teleports", wi.roof > su.roof && su.n > 3000 && wi.n > 3000 && au.n > 3000 && su.tele + wi.tele + au.tele === 0, `roof summer=${(100 * su.roof).toFixed(1)}% winter=${(100 * wi.roof).toFixed(1)}% tele=${su.tele + wi.tele + au.tele}`);
+    check("autopilot: autumn lands on natural ground (grass/soil/ridge) at least as much as winter", au.nat >= wi.nat * 0.9, `autumn=${(100 * au.nat).toFixed(1)}% winter=${(100 * wi.nat).toFixed(1)}%`); }
 }

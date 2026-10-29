@@ -235,7 +235,8 @@ try {
   await p.reload(); await p.waitForFunction(() => window.__game, null, { timeout: 30000 }); await sleep(800);
   const rs = await p.evaluate(() => ({ ctl: document.body.dataset.ctl, st: __game.game.state, ov: !document.getElementById("overlay").hidden, on: document.querySelector('[data-set="ctl"].on')?.dataset.val }));
   check("reload restores the control mode but waits at the start screen", rs.ctl === "left" && rs.st === "ready" && rs.ov && rs.on === "left", JSON.stringify(rs));
-  await p.evaluate(() => localStorage.setItem("vindving.prefs.v1", "{broken")); await p.reload(); await p.waitForFunction(() => window.__game, null, { timeout: 30000 }); await sleep(600);
+  // ページを閉じる/離れるときに保存し直すので、壊れた値は「次の読み込みの直前」に差し込む(1回だけ)
+  await p.context().addInitScript(() => { if (!sessionStorage.getItem("brokenOnce")) { sessionStorage.setItem("brokenOnce", "1"); localStorage.setItem("vindving.prefs.v1", "{broken"); } }); await p.evaluate(() => sessionStorage.removeItem("brokenOnce")); await p.reload(); await p.waitForFunction(() => window.__game, null, { timeout: 30000 }); await sleep(600);
   check("a corrupted saved value starts safely with defaults", (await p.evaluate(() => document.body.dataset.ctl)) === "both");
   await p.click("#ovGo"); await sleep(500);
 
@@ -339,25 +340,25 @@ try {
 
   console.log("\n# seasons (E5)");
   await p.evaluate(() => { __game.setAuto(false); __game.input.state.brake = false; __game.season.phase = 0.9; __game.applySeasonLook(true); });
-  const snowW = await p.evaluate(() => __game.world.group.children.some(c => c.material && c.material.emissiveIntensity > 0.1 && c.material.emissive.getHex() === 0xffffff));
+  const s5_snowW = await p.evaluate(() => __game.world.group.children.some(c => c.material && c.material.emissiveIntensity > 0.1 && c.material.emissive.getHex() === 0xffffff));
   await p.evaluate(() => { __game.season.phase = 0.3; __game.applySeasonLook(true); });
-  const snowS = await p.evaluate(() => __game.world.group.children.some(c => c.material && c.material.emissiveIntensity > 0.1 && c.material.emissive.getHex() === 0xffffff && c.material.map));
-  check("winter shows snow (white emissive on ground/roofs), summer does not", snowW && !snowS, `${snowW} ${snowS}`);
+  const s5_snowS = await p.evaluate(() => __game.world.group.children.some(c => c.material && c.material.emissiveIntensity > 0.1 && c.material.emissive.getHex() === 0xffffff && c.material.map));
+  check("winter shows snow (white emissive on ground/roofs), summer does not", s5_snowW && !s5_snowS, `${s5_snowW} ${s5_snowS}`);
   check("the season button shows the current season (summer = 夏)", (await p.evaluate(() => document.getElementById("btnSeason").textContent)) === "夏");
-  const sp0 = await p.evaluate(() => ({ ph: __game.season.phase, sp: __game.season.speed }));
+  const s5_sp0 = await p.evaluate(() => ({ ph: __game.season.phase, sp: __game.season.speed }));
   await p.evaluate(() => document.getElementById("btnSeason").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })));
-  const sp1 = await p.evaluate(() => ({ ph: __game.season.phase, sp: __game.season.speed, toast: document.getElementById("toast").textContent }));
-  check("tapping the season button cycles the speed (標準→高速), keeps the position, and shows a short message", sp0.sp === "normal" && sp1.sp === "fast" && Math.abs(sp1.ph - sp0.ph) < 0.01 && sp1.toast.includes("高速"), JSON.stringify([sp0, sp1]));
-  const gt0 = await p.evaluate(() => __game.game.gameTime), ph0 = await p.evaluate(() => __game.season.phase);
-  await p.waitForFunction(g => __game.game.gameTime > g + 2, gt0, { timeout: 60000 });
-  const ph1 = await p.evaluate(() => __game.season.phase), gt1 = await p.evaluate(() => __game.game.gameTime);
-  check("the season advances with game time at the chosen speed (高速: 600 s per year)", Math.abs((((ph1 - ph0) + 1) % 1) - (gt1 - gt0) / 600) < 0.004, `${ph0.toFixed(4)} -> ${ph1.toFixed(4)} over ${(gt1 - gt0).toFixed(1)} s`);
-  await p.evaluate(() => __game.input.onPause()); await sleep(300); const pa0 = await p.evaluate(() => __game.season.phase); await sleep(1500); const pa1 = await p.evaluate(() => __game.season.phase);
-  check("paused: the season does not advance", pa0 === pa1);
+  const s5_sp1 = await p.evaluate(() => ({ ph: __game.season.phase, sp: __game.season.speed, toast: document.getElementById("toast").textContent }));
+  check("tapping the season button cycles the speed (標準→高速), keeps the position, and shows a short message", s5_sp0.sp === "normal" && s5_sp1.sp === "fast" && Math.abs(s5_sp1.ph - s5_sp0.ph) < 0.01 && s5_sp1.toast.includes("高速"), JSON.stringify([s5_sp0, s5_sp1]));
+  const s5_gt0 = await p.evaluate(() => __game.game.gameTime), s5_ph0 = await p.evaluate(() => __game.season.phase);
+  await p.waitForFunction(g => __game.game.gameTime > g + 2, s5_gt0, { timeout: 60000 });
+  const s5_ph1 = await p.evaluate(() => __game.season.phase), s5_gt1 = await p.evaluate(() => __game.game.gameTime);
+  check("the season advances with game time at the chosen speed (高速: 600 s per year)", Math.abs((((s5_ph1 - s5_ph0) + 1) % 1) - (s5_gt1 - s5_gt0) / 600) < 0.004, `${s5_ph0.toFixed(4)} -> ${s5_ph1.toFixed(4)} over ${(s5_gt1 - s5_gt0).toFixed(1)} s`);
+  await p.evaluate(() => __game.input.onPause()); await sleep(300); const s5_pa0 = await p.evaluate(() => __game.season.phase); await sleep(1500); const s5_pa1 = await p.evaluate(() => __game.season.phase);
+  check("paused: the season does not advance", s5_pa0 === s5_pa1);
   check("the menu has the 季節の速さ row with the current speed highlighted", await p.evaluate(() => document.querySelector('[data-set="ss"][data-val="fast"]').classList.contains("on")));
   await p.click('[data-set="ss"][data-val="slow"]'); check("changing the speed from the menu works and is saved with the position", await p.evaluate(() => { const o = JSON.parse(localStorage.getItem("vindving.prefs.v1")); return o.seasonSpeed === "slow" && typeof o.seasonPhase === "number"; }));
-  const keep = await p.evaluate(() => __game.season.phase); await p.reload(); await p.waitForFunction(() => window.__game, null, { timeout: 30000 }); await sleep(500);
-  check("after a reload the season position and speed are restored (the game still waits at the start)", await p.evaluate(k => Math.abs(__game.season.phase - k) < 0.02 && __game.season.speed === "slow" && __game.game.state === "ready", keep));
+  const s5_keep = await p.evaluate(() => __game.season.phase); await p.reload(); await p.waitForFunction(() => window.__game, null, { timeout: 30000 }); await sleep(500);
+  check("after a reload the season position and speed are restored (the game still waits at the start)", await p.evaluate(k => Math.abs(__game.season.phase - k) < 0.02 && __game.season.speed === "slow" && __game.game.state === "ready", s5_keep));
   await p.click("#ovGo"); await sleep(300);
   check("E5: no page errors", errs.length === 0, errs.join(" | "));
 

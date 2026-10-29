@@ -251,6 +251,12 @@ export class Autopilot {
     if (this.busy) return; // ついばみ中は止まっていて正常
     if (f.walkV < 0.3 && this.stateT > 1) { this.blocked += dt; if (this.blocked > 1.2) { this.blocked = 0; if (this.r() < 0.4) o.flapTap = true; else this.walkYaw = f.yaw + (this.r() < 0.5 ? 1 : -1) * (1.6 + this.r() * 1.4); } } else this.blocked = 0;
   }
+  /** その向きに、足元より高い障害物(+2.5m)に当たるまでの距離(最大40m、2mごと) */
+  private clearDist(f: Flight, yaw: number) {
+    const ax = -Math.sin(yaw), az = -Math.cos(yaw), lim = f.pos.y + 2.5;
+    for (let d = 2; d <= 40; d += 2) if (this.L.heightAt(f.pos.x + ax * d, f.pos.z + az * d) > lim) return d;
+    return 40;
+  }
   private takeoff(f: Flight, o: FlightInput) {
     this.takeoffT += 1 / 60;
     if (f.mode === "air" && !f.hopping && f.pos.y - f.agl >= -1 && f.agl > 7 && f.speed > 8) { this.stats.takeoffs++; this.enter("cruise"); this.newWaypoint(f); return; }
@@ -260,6 +266,9 @@ export class Autopilot {
         let best = 0, bd = 9;
         for (let k = 0; k < 16; k++) { const y = f.yaw + (k / 16) * Math.PI * 2, d = Math.abs(wrap(y - f.yaw)); if (d < bd && !blockedAhead(y)) { bd = d; best = y; } }
         if (bd < 9) { o.x = this.steer(f, f.pos.x - Math.sin(best) * 30, f.pos.z - Math.cos(best) * 30); if (Math.abs(o.x) < 0.2) o.x = Math.sign(o.x || 1) * 0.2; return; }
+        // どの向きも塞がれている(建物に囲まれた場所): 最も奥まで開けている向きへ歩いて出てから飛ぶ
+        let far = 0, fy = f.yaw; for (let k = 0; k < 16; k++) { const y = f.yaw + (k / 16) * Math.PI * 2, d = this.clearDist(f, y); if (d > far) { far = d; fy = y; } }
+        this.walkYaw = fy; this.walkFor = 3 + this.r() * 3; this.enter("walk"); this.stats.walks++; return;
       }
     }
     if (!this.hopped) { o.flapTap = true; this.hopped = true; this.takeoffT = 0; this.newWaypoint(f); this.alt = Math.max(this.alt, 14); return; }   // まず小ジャンプ(行き先も決めておく)

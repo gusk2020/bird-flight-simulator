@@ -11,6 +11,8 @@ export interface WorldQuery {
   perchPoint?(id: number, t: number, out: { x: number; y: number; z: number }): void;
   wireDir?(id: number): [number, number];
 }
+/** スティックの前倒しで歩き出す閾値(これ未満の前倒しは向き替えだけ) */
+export const WALK_STICK_DEAD = 0.25;
 export interface FlightInput { x: number; y: number; flapHeld: boolean; flapTap: boolean; brake: boolean }
 export type Mode = "air" | "rollout" | "landed" | "perch";
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
@@ -58,8 +60,12 @@ export class Flight {
     }
 
     if (this.mode === "air") this.air(dt, sx, sy);
-    else if (this.mode === "perch") { this.stall = false; this.strokeT = -1; this.perchStep(dt, sx, inp.brake && ctl > 0, tap, held); this.braking = false; }
-    else { this.stall = false; this.strokeT = -1; this.ground(dt, sx, inp.brake && ctl > 0, tap, held); this.braking = this.mode === "rollout" && inp.brake && ctl > 0; }
+    else { // 地上・電線: 歩くボタン(長押し)か、スティックを前へ倒すと歩く。前へ倒した量で速さが変わる
+      const walk = this.braking ? 1 : clamp((sy - WALK_STICK_DEAD) / (1 - WALK_STICK_DEAD - 0.3), 0, 1);
+      this.stall = false; this.strokeT = -1;
+      if (this.mode === "perch") { this.perchStep(dt, sx, walk > 0, tap, held); this.braking = false; }
+      else { this.ground(dt, sx, walk, tap, held); this.braking = this.mode === "rollout" && inp.brake && ctl > 0; }
+    }
     this.hopHint = null;
     this.finish();
   }
@@ -180,11 +186,13 @@ export class Flight {
       this.pos.y = gh + P.feetOffset; this.hopping = false; this.hopT = -1;
       if (-this.vel.y > P.safeSink) { this.mode = "air"; this.touchdown(); return; }
       const hs = Math.hypot(this.vel.x, this.vel.z); this.vel.y = 0;
-      if (hs > 0.3) this.mode = "rollout"; else { this.mode = "landed"; this.vel.set(0, 0, 0); }
+      // 小ジャンプの着地は、歩く速さ程度ならそのまま歩行へつなぐ(滑走で操作が効かない時間を作らない)
+      if (hs > P.walkSpeed + 2) this.mode = "rollout"; else { this.mode = "landed"; this.walkV = Math.min(hs, P.walkSpeed); this.vel.set(0, 0, 0); }
     }
   }
 
-  private ground(dt: number, sx: number, walkHeld: boolean, tap: boolean, flapHeld: boolean) {
+  private ground(dt: number, sx: number, walk: number, tap: boolean, flapHeld: boolean) {
+    const walkHeld = walk > 0;
     _f.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
     // 押下を検知できない入力(押しっぱなしだけ)でも、長押しなら離陸する
     this.groundHold = flapHeld ? this.groundHold + dt : 0;
@@ -205,14 +213,15 @@ export class Flight {
     }
     let hs = Math.max(0, this.vel.dot(_f));
     if (this.mode === "rollout") {
-      hs = Math.max(0, hs - (P.rolloutDecel + (walkHeld ? P.rolloutBrake : 0)) * dt);
+      hs = Math.max(0, hs - (P.rolloutDecel + (this.braking ? P.rolloutBrake : 0)) * dt);
       this.yaw -= sx * P.groundTurn * Math.min(1, hs / 4) * dt;
-      if (hs < 0.3) { hs = 0; this.mode = "landed"; }
-      this.walkV = 0;
+      if (hs < 0.3) { hs = 0; this.mode = "landed"; this.walkV = 0; }
+      else if (walkHeld && hs < P.walkSpeed + 1) { this.mode = "landed"; this.walkV = Math.min(hs, P.walkSpeed); } // 減速しきる前でも、歩く入力があれば歩行へ
+      else this.walkV = 0;
     } else {
       // 歩行: 歩くボタンで前進。スティックで向きを変える
       this.yaw -= sx * P.groundTurn * dt;
-      const target = walkHeld ? P.walkSpeed : 0;
+      const target = P.walkSpeed * walk;
       this.walkV += clamp(target - this.walkV, -P.walkDecel * dt, P.walkAccel * dt);
       hs = this.walkV; this.walkPhase += hs * dt * 4.5;
     }

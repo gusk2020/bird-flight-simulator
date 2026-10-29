@@ -149,7 +149,7 @@ export class Autopilot {
     }
     // 舵の平滑化(小刻みな操作・進路の反転を防ぐ)
     const k = 1 - Math.exp(-dt / 0.25); this.sx += (o.x - this.sx) * k; this.sy += (o.y - this.sy) * (1 - Math.exp(-dt / 0.35));
-    o.x = this.sx; o.y = this.sy;
+    o.x = this.sx; o.y = f.mode === "air" ? this.sy : 0; // 地上では前倒し=歩行になるので、オートは歩くボタン(brake)だけで歩く
     return o;
   }
 

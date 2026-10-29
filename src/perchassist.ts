@@ -1,4 +1,4 @@
-import type { Flight, FlightInput } from "./flight";
+import { WALK_STICK_DEAD, type Flight, type FlightInput } from "./flight";
 import { PHYS as P } from "./params";
 import type { Surface, SurfaceIndex } from "./perches";
 
@@ -172,7 +172,7 @@ export class PerchAssist {
   private edge(inp: FlightInput, f: Flight) {
     const s = this.idx.under(f.pos.x, f.pos.y - P.feetOffset, f.pos.z, this.under);
     if (!s || !s.edge) return;
-    if (inp.brake) { // 歩いている
+    if (inp.brake || inp.y > WALK_STICK_DEAD) { // 歩いている(長押し/スティック前倒し)
       // 縁の軸に沿う向き(前向き/後ろ向きのうち近い方)へ。中心線からずれているぶん、中心へ少し斜めに向ける
       const cx = (s.minX + s.maxX) / 2, cz = (s.minZ + s.maxZ) / 2, a1 = s.axisAlongX ? -Math.PI / 2 : 0;
       const e1 = wrap(a1 - f.yaw), e2 = wrap(a1 + Math.PI - f.yaw), plus = Math.abs(e1) < Math.abs(e2), sgn = plus ? 1 : -1;
@@ -181,7 +181,7 @@ export class PerchAssist {
       const yawDes = Math.atan2(-hx, -hz), e = wrap(yawDes - f.yaw);
       if (Math.abs(wrap((plus ? e1 : e2))) < PERCH.edgeAlign && Math.abs(inp.x) < 0.8) { inp.x += (-clamp(e * 2.5, -1, 1) - inp.x) * 0.8; this.stats.edgeAligns++; }
       const ax = f.pos.x - Math.sin(f.yaw) * 0.5, az = f.pos.z - Math.cos(f.yaw) * 0.5; // 0.5m先
-      if (ax < s.minX - 0.02 || ax > s.maxX + 0.02 || az < s.minZ - 0.02 || az > s.maxZ + 0.02) { inp.brake = false; this.stats.edgeStops++; } // 端: 空中へ歩き出さない
+      if (ax < s.minX - 0.02 || ax > s.maxX + 0.02 || az < s.minZ - 0.02 || az > s.maxZ + 0.02) { inp.brake = false; inp.y = Math.min(inp.y, 0); this.stats.edgeStops++; } // 端: 空中へ歩き出さない
     }
   }
 }

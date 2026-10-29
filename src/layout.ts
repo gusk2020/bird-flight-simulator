@@ -4,7 +4,7 @@ export interface Collider { minX: number; maxX: number; minZ: number; maxZ: numb
 export interface House { x: number; z: number; ry: number; floors: 1 | 2; wall: number; roof: number }
 export interface Apt { x: number; z: number; ry: number; floors: number; wall: number; w: number; d: number }
 export interface Tree { x: number; z: number; s: number; tint: number }
-export interface Low { x: number; z: number; hw: number; hd: number; top: number; kind: "bench" | "wall" | "planter" | "balcony" | "rail" | "fence" | "sign" | "rock" | "branch" | "pole" }
+export interface Low { x: number; z: number; hw: number; hd: number; top: number; kind: "bench" | "wall" | "planter" | "balcony" | "rail" | "fence" | "sign" | "rock" | "branch" | "pole"; /** 壁面の外側(z方向の符号) */ out?: number }
 export interface Wire { ax: number; az: number; bx: number; bz: number; off: number; alongX: boolean }
 export const WIRE_TOP = 8.3, WIRE_SAG = 1.2, WIRE_SPACING = 0.9;
 export interface Layout {
@@ -123,15 +123,15 @@ export function generateLayout(seed = 7): Layout {
     for (const lv of levels) {
       if (r3() < 0.25) continue;
       const side = r3() < 0.6 ? 1 : -1, bx = a.x + (r3() - 0.5) * 12, bz = a.z + side * (APT_D / 2 + 0.7), top = FLOOR_H * lv;
-      L.lows.push({ x: bx, z: bz, hw: 2.2, hd: 0.7, top, kind: "balcony" }); box(bx, bz, 2.2, 0.7, top);
+      L.lows.push({ x: bx, z: bz, hw: 2.2, hd: 0.7, top, kind: "balcony", out: side }); box(bx, bz, 2.2, 0.7, top);
       const rz = bz + side * 0.62;
-      L.lows.push({ x: bx, z: rz, hw: 2.2, hd: 0.04, top: top + 1.0, kind: "rail" }); box(bx, rz, 2.2, 0.04, top + 1.0);
+      L.lows.push({ x: bx, z: rz, hw: 2.2, hd: 0.04, top: top + 1.0, kind: "rail", out: side }); box(bx, rz, 2.2, 0.04, top + 1.0);
     }
   }
   for (const lot of L.lots) {
     if (lot.park) continue;
     // 柵: 区画の縁(道路側)に沿って低い柵。壁とは別の辺
-    if (r3() < 0.6) { const sx = r3() < 0.5 ? -1 : 1; L.lows.push({ x: lot.x + sx * 21.8, z: lot.z + (r3() - 0.5) * 18, hw: 0.05, hd: 3.2, top: 1.15, kind: "fence" }); const l = L.lows[L.lows.length - 1]; box(l.x, l.z, l.hw, l.hd, l.top); }
+    if (r3() < 0.6) { const sx = r3() < 0.5 ? -1 : 1; L.lows.push({ x: lot.x + sx * 21.3, z: lot.z + (r3() - 0.5) * 18, hw: 0.05, hd: 3.2, top: 1.15, kind: "fence" }); const l = L.lows[L.lows.length - 1]; box(l.x, l.z, l.hw, l.hd, l.top); }
     // 看板: 区画の角に近い支柱つきの小さな看板(上面が足場)
     if (r3() < 0.35) { const sx = r3() < 0.5 ? -1 : 1, sz = r3() < 0.5 ? -1 : 1; L.lows.push({ x: lot.x + sx * 19, z: lot.z + sz * 21.2, hw: 0.6, hd: 0.07, top: 2.3, kind: "sign" }); const l = L.lows[L.lows.length - 1]; box(l.x, l.z, l.hw, l.hd, l.top); }
     // 岩: ときどき区画の隅に

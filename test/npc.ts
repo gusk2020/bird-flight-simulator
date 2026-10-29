@@ -5,6 +5,8 @@ import { ROAD } from "../src/layout";
 
 const P = (x = 28, y = 15, z = 110, speed = 8, yaw = 0, air = true): Player => ({ x, y, z, speed, yaw, air });
 const inColl = (x: number, y: number, z: number, margin = 0.05) => L.colliders.some(c => x > c.minX && x < c.maxX && z > c.minZ && z < c.maxZ && y < c.top - margin);
+// 電柱・看板など幅0.6m未満の細いものは建物ではない(歩行者が脇を通るだけ)
+const inBig = (x: number, y: number, z: number, margin = 0.05) => L.colliders.some(c => c.maxX - c.minX >= 0.6 && c.maxZ - c.minZ >= 0.6 && x > c.minX && x < c.maxX && z > c.minZ && z < c.maxZ && y < c.top - margin);
 const onRoad = (x: number, z: number) => L.roads.some(r => Math.abs(x - r) <= ROAD / 2 + 0.01) || L.roads.some(r => Math.abs(z - r) <= ROAD / 2 + 0.01);
 
 export function npcTests() {
@@ -42,7 +44,7 @@ export function npcTests() {
 
   // 歩行者
   { const w = new NpcWorld(L, 2), p = P(28, 40, 110); w.setLevel(3, p); let bad = 0, off = 0, n = 0;
-    for (let i = 0; i < 60 * 120; i++) { w.update(1 / 60, p, 12); if (i % 20 === 0) for (const q of w.visiblePeds()) { n++; if (inColl(q.x, 0.1, q.z, -0.01) || inColl(q.x, 1, q.z, 0.01)) bad++; const e = Math.max(Math.abs(q.x - q.lx), Math.abs(q.z - q.lz)); if (Math.abs(e - SIDEWALK_HALF) > 0.01) off++; } }
+    for (let i = 0; i < 60 * 120; i++) { w.update(1 / 60, p, 12); if (i % 20 === 0) for (const q of w.visiblePeds()) { n++; if (inBig(q.x, 0.1, q.z, -0.01) || inBig(q.x, 1, q.z, 0.01)) bad++; const e = Math.max(Math.abs(q.x - q.lx), Math.abs(q.z - q.lz)); if (Math.abs(e - SIDEWALK_HALF) > 0.01) off++; } }
     check("pedestrians stay on the sidewalk loop and never enter buildings", bad === 0 && off === 0 && n > 1000, `${n} samples, ${bad} in buildings, ${off} off the path`); }
   { const w = new NpcWorld(L, 2), p = P(28, 40, 110); w.setLevel(2, p); const q = w.peds[0]; q.on = true; q.pause = 0;
     const lowNear = P(q.x + 3, 1.5, q.z, 2, 0, true); const x0 = q.x, z0 = q.z; w.update(0.016, lowNear, 12); for (let i = 0; i < 30; i++) w.update(1 / 60, lowNear, 12);

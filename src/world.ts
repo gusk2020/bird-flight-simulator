@@ -1,7 +1,8 @@
 import * as THREE from "three";
-import { generateLayout, Layout, PITCH, ROAD, LOT, LOT_TOP, HOUSE_W, HOUSE_D, FLOOR_H, houseHeight, APT_W, APT_D } from "./layout";
+import { generateLayout, Layout, PADDY, PITCH, ROAD, LOT, LOT_TOP, HOUSE_W, HOUSE_D, FLOOR_H, houseHeight, APT_W, APT_D } from "./layout";
 
-export interface World extends Layout { group: THREE.Group; clouds: THREE.Group; setLights(level: number): void; lightsLevel(): number; updateLOD(x: number, z: number, force?: boolean): void; lodCounts(): { near: number; far: number } }
+export interface PaddyLook { growth: number; rice: number; water: number; waterColor?: number }
+export interface World extends Layout { setPaddyLook(p: PaddyLook): void; group: THREE.Group; clouds: THREE.Group; setLights(level: number): void; lightsLevel(): number; updateLOD(x: number, z: number, force?: boolean): void; lodCounts(): { near: number; far: number } }
 
 /** 4x4窓タイルのテクスチャ(色)と、点灯している窓だけを光らせる発光マップ */
 function wallTextures(): { map: THREE.CanvasTexture; emissive: THREE.CanvasTexture } {
@@ -77,8 +78,32 @@ export function buildWorld(): World {
   }
   // 区画(歩道・敷地)
   const lotMat = lam(0xffffff, { map: speckle(LOT / 6, LOT / 6, "#a7a99f", 34) }), parkMat = lam(0xffffff, { map: speckle(LOT / 6, LOT / 6, "#6f9a52", 44) });
-  group.add(inst(new THREE.BoxGeometry(LOT, LOT_TOP, LOT), lotMat, L.lots.filter(l => !l.park).map(l => ({ x: l.x, y: LOT_TOP / 2, z: l.z }))));
-  group.add(inst(new THREE.BoxGeometry(LOT, LOT_TOP, LOT), parkMat, L.lots.filter(l => l.park).map(l => ({ x: l.x, y: LOT_TOP / 2, z: l.z }))));
+  const lotBox = new THREE.BoxGeometry(LOT, LOT_TOP, LOT), at = (l: { x: number; z: number }) => ({ x: l.x, y: LOT_TOP / 2, z: l.z });
+  const soilMat = lam(0xffffff, { map: speckle(LOT / 6, LOT / 6, "#8a7554", 30) }), ridgeMat = lam(0xffffff, { map: speckle(LOT / 6, LOT / 6, "#86955a", 26) });
+  group.add(inst(lotBox, lotMat, L.lots.filter(l => l.use === "town").map(at)), inst(lotBox, parkMat, L.lots.filter(l => l.use === "park").map(at)));
+  group.add(inst(lotBox, soilMat, L.lots.filter(l => l.use === "vacant").map(at)), inst(lotBox, ridgeMat, L.lots.filter(l => l.use === "paddy").map(at)));
+  // 空き地: 草むら(平たい緑の斑)と雑草の束。座標は区画ごとに決まった乱数で
+  { let sd = 31; const rn = () => ((sd = (sd * 1664525 + 1013904223) >>> 0) / 4294967296), patches: { x: number; y: number; z: number; sx: number; sz: number; color: number }[] = [], tufts: { x: number; y: number; z: number; ry: number; sy: number; color: number }[] = [];
+    for (const l of L.lots.filter(q => q.use === "vacant")) {
+      for (let k = 0; k < 14; k++) { const r = 1.5 + rn() * 3.2; patches.push({ x: l.x + (rn() - 0.5) * 40, y: LOT_TOP + 0.012, z: l.z + (rn() - 0.5) * 40, sx: r, sz: r * (0.6 + rn() * 0.5), color: rn() < 0.7 ? 0x6f9a4a : 0x8aa457 }); }
+      for (let k = 0; k < 90; k++) tufts.push({ x: l.x + (rn() - 0.5) * 42, y: LOT_TOP, z: l.z + (rn() - 0.5) * 42, ry: rn() * 6, sy: 0.6 + rn() * 1.2, color: rn() < 0.5 ? 0x5f8a3c : 0x7a9a45 });
+    }
+    const disc = new THREE.CircleGeometry(1, 7); disc.rotateX(-Math.PI / 2);
+    group.add(inst(disc, lam(0xffffff), patches));
+    const tuft = new THREE.ConeGeometry(0.2, 0.7, 3, 1, true); tuft.translate(0, 0.35, 0);
+    group.add(inst(tuft, lam(0xffffff), tufts)); }
+  // 田んぼ: 3×3 の水面(あぜで仕切る)と、その上の稲。稲と水は setPaddyLook で季節に合わせて変える
+  const e = LOT / 2 - PADDY.border, cell = (2 * e - 2 * PADDY.ridge) / PADDY.plots, pr = cell / 2 + PADDY.ridge / 2;
+  const waterMat = new THREE.MeshLambertMaterial({ color: 0x6f93a8, transparent: true, opacity: 0.85, depthWrite: false }), waterGeo = new THREE.PlaneGeometry(cell, cell); waterGeo.rotateX(-Math.PI / 2);
+  const plots: { x: number; y: number; z: number }[] = [], rice: { x: number; y: number; z: number; ry: number; sy: number }[] = []; let sd2 = 77; const rn2 = () => ((sd2 = (sd2 * 1664525 + 1013904223) >>> 0) / 4294967296);
+  for (const l of L.lots.filter(q => q.use === "paddy")) for (const ix of [-1, 0, 1]) for (const iz of [-1, 0, 1]) {
+    const px = l.x + ix * 2 * pr, pz = l.z + iz * 2 * pr; plots.push({ x: px, y: LOT_TOP + 0.014, z: pz });
+    for (let a = 0; a < 6; a++) for (let b = 0; b < 6; b++) rice.push({ x: px + (a - 2.5) * (cell / 6) + (rn2() - 0.5) * 0.6, y: LOT_TOP, z: pz + (b - 2.5) * (cell / 6) + (rn2() - 0.5) * 0.6, ry: rn2() * 6, sy: 0.85 + rn2() * 0.3 });
+  }
+  const waterMesh = inst(waterGeo, waterMat, plots); waterMesh.renderOrder = 1; group.add(waterMesh);
+  const riceGeo = new THREE.ConeGeometry(0.2, 0.9, 3, 1, true); riceGeo.translate(0, 0.45, 0); // 稲は三角の筒(3枚)で足りる
+  const riceMat = lam(0x6fae4a), riceMesh = inst(riceGeo, riceMat, rice); riceMesh.scale.y = 0.8; group.add(riceMesh);
+  const setPaddyLook = (p: PaddyLook) => { riceMesh.scale.set(1, Math.max(0.02, p.growth), 1); riceMesh.visible = p.growth > 0.03; riceMat.color.setHex(p.rice); waterMat.opacity = p.water; waterMesh.visible = p.water > 0.02; if (p.waterColor !== undefined) waterMat.color.setHex(p.waterColor); };
   // 道路標示
   const mark = lam(0xe9e9e4, { polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
   const dashes: { x: number; y: number; z: number; ry?: number }[] = [], stripes: typeof dashes = [];
@@ -198,5 +223,5 @@ export function buildWorld(): World {
     side.emissiveIntensity = 0.9 * lv;
     lampMat.color.setHex(0x777777).lerp(new THREE.Color(0xffd98a), lv);
   };
-  return Object.assign(L, { group, clouds, setLights, lightsLevel: () => lightsLv, updateLOD, lodCounts: () => ({ near: nNear, far: nFar }) }) as World;
+  return Object.assign(L, { setPaddyLook, group, clouds, setLights, lightsLevel: () => lightsLv, updateLOD, lodCounts: () => ({ near: nNear, far: nFar }) }) as World;
 }

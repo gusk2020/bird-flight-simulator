@@ -21,7 +21,7 @@ export class BirdModel {
   private tail = new THREE.Group();
   private shadow: THREE.Mesh;
   private wingAng = 0.15; private fold = 0; private legExt = 0; private tailPitch = 0;
-  private head!: THREE.Mesh; private neck!: THREE.Mesh; private t = 0;
+  private head!: THREE.Mesh; private neck!: THREE.Mesh; private peckPrev = 0; private beak!: THREE.Mesh; private eyes: THREE.Mesh[] = []; private t = 0;
 
   constructor() {
     const grey = mat(0x8d94a0), dark = mat(0x5f6a7a), light = mat(0xb7bcc6), sheen = mat(0x5f9a8c), wingM = mat(0x858c98, THREE.DoubleSide), bar = mat(0x2b303a, THREE.DoubleSide);
@@ -31,8 +31,8 @@ export class BirdModel {
     this.head = ball(0.14, dark, 1, 1, 1, [0, 0.17, -0.52]); this.neck = ball(0.13, sheen, 1.1, 0.7, 0.9, [0, 0.09, -0.42]);
     r.add(this.head, this.neck);
     r.add(ball(0.12, mat(0xe8e8ee), 1.1, 0.4, 1.0, [0, 0.1, 0.33]));
-    const beak = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.13, 6), mat(0xcbbba0)); beak.rotation.x = -Math.PI / 2; beak.position.set(0, 0.16, -0.69); r.add(beak);
-    for (const s of [-1, 1]) r.add(ball(0.03, mat(0xe0892a), 1, 1, 1, [s * 0.085, 0.2, -0.58]));
+    const beak = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.13, 6), mat(0xcbbba0)); beak.rotation.x = -Math.PI / 2; beak.position.set(0, 0.16, -0.69); r.add(beak); this.beak = beak;
+    for (const s of [-1, 1]) { const e = ball(0.03, mat(0xe0892a), 1, 1, 1, [s * 0.085, 0.2, -0.58]); r.add(e); this.eyes.push(e); }
     // 尾
     this.tail.position.set(0, 0.02, 0.5);
     const t = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.02, 0.4), dark); t.position.z = 0.2;
@@ -63,7 +63,7 @@ export class BirdModel {
   attach(scene: THREE.Scene) { scene.add(this.group, this.shadow); }
   setVisible(v: boolean) { this.group.visible = v; }
 
-  update(dt: number, f: Flight, pos: THREE.Vector3, groundY: number) {
+  update(dt: number, f: Flight, pos: THREE.Vector3, groundY: number, peck = 0) {
     this.group.position.copy(pos);
     this.group.rotation.set(f.pitch, f.yaw, f.roll, "YXZ");
     const air = f.mode === "air"; this.t += dt;
@@ -90,6 +90,14 @@ export class BirdModel {
       this.head.position.z = -0.52 + Math.sin(ph) * 0.06 * walkAmt; this.neck.position.z = -0.42 + Math.sin(ph) * 0.05 * walkAmt;
       this.root.position.y = Math.abs(Math.sin(ph)) * 0.025 * walkAmt;
     } else { this.head.position.z = -0.52; this.neck.position.z = -0.42; this.root.position.y = 0; }
+    // ついばみ: 頭・くちばし・目を前下へ(peck=0..1)。歩行の揺れの上に重ねる
+    if (peck > 0.001 || this.peckPrev > 0.001) {
+      const dy = -0.2 * peck, dz = -0.12 * peck;
+      this.head.position.y = 0.17 + dy; this.head.position.z += dz; this.neck.position.y = 0.09 + dy * 0.55; this.neck.position.z += dz * 0.6;
+      this.beak.position.set(0, 0.16 + dy - 0.03 * peck, -0.69 + this.head.position.z + 0.52); this.beak.rotation.x = -Math.PI / 2 - 0.9 * peck;
+      for (let i = 0; i < 2; i++) this.eyes[i].position.set(i ? 0.085 : -0.085, 0.2 + dy, -0.58 + dz);
+    }
+    this.peckPrev = peck;
     // 尾: ブレーキで下げる
     this.tailPitch += ((f.braking ? 0.5 : 0) - this.tailPitch) * (1 - Math.exp(-10 * dt));
     this.tail.rotation.x = this.tailPitch; this.tail.scale.x = 1 + this.tailPitch * 0.8;

@@ -8,7 +8,7 @@ export function structureTests() {
   const by = (k: string) => L.lows.filter(l => l.kind === k);
   const kinds = ["bench", "wall", "planter", "balcony", "rail", "fence", "sign", "rock", "branch", "pole"];
   check("every kind is present", kinds.every(k => by(k).length > 0), kinds.map(k => `${k}:${by(k).length}`).join(" "));
-  check("the original town is untouched (houses/apts/trees/poles counts and first 62 lows)", L.houses.length === 108 && L.apts.length === 29 && L.trees.length === 783 && L.poles.length === 224 && L.lows.slice(0, 62).every(l => ["bench", "wall", "planter"].includes(l.kind)));
+  check("poles are unchanged and the first lows are still benches/walls/planters", L.poles.length === 224 && L.lows.slice(0, 40).every(l => ["bench", "wall", "planter"].includes(l.kind)));
   const L2 = generateLayout(); check("the layout is reproducible from the seed", L2.lows.length === L.lows.length && L2.lows.every((l, i) => l.x === L.lows[i].x && l.z === L.lows[i].z && l.top === L.lows[i].top));
   // 低い足場と高い足場が混在
   const tops = L.lows.map(l => l.top);
@@ -24,7 +24,7 @@ export function structureTests() {
   check("lot-side objects stay inside their lot (never on a road)", L.lows.filter(l => ["fence", "sign", "rock"].includes(l.kind) && !(Math.abs(l.x) < 12 && Math.abs(l.z) < 25)).every(l => { const ix = Math.round(l.x / PITCH), iz = Math.round(l.z / PITCH); return Math.abs(l.x - ix * PITCH) < LOT / 2 && Math.abs(l.z - iz * PITCH) < LOT / 2; }) && onRoad.length === 0);
   // ベランダは集合住宅の壁面に付き、手すりはその外縁
   check("balconies attach to an apartment facade and rails sit on the outer edge", by("balcony").every(b => L.apts.some(a => Math.abs(b.x - a.x) < a.w / 2 + 0.1 && Math.abs(Math.abs(b.z - a.z) - (a.d / 2 + 0.7)) < 0.01)) && by("rail").every(r => by("balcony").some(b => Math.abs(b.x - r.x) < 1e-6 && Math.abs(r.top - (b.top + 1)) < 1e-6 && Math.abs(Math.abs(r.z - b.z) - 0.62) < 1e-6)));
-  check("branches belong to big trees; pole tops sit on real poles", by("branch").every(b => L.trees.some(t => t.s >= 1.7 && Math.hypot(b.x - t.x, b.z - t.z) < 1.0)) && by("pole").every(p => L.poles.some(q => q.x === p.x && q.z === p.z)));
+  check("branches belong to big park trees; pole tops sit on real poles", by("branch").every(b => L.trees.some(t => t.s >= 1.7 && Math.abs(t.x) <= 19 && Math.hypot(b.x - t.x, b.z - t.z) < 1.0)) && by("pole").every(p => L.poles.some(q => q.x === p.x && q.z === p.z)));
   // 着地面・歩行
   const idx = buildSurfaces(L);
   const sk = new Set(idx.all.map(s => s.kind));

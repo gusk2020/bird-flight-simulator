@@ -323,6 +323,20 @@ try {
   check("landed: the camera is closer to the bird than in flight", dGround < dAir - 0.8, `${dAir.toFixed(2)} -> ${dGround.toFixed(2)}`);
   check("E2: no page errors", errs.length === 0, errs.join(" | "));
 
+  console.log("\n# fields and foraging (E4)");
+  await p.evaluate(() => { __game.setAuto(false); __game.input.state.brake = false; });
+  const vac = await p.evaluate(() => { const l = __game.world.lots.find(q => q.use === "vacant"); return { x: l.x, z: l.z }; });
+  await p.evaluate(v => { const f = __game.flight; f.reset(); f.pos.set(v.x - 12, __game.world.heightAt(v.x - 12, v.z) + 0.32, v.z); f.prevPos.copy(f.pos); f.mode = "landed"; f.vel.set(0, 0, 0); f.yaw = -Math.PI / 2; __game.forage.reset(); __game.forage.stats.sequences = 0; __game.forage.stats.pecks = 0; __game.input.state.brake = true; }, vac);
+  await p.waitForFunction(() => __game.forage.stats.pecks >= 2, null, { timeout: 60000 }).catch(() => {});
+  const fg = await p.evaluate(() => ({ seq: __game.forage.stats.sequences, pecks: __game.forage.stats.pecks, ground: __game.world.groundAt(__game.flight.pos.x, __game.flight.pos.z) }));
+  check("walking on a vacant lot (soil): the bird stops and pecks", fg.pecks >= 2 && fg.seq >= 1 && fg.ground === "soil", JSON.stringify(fg));
+  const pad = await p.evaluate(() => { const l = __game.world.lots.find(q => q.use === "paddy"); return { x: l.x, z: l.z }; });
+  await p.evaluate(v => { const f = __game.flight; f.reset(); f.pos.set(v.x + 21.5, __game.world.heightAt(v.x + 21.5, v.z) + 0.32, v.z); f.prevPos.copy(f.pos); f.mode = "landed"; f.vel.set(0, 0, 0); f.yaw = Math.PI / 2; __game.input.state.brake = true; }, pad);
+  await p.waitForFunction(() => __game.game.steps > 0, null, { timeout: 5000 }); const pst0 = await p.evaluate(() => __game.game.steps); await p.waitForFunction(s => __game.game.steps > s + 300, pst0, { timeout: 60000 });
+  check("walking toward a paddy: the bird stays out of the water", await p.evaluate(() => !__game.world.waterAt(__game.flight.pos.x, __game.flight.pos.z) && __game.flight.mode === "landed"));
+  await p.evaluate(() => { __game.input.state.brake = false; });
+  check("E4: no page errors", errs.length === 0, errs.join(" | "));
+
   console.log("\n# time of day (A2)");
   const seen = [];
   for (let i = 0; i < 4; i++) { await p.click("#btnTime"); await sleep(1500); seen.push(await p.evaluate(() => ({ label: document.getElementById("btnTime").textContent, e: __game.env() }))); }

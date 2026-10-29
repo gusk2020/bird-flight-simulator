@@ -6,7 +6,7 @@ import { FollowCam } from "../src/camera";
 import { generateLayout } from "../src/layout";
 
 const L = generateLayout();
-const world = { colliders: L.colliders, heightAt: L.heightAt, perchAt: L.perchAt, perchPoint: L.perchPoint, wireDir: L.wireDir };
+const world = { colliders: L.colliders, heightAt: L.heightAt, perchAt: L.perchAt, perchPoint: L.perchPoint, wireDir: L.wireDir, waterAt: L.waterAt };
 export interface Shake { birdP2P: number; camP2P: number; ratio: number; birdHF: number; camHF: number; hfRatio: number; viewHF: number; maxLag: number; minAboveGround: number; frames: number }
 /** 羽ばたき周波数(タップ間隔42フレーム=約1.43Hz)とその倍音での振幅(ロックイン検出、p2p換算)。ゆっくりした高度変化は含まない。 */
 function hf(v0: number[]) { const W = 42, v: number[] = []; for (let i = W; i < v0.length - W; i++) { let m = 0; for (let k = -W; k <= W; k++) m += v0[i + k]; v.push(v0[i] - m / (2 * W + 1)); } let tot = 0; for (const mult of [1, 2]) { const w = 2 * Math.PI * mult * 60 / 42 / 60; let c = 0, s = 0; for (let i = 0; i < v.length; i++) { c += v[i] * Math.cos(w * i); s += v[i] * Math.sin(w * i); } tot += (2 * Math.hypot(c, s) / v.length) ** 2; } return 2 * Math.sqrt(tot); }

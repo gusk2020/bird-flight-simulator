@@ -7,13 +7,21 @@ export interface Tree { x: number; z: number; s: number; tint: number }
 export interface Low { x: number; z: number; hw: number; hd: number; top: number; kind: "bench" | "wall" | "planter" | "balcony" | "rail" | "fence" | "sign" | "rock" | "branch" | "pole"; /** 壁面の外側(z方向の符号) */ out?: number }
 export interface Wire { ax: number; az: number; bx: number; bz: number; off: number; alongX: boolean }
 export const WIRE_TOP = 8.3, WIRE_SAG = 1.2, WIRE_SPACING = 0.9;
+/** 区画の使われ方。town=住宅・集合住宅、park=公園、vacant=空き地、paddy=田んぼ */
+export type LotUse = "town" | "park" | "vacant" | "paddy";
+export interface Lot { x: number; z: number; park: boolean; use: LotUse }
+/** paved=敷地の舗装・歩道 road=道路 grass=草地 soil=土 ridge=あぜ道 water=水田の水面 */
+export type GroundKind = "paved" | "road" | "grass" | "soil" | "ridge" | "water";
+export const PADDY = { border: 2, ridge: 1.2, plots: 3 }; // 田んぼ: 縁のあぜ幅 / 仕切りのあぜ幅 / 3×3 の区画
 export interface Layout {
   wires: Wire[]; perchAt(x: number, y: number, z: number, r: number): { id: number; t: number } | null;
   perchPoint(id: number, t: number, out: { x: number; y: number; z: number }): void; wireDir(id: number): [number, number];
   lows: Low[];
   colliders: Collider[]; houses: House[]; apts: Apt[]; tanks: { x: number; z: number; y: number }[];
   trees: Tree[]; poles: { x: number; z: number }[]; poleLines: [number, number][][];
-  lots: { x: number; z: number; park: boolean }[]; roads: number[];
+  lots: Lot[]; roads: number[];
+  /** 地面の種類(歩ける・ついばめるか、水か)。座標は世界座標 */
+  groundAt(x: number, z: number): GroundKind; waterAt(x: number, z: number): boolean;
   heightAt(x: number, z: number): number;
 }
 export const MIN_HALF = 0.25; // 当たり判定・着地面の最小の半幅 m
@@ -32,15 +40,22 @@ export function houseHeight(floors: number) { return floors === 2 ? 6.2 : 3.2; }
 export function generateLayout(seed = 7): Layout {
   const r = rng(seed);
   const pick = <T,>(a: T[]) => a[Math.floor(r() * a.length)];
-  const L: Layout = { wires: [], perchAt, perchPoint, wireDir, lows: [], colliders: [], houses: [], apts: [], tanks: [], trees: [], poles: [], poleLines: [], lots: [], roads: [], heightAt };
+  const L: Layout = { wires: [], perchAt, perchPoint, wireDir, lows: [], colliders: [], houses: [], apts: [], tanks: [], trees: [], poles: [], poleLines: [], lots: [], roads: [], heightAt, groundAt, waterAt };
   for (let k = 0; k < 8; k++) L.roads.push((k - 3.5) * PITCH);
   // 当たり判定は、見た目が細くても半幅 MIN_HALF 以上にする(体の半径0.35mの鳥が、幅20cmの壁の上の数cmの帯へ中心を入れるのは非現実的なので、乗れる幅に余裕を持たせる)
   const box = (x: number, z: number, hw: number, hd: number, top: number) => { const w = Math.max(hw, MIN_HALF), d = Math.max(hd, MIN_HALF);
     L.colliders.push({ minX: x - w, maxX: x + w, minZ: z - d, maxZ: z + d, top }); };
+  // E4: 空き地と田んぼにする区画を、別の乱数列で決める(外側の2周から)。選ばれた区画も元の乱数は同じだけ消費して捨てるので、他の区画の配置は変わらない。
+  const rs = rng(seed + 3999), cand: [number, number][] = [];
+  for (let i = -HALF; i <= HALF; i++) for (let j = -HALF; j <= HALF; j++) if (Math.max(Math.abs(i), Math.abs(j)) >= 2) cand.push([i, j]);
+  for (let k = cand.length - 1; k > 0; k--) { const m = Math.floor(rs() * (k + 1)); [cand[k], cand[m]] = [cand[m], cand[k]]; }
+  const useOf = new Map<string, LotUse>(); cand.slice(0, 5).forEach(([i, j]) => useOf.set(i + "," + j, "paddy")); cand.slice(5, 10).forEach(([i, j]) => useOf.set(i + "," + j, "vacant"));
+  const mark = { houses: 0, apts: 0, colliders: 0, tanks: 0, trees: 0 };
   for (let i = -HALF; i <= HALF; i++) for (let j = -HALF; j <= HALF; j++) {
     const cx = i * PITCH, cz = j * PITCH, ring = Math.max(Math.abs(i), Math.abs(j));
-    const park = i === 0 && j === 0;
-    L.lots.push({ x: cx, z: cz, park });
+    const park = i === 0 && j === 0, use: LotUse = park ? "park" : useOf.get(i + "," + j) ?? "town";
+    L.lots.push({ x: cx, z: cz, park, use });
+    mark.houses = L.houses.length; mark.apts = L.apts.length; mark.colliders = L.colliders.length; mark.tanks = L.tanks.length; mark.trees = L.trees.length;
     if (park) {
       for (let n = 0; n < 70; n++) L.trees.push({ x: cx + (r() - 0.5) * 40, z: cz + (r() - 0.5) * 40, s: 1.4 + r() * 1.6, tint: r() });
       continue;
@@ -72,6 +87,9 @@ export function generateLayout(seed = 7): Layout {
     for (let t = -20; t <= 20; t += 10) {
       const e = LOT / 2 - 2.2;
       for (const [x, z] of [[t, -e], [t, e], [-e, t], [e, t]]) if (r() < 0.65) L.trees.push({ x: cx + x, z: cz + z, s: 1.1 + r() * 0.7, tint: r() });
+    }
+    if (use === "vacant" || use === "paddy") { // 乱数は消費済み。この区画の住宅・集合住宅・樹は捨てる
+      L.houses.length = mark.houses; L.apts.length = mark.apts; L.colliders.length = mark.colliders; L.tanks.length = mark.tanks; L.trees.length = mark.trees;
     }
   }
   // 電柱: 道路沿い。交差点から14m離れた位置に28m間隔
@@ -111,9 +129,11 @@ export function generateLayout(seed = 7): Layout {
   const r2 = rng(seed + 999);
   const low = (x: number, z: number, hw: number, hd: number, top: number, kind: Low["kind"]) => { L.lows.push({ x, z, hw, hd, top, kind }); box(x, z, hw, hd, top); };
   for (const lot of L.lots) {
+    const lw0 = L.lows.length, lc0 = L.colliders.length;
     if (lot.park) { for (let k = 0; k < 6; k++) { const a = (k / 6) * Math.PI * 2; low(lot.x + Math.cos(a) * 9, lot.z + Math.sin(a) * 9, k % 2 ? 0.25 : 0.8, k % 2 ? 0.8 : 0.25, 0.5, "bench"); } continue; }
     if (r2() < 0.7) low(lot.x + (r2() - 0.5) * 14, lot.z + (r2() < 0.5 ? -20.3 : 20.3), 5, 0.15, 1.0, "wall");
     if (r2() < 0.5) low(lot.x + (r2() < 0.5 ? -21 : 21) , lot.z + (r2() - 0.5) * 20, 0.5, 0.5, 0.45, "planter");
+    if (lot.use === "vacant" || lot.use === "paddy") { L.lows.length = lw0; L.colliders.length = lc0; }
   }
   // E3: 飛び乗って遊べる構造物と自然物(ベランダ・手すり・柵・看板・岩・木の枝・電柱の上)。既存の乱数列を乱さないよう別系列で配置する
   const r3 = rng(seed + 1999);
@@ -130,19 +150,48 @@ export function generateLayout(seed = 7): Layout {
   }
   for (const lot of L.lots) {
     if (lot.park) continue;
+    const lw1 = L.lows.length, lc1 = L.colliders.length;
     // 柵: 区画の縁(道路側)に沿って低い柵。壁とは別の辺
     if (r3() < 0.6) { const sx = r3() < 0.5 ? -1 : 1; L.lows.push({ x: lot.x + sx * 21.3, z: lot.z + (r3() - 0.5) * 18, hw: 0.05, hd: 3.2, top: 1.15, kind: "fence" }); const l = L.lows[L.lows.length - 1]; box(l.x, l.z, l.hw, l.hd, l.top); }
     // 看板: 区画の角に近い支柱つきの小さな看板(上面が足場)
     if (r3() < 0.35) { const sx = r3() < 0.5 ? -1 : 1, sz = r3() < 0.5 ? -1 : 1; L.lows.push({ x: lot.x + sx * 19, z: lot.z + sz * 21.2, hw: 0.6, hd: 0.07, top: 2.3, kind: "sign" }); const l = L.lows[L.lows.length - 1]; box(l.x, l.z, l.hw, l.hd, l.top); }
     // 岩: ときどき区画の隅に
     if (r3() < 0.3) { L.lows.push({ x: lot.x + (r3() < 0.5 ? -1 : 1) * 17, z: lot.z + (r3() < 0.5 ? -1 : 1) * 19, hw: 0.6 + r3() * 0.4, hd: 0.5 + r3() * 0.3, top: 0.5 + r3() * 0.5, kind: "rock" }); const l = L.lows[L.lows.length - 1]; box(l.x, l.z, l.hw, l.hd, l.top); }
+    if (lot.use === "vacant" || lot.use === "paddy") { L.lows.length = lw1; L.colliders.length = lc1; }
+  }
+  // 空き地: 低木と岩を少し(歩ける地面は残す)。田んぼは何も足さない(あぜと水面だけ)
+  const r4 = rng(seed + 4999);
+  for (const lot of L.lots) if (lot.use === "vacant") {
+    for (let k = 0; k < 6; k++) L.trees.push({ x: lot.x + (r4() - 0.5) * 40, z: lot.z + (r4() - 0.5) * 40, s: 0.5 + r4() * 0.5, tint: r4() }); // 低木(樹冠だけ小さい)
+    for (let k = 0; k < 3; k++) { const l: Low = { x: lot.x + (r4() - 0.5) * 24, z: lot.z + (r4() - 0.5) * 24, hw: 0.5 + r4() * 0.5, hd: 0.4 + r4() * 0.4, top: 0.4 + r4() * 0.5, kind: "rock" }; L.lows.push(l); box(l.x, l.z, l.hw, l.hd, l.top); }
   }
   // 公園の岩
   for (let k = 0; k < 7; k++) { const a = r3() * Math.PI * 2, d = 12 + r3() * 7; const l: Low = { x: Math.cos(a) * d, z: Math.sin(a) * d, hw: 0.7 + r3() * 0.6, hd: 0.6 + r3() * 0.5, top: 0.6 + r3() * 0.8, kind: "rock" }; if (Math.abs(d - 9) < 1.5) continue; L.lows.push(l); box(l.x, l.z, l.hw, l.hd, l.top); }
   // 木の枝: 大きな木(公園・街路樹)の幹の脇に、止まれる太い枝。足場は枝の上面
-  { let n = 0; for (const t of L.trees) { if (t.s < 1.7 || n >= 40) continue; n++; const a = r3() * Math.PI * 2, bx = t.x + Math.cos(a) * 0.9, bz = t.z + Math.sin(a) * 0.9; L.lows.push({ x: bx, z: bz, hw: 0.9, hd: 0.14, top: 2.4 * t.s, kind: "branch" }); box(bx, bz, 0.9, 0.14, 2.4 * t.s); } }
+  // 公園の木だけ(街路樹の枝が歩道へ張り出さないように)
+  { let n = 0; for (const t of L.trees) { if (t.s < 1.7 || n >= 40 || Math.abs(t.x) > 19 || Math.abs(t.z) > 19) continue; n++; const a = r3() * Math.PI * 2, bx = t.x + Math.cos(a) * 0.9, bz = t.z + Math.sin(a) * 0.9; L.lows.push({ x: bx, z: bz, hw: 0.9, hd: 0.14, top: 2.4 * t.s, kind: "branch" }); box(bx, bz, 0.9, 0.14, 2.4 * t.s); } }
   // 電柱の上: 一部の電柱の頭(柱そのものが障害物にもなる)
   for (let i = 0; i < L.poles.length; i += 7) { const p = L.poles[i]; L.lows.push({ x: p.x, z: p.z, hw: 0.14, hd: 0.14, top: 9.0, kind: "pole" }); box(p.x, p.z, 0.14, 0.14, 9.0); }
+  function lotAt(x: number, z: number): Lot | null {
+    const ix = Math.round(x / PITCH), iz = Math.round(z / PITCH);
+    if (Math.abs(ix) > HALF || Math.abs(iz) > HALF || Math.abs(x - ix * PITCH) >= LOT / 2 || Math.abs(z - iz * PITCH) >= LOT / 2) return null;
+    return L.lots[(ix + HALF) * (2 * HALF + 1) + (iz + HALF)] ?? null;
+  }
+  /** 田んぼの区画内の座標が水面か(縁と仕切りのあぜ以外) */
+  function paddyWater(lx: number, lz: number) {
+    const e = LOT / 2 - PADDY.border; if (Math.abs(lx) > e || Math.abs(lz) > e) return false;
+    const cell = (2 * e - 2 * PADDY.ridge) / PADDY.plots, r = cell / 2 + PADDY.ridge / 2; // 仕切りのあぜの中心は軸から ±r
+    return !(Math.abs(Math.abs(lx) - r) < PADDY.ridge / 2 || Math.abs(Math.abs(lz) - r) < PADDY.ridge / 2);
+  }
+  function groundAt(x: number, z: number): GroundKind {
+    const lot = lotAt(x, z);
+    if (!lot) { const nearRoad = L.roads.some(rd => Math.abs(x - rd) < ROAD / 2 || Math.abs(z - rd) < ROAD / 2); return nearRoad && Math.abs(x) < PITCH * 4 && Math.abs(z) < PITCH * 4 ? "road" : "grass"; }
+    if (lot.use === "park") return "grass";
+    if (lot.use === "vacant") return "soil";
+    if (lot.use === "paddy") return paddyWater(x - lot.x, z - lot.z) ? "water" : "ridge";
+    return "paved";
+  }
+  function waterAt(x: number, z: number) { const lot = lotAt(x, z); return !!lot && lot.use === "paddy" && paddyWater(x - lot.x, z - lot.z); }
   function heightAt(x: number, z: number) {
     let h = 0;
     const cs = L.colliders;

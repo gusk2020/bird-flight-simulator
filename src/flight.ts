@@ -5,6 +5,8 @@ import type { Collider } from "./layout";
 export interface WindSource { at(x: number, y: number, z: number, t: number, out: THREE.Vector3): THREE.Vector3 }
 export interface WorldQuery {
   colliders: Collider[]; heightAt(x: number, z: number): number;
+  /** 水面(田んぼの水)か。歩いて入らない(飛ぶ・跳ぶ・離陸は自由) */
+  waterAt?(x: number, z: number): boolean;
   perchAt?(x: number, y: number, z: number, r: number): { id: number; t: number } | null;
   perchPoint?(id: number, t: number, out: { x: number; y: number; z: number }): void;
   wireDir?(id: number): [number, number];
@@ -215,8 +217,11 @@ export class Flight {
       hs = this.walkV; this.walkPhase += hs * dt * 4.5;
     }
     this.vel.copy(_f).multiplyScalar(hs);
+    const wx = this.pos.x, wz = this.pos.z, inWater = !!this.world.waterAt && this.world.waterAt(wx, wz);
     this.pos.addScaledVector(this.vel, dt);
     this.collide(true);
+    // 水田の水面へは歩いて入らない(すでに水の中にいるときは、出る向きの歩行を妨げない)
+    if (!inWater && this.world.waterAt && this.world.waterAt(this.pos.x, this.pos.z)) { this.pos.x = wx; this.pos.z = wz; this.vel.set(0, 0, 0); this.walkV = 0; if (this.mode === "rollout") this.mode = "landed"; }
     this.pitch += (0 - this.pitch) * (1 - Math.exp(-8 * dt));
     this.roll += (0 - this.roll) * (1 - Math.exp(-8 * dt));
     const gh = this.world.heightAt(this.pos.x, this.pos.z);

@@ -25,13 +25,17 @@ export function airApproach(s: Surface, assist: boolean): Outcome {
     const e = wrap(Math.atan2(-(cx - f.pos.x), -(cz - f.pos.z)) - f.yaw + bias), d = Math.hypot(cx - f.pos.x, cz - f.pos.z);
     const feet = f.pos.y - P.feetOffset;
     let inp = { x: -Math.max(-1, Math.min(1, e * 1.1)) * 0.8, y: Math.max(-0.4, Math.min(0.3, (s.top + 0.5 + d * 0.2 - feet) * 0.12)), flapHeld: false, flapTap: false, brake: d < 12 || f.speed > 8 && d < 16 };
-    if (f.speed < 6.2 && f.vel.y < 0 && i % 25 === 0) inp.flapTap = true;
+    if (f.speed < 6.2 && f.vel.y < 0 && i % 25 === 0 && !(d < 3 && feet - s.top < 1.6)) inp.flapTap = true; // 着地直前(足場の真上近く)では羽ばたかない(人も降りる)
     inp = pa.apply(inp, f);
     f.step(1 / 60, inp);
     if (f.crashes > c0) return { ok: false, why: "crash" };
     if (f.mode === "landed" || f.mode === "rollout") {
       const fy = f.pos.y - P.feetOffset, inside = f.pos.x >= s.minX - 0.3 && f.pos.x <= s.maxX + 0.3 && f.pos.z >= s.minZ - 0.3 && f.pos.z <= s.maxZ + 0.3;
-      if (Math.abs(fy - s.top) < 0.2 && inside) return { ok: true, why: "landed" };
+      if (Math.abs(fy - s.top) < 0.2 && inside) { // 触れた瞬間ではなく、1.5秒後もその足場の上にいるか(滑り落ちない・そのまま止まる)まで見る
+        for (let j = 0; j < 90; j++) { const q = pa.apply({ x: 0, y: 0, flapHeld: false, flapTap: false, brake: false }, f); f.step(1 / 60, q); if (f.crashes > c0) return { ok: false, why: "crash-after" }; }
+        const fy2 = f.pos.y - P.feetOffset, in2 = f.pos.x >= s.minX - 0.05 && f.pos.x <= s.maxX + 0.05 && f.pos.z >= s.minZ - 0.05 && f.pos.z <= s.maxZ + 0.05;
+        return Math.abs(fy2 - s.top) < 0.2 && in2 && f.mode !== "air" ? { ok: true, why: "landed" } : { ok: false, why: "slid-off" };
+      }
       if (fy < s.top - 0.5) return { ok: false, why: "ground" };
     }
   }

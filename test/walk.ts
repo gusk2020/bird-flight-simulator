@@ -46,7 +46,7 @@ export function walkTests() {
     }
     check("small hop can land on a low planter", landed >= 1 && bad === 0, `${landed}/${n} landed on top, ${bad} clipped`);
     const w = L.lows.find(l => l.kind === "wall")!; let on = 0;
-    for (let d = 0.9; d <= 1.6; d += 0.1) { const f = landedAt(w.x, w.z + w.hd + d, 0); f.step(1 / 60, inp({ flapTap: true, flapHeld: true })); sim(f, 2, () => inp()); if (Math.abs(f.pos.y - PHYS.feetOffset - w.top) < 0.02) on++; }
+    for (let d = 0.9; d <= 1.6; d += 0.1) { const f = landedAt(w.x, w.z + Math.max(w.hd, 0.25) + d, 0); f.step(1 / 60, inp({ flapTap: true, flapHeld: true })); sim(f, 2, () => inp()); if (Math.abs(f.pos.y - PHYS.feetOffset - w.top) < 0.02) on++; }
     check("a 1 m wall is too high for a small hop", on === 0, `${on} landed on top`); }
   { const f = landedAt(30, 56, Math.PI / 2); const h0 = f.pos.y; const r = sim(f, 5, () => walkIn());
     check("walking over a curb: stays grounded, rises by the step height, no flicker", f.pos.x < 22.5 && f.mode === "landed" && r.transitions === 0 && Math.abs(f.pos.y - h0 - 0.12) < 1e-6, `x=${f.pos.x.toFixed(1)} dy=${(f.pos.y - h0).toFixed(3)}`); }

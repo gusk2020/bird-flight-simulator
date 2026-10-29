@@ -255,6 +255,10 @@ export class Autopilot {
       if (blockedAhead(f.yaw)) { // 向きを回しながら、最も回転の少ない「開けた向き」を探す
         let best = 0, bd = 9;
         for (let k = 0; k < 16; k++) { const y = f.yaw + (k / 16) * Math.PI * 2, d = Math.abs(wrap(y - f.yaw)); if (d < bd && !blockedAhead(y)) { bd = d; best = y; } }
+        if (bd >= 9 && f.mode === "landed" && f.pos.y - f.agl < 1) { // どの向きも塞がれている(木立・柵の中など): 一番低い向きへ歩いて抜け出してから離陸をやり直す
+          let wy = f.yaw, wh = 1e9; for (let k = 0; k < 16; k++) { const y = f.yaw + (k / 16) * Math.PI * 2, h = this.heightsAhead(f, y, 18, null); if (h < wh) { wh = h; wy = y; } }
+          this.enter("walk"); this.walkFor = 3 + this.r() * 2; this.walkYaw = wy; this.stats.walks++; return;
+        }
         if (bd < 9) { o.x = this.steer(f, f.pos.x - Math.sin(best) * 30, f.pos.z - Math.cos(best) * 30); if (Math.abs(o.x) < 0.2) o.x = Math.sign(o.x || 1) * 0.2; return; }
       }
     }
@@ -269,7 +273,7 @@ export class Autopilot {
   /** 物理入力による復帰。位置も速度も触らず、次の判断だけを変える。 */
   private recover(f: Flight) {
     this.stats.recoveries++;
-    if (this.state === "takeoff") { this.hopped = false; this.takeoffT = 0; this.walkYaw = f.yaw + (this.r() < 0.5 ? 1 : -1) * (1.2 + this.r() * 1.5); }
+    if (this.state === "takeoff") { this.hopped = false; this.takeoffT = 0; this.walkYaw = f.yaw + (this.r() < 0.5 ? 1 : -1) * (1.2 + this.r() * 1.5); if (f.mode !== "air") { this.enter("walk"); this.walkFor = 3 + this.r() * 2; this.stats.walks++; } } // 向きを替えるだけでなく、実際に歩いて壁際から離れる
     else if (this.state === "walk") { this.walkYaw = f.yaw + (this.r() < 0.5 ? 1 : -1) * (1.6 + this.r() * 1.4); this.stateT = 0; }
     else if (f.mode === "air") { this.tgt = null; if (this.state !== "cruise") this.enter("cruise"); this.newWaypoint(f, true); this.alt = Math.max(this.alt, f.pos.y + 14); this.emerg = 1.5; this.emergDir = this.r() < 0.5 ? -1 : 1; }
   }

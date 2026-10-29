@@ -117,12 +117,23 @@ export function buildWorld(): World {
   }
   group.add(inst(new THREE.BoxGeometry(5, 2.2, 5), lam(0xb9bcc0), L.tanks.map(t => ({ x: t.x, y: t.y + 1.1, z: t.z }))));
 
-  // 低い障害物(ベンチ・塀・植え込み)
-  const lowCol = { bench: 0x8a5a3a, wall: 0xc9c3b4, planter: 0x6f7f5a };
+  // 低い障害物と、止まれる構造物・自然物(ベンチ・塀・植え込み・ベランダ・手すり・柵・看板・岩・木の枝)。種類ごとに1つのInstancedMesh
+  const lowCol = { bench: 0x8a5a3a, wall: 0xc9c3b4, planter: 0x6f7f5a, balcony: 0xd6d0c4, rail: 0x4a4d52, fence: 0x7a6a55, sign: 0xe8e3d0, rock: 0x8b8982, branch: 0x6b4f3a };
+  const unit = new THREE.BoxGeometry(1, 1, 1);
   for (const k of ["bench", "wall", "planter"] as const) {
-    const list = L.lows.filter(l => l.kind === k);
-    group.add(inst(new THREE.BoxGeometry(1, 1, 1), lam(lowCol[k]), list.map(l => ({ x: l.x, y: l.top / 2, z: l.z, sx: l.hw * 2, sy: l.top, sz: l.hd * 2 }))));
+    group.add(inst(unit, lam(lowCol[k]), L.lows.filter(l => l.kind === k).map(l => ({ x: l.x, y: l.top / 2, z: l.z, sx: l.hw * 2, sy: l.top, sz: l.hd * 2 }))));
   }
+  const of = (k: string) => L.lows.filter(l => l.kind === k);
+  group.add(inst(unit, lam(lowCol.balcony), of("balcony").map(l => ({ x: l.x, y: l.top - 0.1, z: l.z, sx: l.hw * 2, sy: 0.2, sz: l.hd * 2 }))));   // ベランダ: 床板
+  group.add(inst(unit, lam(lowCol.rail), of("rail").map(l => ({ x: l.x, y: l.top - 0.45, z: l.z, sx: l.hw * 2, sy: 0.9, sz: l.hd * 2 }))));          // 手すり
+  group.add(inst(unit, lam(lowCol.fence), of("fence").map(l => ({ x: l.x, y: l.top / 2, z: l.z, sx: l.hw * 2, sy: l.top, sz: l.hd * 2 }))));       // 柵
+  group.add(inst(unit, lam(lowCol.sign), of("sign").map(l => ({ x: l.x, y: l.top - 0.35, z: l.z, sx: l.hw * 2, sy: 0.7, sz: l.hd * 2 }))));         // 看板の板
+  group.add(inst(unit, lam(0x55575c), of("sign").map(l => ({ x: l.x, y: (l.top - 0.7) / 2, z: l.z, sx: 0.1, sy: l.top - 0.7, sz: 0.1 }))));        // 看板の支柱
+  const rockGeo = new THREE.DodecahedronGeometry(1, 0);
+  group.add(inst(rockGeo, lam(lowCol.rock), of("rock").map((l, i) => ({ x: l.x, y: l.top * 0.45, z: l.z, ry: i * 1.7, sx: l.hw * 1.15, sy: l.top * 0.62, sz: l.hd * 1.15 }))));
+  const branchGeo = new THREE.CylinderGeometry(0.11, 0.15, 1.8, 6); branchGeo.rotateZ(Math.PI / 2);
+  group.add(inst(branchGeo, lam(lowCol.branch), of("branch").map(l => ({ x: l.x, y: l.top - 0.12, z: l.z }))));
+  group.add(inst(new THREE.CylinderGeometry(0.17, 0.17, 0.12, 6), lam(0x6d665c), of("pole").map(l => ({ x: l.x, y: l.top + 0.06, z: l.z })))); // 電柱の頭
   // 街路樹
   const trunk = new THREE.CylinderGeometry(0.15, 0.22, 2.4, 5); trunk.translate(0, 1.2, 0);
   const greens = [0x4f8a3f, 0x5d9645, 0x3f7a3a, 0x6aa34d];

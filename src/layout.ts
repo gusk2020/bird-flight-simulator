@@ -4,7 +4,7 @@ export interface Collider { minX: number; maxX: number; minZ: number; maxZ: numb
 export interface House { x: number; z: number; ry: number; floors: 1 | 2; wall: number; roof: number }
 export interface Apt { x: number; z: number; ry: number; floors: number; wall: number; w: number; d: number }
 export interface Tree { x: number; z: number; s: number; tint: number }
-export interface Low { x: number; z: number; hw: number; hd: number; top: number; kind: "bench" | "wall" | "planter" }
+export interface Low { x: number; z: number; hw: number; hd: number; top: number; kind: "bench" | "wall" | "planter" | "balcony" | "rail" | "fence" | "sign" | "rock" | "branch" | "pole"; /** 壁面の外側(z方向の符号) */ out?: number }
 export interface Wire { ax: number; az: number; bx: number; bz: number; off: number; alongX: boolean }
 export const WIRE_TOP = 8.3, WIRE_SAG = 1.2, WIRE_SPACING = 0.9;
 export interface Layout {
@@ -115,6 +115,34 @@ export function generateLayout(seed = 7): Layout {
     if (r2() < 0.7) low(lot.x + (r2() - 0.5) * 14, lot.z + (r2() < 0.5 ? -20.3 : 20.3), 5, 0.15, 1.0, "wall");
     if (r2() < 0.5) low(lot.x + (r2() < 0.5 ? -21 : 21) , lot.z + (r2() - 0.5) * 20, 0.5, 0.5, 0.45, "planter");
   }
+  // E3: 飛び乗って遊べる構造物と自然物(ベランダ・手すり・柵・看板・岩・木の枝・電柱の上)。既存の乱数列を乱さないよう別系列で配置する
+  const r3 = rng(seed + 1999);
+  // ベランダと手すり: 集合住宅の前後の壁面に、2階(と高層は5階)の高さで。slab は上面だけが足場、手すりは細い縁
+  for (const a of L.apts) {
+    const levels = a.floors >= 9 ? [2, 5] : [2];
+    for (const lv of levels) {
+      if (r3() < 0.25) continue;
+      const side = r3() < 0.6 ? 1 : -1, bx = a.x + (r3() - 0.5) * 12, bz = a.z + side * (APT_D / 2 + 0.7), top = FLOOR_H * lv;
+      L.lows.push({ x: bx, z: bz, hw: 2.2, hd: 0.7, top, kind: "balcony", out: side }); box(bx, bz, 2.2, 0.7, top);
+      const rz = bz + side * 0.62;
+      L.lows.push({ x: bx, z: rz, hw: 2.2, hd: 0.04, top: top + 1.0, kind: "rail", out: side }); box(bx, rz, 2.2, 0.04, top + 1.0);
+    }
+  }
+  for (const lot of L.lots) {
+    if (lot.park) continue;
+    // 柵: 区画の縁(道路側)に沿って低い柵。壁とは別の辺
+    if (r3() < 0.6) { const sx = r3() < 0.5 ? -1 : 1; L.lows.push({ x: lot.x + sx * 21.3, z: lot.z + (r3() - 0.5) * 18, hw: 0.05, hd: 3.2, top: 1.15, kind: "fence" }); const l = L.lows[L.lows.length - 1]; box(l.x, l.z, l.hw, l.hd, l.top); }
+    // 看板: 区画の角に近い支柱つきの小さな看板(上面が足場)
+    if (r3() < 0.35) { const sx = r3() < 0.5 ? -1 : 1, sz = r3() < 0.5 ? -1 : 1; L.lows.push({ x: lot.x + sx * 19, z: lot.z + sz * 21.2, hw: 0.6, hd: 0.07, top: 2.3, kind: "sign" }); const l = L.lows[L.lows.length - 1]; box(l.x, l.z, l.hw, l.hd, l.top); }
+    // 岩: ときどき区画の隅に
+    if (r3() < 0.3) { L.lows.push({ x: lot.x + (r3() < 0.5 ? -1 : 1) * 17, z: lot.z + (r3() < 0.5 ? -1 : 1) * 19, hw: 0.6 + r3() * 0.4, hd: 0.5 + r3() * 0.3, top: 0.5 + r3() * 0.5, kind: "rock" }); const l = L.lows[L.lows.length - 1]; box(l.x, l.z, l.hw, l.hd, l.top); }
+  }
+  // 公園の岩
+  for (let k = 0; k < 7; k++) { const a = r3() * Math.PI * 2, d = 12 + r3() * 7; const l: Low = { x: Math.cos(a) * d, z: Math.sin(a) * d, hw: 0.7 + r3() * 0.6, hd: 0.6 + r3() * 0.5, top: 0.6 + r3() * 0.8, kind: "rock" }; if (Math.abs(d - 9) < 1.5) continue; L.lows.push(l); box(l.x, l.z, l.hw, l.hd, l.top); }
+  // 木の枝: 大きな木(公園・街路樹)の幹の脇に、止まれる太い枝。足場は枝の上面
+  { let n = 0; for (const t of L.trees) { if (t.s < 1.7 || n >= 40) continue; n++; const a = r3() * Math.PI * 2, bx = t.x + Math.cos(a) * 0.9, bz = t.z + Math.sin(a) * 0.9; L.lows.push({ x: bx, z: bz, hw: 0.9, hd: 0.14, top: 2.4 * t.s, kind: "branch" }); box(bx, bz, 0.9, 0.14, 2.4 * t.s); } }
+  // 電柱の上: 一部の電柱の頭(柱そのものが障害物にもなる)
+  for (let i = 0; i < L.poles.length; i += 7) { const p = L.poles[i]; L.lows.push({ x: p.x, z: p.z, hw: 0.14, hd: 0.14, top: 9.0, kind: "pole" }); box(p.x, p.z, 0.14, 0.14, 9.0); }
   function heightAt(x: number, z: number) {
     let h = 0;
     const cs = L.colliders;

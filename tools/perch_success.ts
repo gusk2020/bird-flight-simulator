@@ -17,7 +17,9 @@ const open = (s: Surface) => !L.colliders.some(c => c.top > s.top + 0.3 && c.max
 /** 空中から減速して降りる(人の操作の代わりの簡易モデル: 目標へ目で合わせた舵+誤差、近づいたら減速) */
 export function airApproach(s: Surface, assist: boolean): Outcome {
   const f = new Flight(world), pa = new PerchAssist(idx); pa.enabled = assist;
-  const ang = rnd() * Math.PI * 2, dist = 8 + rnd() * 4, cx = (s.minX + s.maxX) / 2, cz = (s.minZ + s.maxZ) / 2;
+  // ベランダ・手すりは建物の外側からだけ近づける(壁の向こうからは来られない)
+  const apt = (s.kind === "balcony" || s.kind === "rail") ? L.apts.find(a => Math.abs((s.minX + s.maxX) / 2 - a.x) < a.w / 2 + 0.1 && Math.abs((s.minZ + s.maxZ) / 2 - a.z) < a.d / 2 + 1.5) : undefined;
+  const ang = apt ? ((s.minZ + s.maxZ) / 2 > apt.z ? Math.PI / 2 : -Math.PI / 2) + (rnd() - 0.5) * 1.6 : rnd() * Math.PI * 2, dist = 8 + rnd() * 4, cx = (s.minX + s.maxX) / 2, cz = (s.minZ + s.maxZ) / 2;
   f.pos.set(cx + Math.cos(ang) * dist, s.top + 1.2 + rnd() * 1.8, cz + Math.sin(ang) * dist); f.prevPos.copy(f.pos);
   const toward = Math.atan2(-(cx - f.pos.x), -(cz - f.pos.z)); f.yaw = toward + (rnd() - 0.5) * 0.9; f.vel.set(-Math.sin(f.yaw) * 10, -0.5, -Math.cos(f.yaw) * 10);
   const c0 = f.crashes, bias = (rnd() - 0.5) * 0.5;
@@ -28,7 +30,7 @@ export function airApproach(s: Surface, assist: boolean): Outcome {
     if (f.speed < 6.2 && f.vel.y < 0 && i % 25 === 0 && !(d < 3 && feet - s.top < 1.6)) inp.flapTap = true; // 着地直前(足場の真上近く)では羽ばたかない(人も降りる)
     inp = pa.apply(inp, f);
     f.step(1 / 60, inp);
-    if (f.crashes > c0) return { ok: false, why: "crash" };
+    if (f.crashes > c0) return { ok: false, why: `crash feet-top=${(feet - s.top).toFixed(1)} d=${d.toFixed(1)} v=${f.speed.toFixed(1)} t=${(i / 60).toFixed(1)}` };
     if (f.mode === "landed" || f.mode === "rollout") {
       const fy = f.pos.y - P.feetOffset, inside = f.pos.x >= s.minX - 0.3 && f.pos.x <= s.maxX + 0.3 && f.pos.z >= s.minZ - 0.3 && f.pos.z <= s.maxZ + 0.3;
       if (Math.abs(fy - s.top) < 0.2 && inside) { // 触れた瞬間ではなく、1.5秒後もその足場の上にいるか(滑り落ちない・そのまま止まる)まで見る
@@ -61,15 +63,17 @@ export function hopOnto(s: Surface, assist: boolean): Outcome {
 
 export function run(n: number) {
   const out: Record<string, { air: [number, number]; hop: [number, number]; why: Record<string, number> }> = {};
-  const kinds = ["bench", "wall", "roof"] as const;
+  if (typeof (globalThis as any).KINDS === "string") { /* 絞り込み用 */ }
+  const kinds = ["bench", "wall", "roof", "fence", "rock", "balcony", "rail", "sign", "branch", "pole"] as const;
   for (const kind of kinds) {
-    const surfaces = idx.all.filter(s => s.kind === kind && open(s) && (kind !== "roof" || s.top < 7));
+    const surfaces = idx.all.filter(s => s.kind === kind && (kind === "balcony" || kind === "rail" || open(s)) && (kind !== "roof" || s.top < 7));
+    if (!surfaces.length) continue;
     const r = { air: [0, 0] as [number, number], hop: [0, 0] as [number, number], why: {} as Record<string, number> };
     for (let a = 0; a < 2; a++) {
       for (let i = 0; i < n; i++) {
         seed = 100 + i; const s = surfaces[i % surfaces.length];
         const o = airApproach(s, a === 1); if (o.ok) r.air[a]++; else r.why[(a ? "補助あり:" : "補助なし:") + o.why] = (r.why[(a ? "補助あり:" : "補助なし:") + o.why] || 0) + 1;
-        if (kind !== "roof") { seed = 900 + i; const h = hopOnto(s, a === 1); if (h.ok) r.hop[a]++; }
+        if (kind !== "roof" && kind !== "balcony" && s.top < 1.6) { seed = 900 + i; const h = hopOnto(s, a === 1); if (h.ok) r.hop[a]++; }
       }
     }
     out[kind] = r;
@@ -78,6 +82,6 @@ export function run(n: number) {
 }
 if (typeof process !== "undefined" && process.argv[1]?.includes("perch")) {
   const n = Number(process.argv[2] || 150), r = run(n);
-  for (const [k, v] of Object.entries(r)) console.log(`${k.padEnd(6)} 空中から着地 ${(100 * v.air[0] / n).toFixed(0)}% → ${(100 * v.air[1] / n).toFixed(0)}%` + (k !== "roof" ? `   地上から飛び乗り ${(100 * v.hop[0] / n).toFixed(0)}% → ${(100 * v.hop[1] / n).toFixed(0)}%` : "") + `   失敗内訳 ${JSON.stringify(v.why)}`);
+  for (const [k, v] of Object.entries(r)) console.log(`${k.padEnd(6)} 空中から着地 ${(100 * v.air[0] / n).toFixed(0)}% → ${(100 * v.air[1] / n).toFixed(0)}%` + (v.hop[1] + v.hop[0] > 0 ? `   地上から飛び乗り ${(100 * v.hop[0] / n).toFixed(0)}% → ${(100 * v.hop[1] / n).toFixed(0)}%` : "") + `   失敗内訳 ${JSON.stringify(v.why)}`);
 }
 export const _dbg = { idx, hopOnto, open };

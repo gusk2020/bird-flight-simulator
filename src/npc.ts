@@ -52,7 +52,7 @@ export class NpcWorld {
   constructor(private L: Layout, seed = 1, private density: Density[] = DENSITY) {
     this.r = rng(seed);
     for (const l of L.lots) this.lotCells.push({ x: l.x, z: l.z });
-    for (const c of L.colliders) if (c.top >= 3) this.roofs.push({ x0: c.minX + 0.8, x1: c.maxX - 0.8, z0: c.minZ + 0.8, z1: c.maxZ - 0.8, top: c.top });
+    for (const c of L.colliders) if (c.top >= 3 && c.maxX - c.minX > 3 && c.maxZ - c.minZ > 3) this.roofs.push({ x0: c.minX + 0.8, x1: c.maxX - 0.8, z0: c.minZ + 0.8, z1: c.maxZ - 0.8, top: c.top });
   }
 
   /** 設定レベル(0..3)に合わせて個体数を調整。増える分は初期位置を作り、減る分は不活性にする。 */

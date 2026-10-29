@@ -58,8 +58,9 @@ export class Autopilot {
   }
   private heightsAhead(f: Flight, yaw: number, dist: number, ignore: Target | null) {
     const ax = -Math.sin(yaw), az = -Math.cos(yaw); let top = 0;
-    for (let k = 1; k <= 3; k++) {
-      const d = (dist * k) / 3, x = f.pos.x + ax * d, z = f.pos.z + az * d;
+    const n = Math.max(3, Math.min(10, Math.ceil(dist / 5))); // 細い障害物(電柱・手すり・看板)を飛ばさないよう、距離に応じて密にサンプルする
+    for (let k = 1; k <= n; k++) {
+      const d = (dist * k) / n, x = f.pos.x + ax * d, z = f.pos.z + az * d;
       if (ignore && ignore.box > 0 && Math.abs(x - ignore.x) < ignore.box && Math.abs(z - ignore.z) < ignore.box) continue; // 着地目標の建物自体は避けない
       top = Math.max(top, this.L.heightAt(x, z), this.L.heightAt(x + az * 3, z - ax * 3), this.L.heightAt(x - az * 3, z + ax * 3)); // 両翼分も見る
     }

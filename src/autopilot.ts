@@ -26,6 +26,9 @@ function rng(seed: number) { let a = seed >>> 0; return () => { a = (a + 0x6d2b7
 export class Autopilot {
   /** 自動ついばみの最中(止まって頭を下げている)。固着と見なさない */
   busy = false;
+  /** 季節による行動の偏り(1=変化なし)。控えめ。setSeasonBias で更新 */
+  bias = { forage: 1, roof: 1, ground: 1, water: 1 };
+  setSeasonBias(b: { forage: number; roof: number; ground: number; water: number }) { this.bias = { ...b }; }
   state: PilotState = "cruise"; policy: AutoPolicy = "random"; active: Exclude<AutoPolicy, "random"> = "life"; enabled = false;
   stats = { landings: 0, walks: 0, perches: 0, takeoffs: 0, flaps: 0, replans: 0, teleports: 0, recoveries: 0, avoids: 0, switches: 0 }; // teleports=最終手段の再配置回数(通常0)  recoveries=物理入力による固着復帰の回数
   private r: () => number; private t = 0; private decideT = 0; private stateT = 0; private policyT = 0;
@@ -73,13 +76,14 @@ export class Autopilot {
     for (let tries = 0; tries < 14; tries++) {
       const roll = r(), ang = f.yaw + (r() - 0.5) * 1.6, dist = 35 + r() * 80, x = f.pos.x - Math.sin(ang) * dist, z = f.pos.z - Math.cos(ang) * dist;
       if (Math.abs(x) > BOUND || Math.abs(z) > BOUND) continue;
-      if (roll < w.spots[0]) { // 地面(歩道・敷地): 周囲に建物がない開けた場所
+      const sp0 = Math.min(0.95, w.spots[0] * this.bias.ground), sp1 = w.spots[1] * this.bias.roof;
+      if (roll < sp0) { // 地面(歩道・敷地): 周囲に建物がない開けた場所
         const gy = this.L.heightAt(x, z); if (gy > 0.2 || [[4, 0], [-4, 0], [0, 4], [0, -4]].some(([ox, oz]) => this.L.heightAt(x + ox, z + oz) > 0.2)) continue;
         if (this.L.waterAt(x, z) || [[3, 0], [-3, 0], [0, 3], [0, -3]].some(([ox, oz]) => this.L.waterAt(x + ox, z + oz))) continue; // 田んぼの水の上・すぐ脇には降りない
-        const gk = this.L.groundAt(x, z); if (this.active !== "scenic" && gk !== "grass" && gk !== "soil" && gk !== "ridge" && r() < (this.active === "life" ? 0.8 : 0.5)) continue; // 草地・土・あぜ道(ついばめる地面)を好む
+        const gk = this.L.groundAt(x, z); if (this.active !== "scenic" && gk !== "grass" && gk !== "soil" && gk !== "ridge" && r() < Math.min(0.95, (this.active === "life" ? 0.8 : 0.5) * (2 - this.bias.forage))) continue; // 草地・土・あぜ道(ついばめる地面)を好む
         return { x, y: gy, z, kind: "ground", wire: -1, dirx: 0, dirz: 0, box: 0, tries: 0 };
       }
-      if (roll < w.spots[0] + w.spots[1]) { // 屋根
+      if (roll < sp0 + sp1) { // 屋根
         const cs = this.L.colliders; const c = cs[Math.floor(r() * cs.length)];
         if (c.top < 3 || c.maxX - c.minX < 4 || c.maxZ - c.minZ < 4) continue;
         const tx = (c.minX + c.maxX) / 2, tz = (c.minZ + c.maxZ) / 2, hy = this.L.heightAt(tx, tz);

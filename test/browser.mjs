@@ -86,7 +86,7 @@ try {
   await p.click('[data-set="weather"][data-val="rain"]'); await p.click('[data-set="wind"][data-val="2"]'); await p.click('[data-set="bearing"][data-val="90"]');
   let B = await p.evaluate(() => ({ rain: __game.rain.mesh.visible, lift: __game.flight.liftScale, fog: __game.scene.fog.far, bear: __game.wind.bearing, sp: __game.wind.speed, on: [...document.querySelectorAll("[data-set].on")].length }));
   check("rain: particles on, lift reduced, visibility shortened", B.rain && B.lift < 1 && B.fog < 500, JSON.stringify(B));
-  check("wind: strong east wind set, buttons highlighted", B.bear === 90 && B.sp > 7 && B.on === 11);
+  check("wind: strong east wind set, buttons highlighted", B.bear === 90 && B.sp > 7 && B.on === 12);
   await p.click('[data-set="time"][data-val="2"]'); await p.click("#ovGo"); await sleep(300);
   const h0 = await p.evaluate(() => __game.env().lights + "|" + __game.game.gameTime);
   await sleep(2500); const w1 = await p.evaluate(() => ({ wv: __game.flight.windVec.length(), rc: __game.rain.count, q: __game.quality.level, hud: document.getElementById("hud").textContent }));
@@ -336,6 +336,30 @@ try {
   check("walking toward a paddy: the bird stays out of the water", await p.evaluate(() => !__game.world.waterAt(__game.flight.pos.x, __game.flight.pos.z) && __game.flight.mode === "landed"));
   await p.evaluate(() => { __game.input.state.brake = false; });
   check("E4: no page errors", errs.length === 0, errs.join(" | "));
+
+  console.log("\n# seasons (E5)");
+  await p.evaluate(() => { __game.setAuto(false); __game.input.state.brake = false; __game.season.phase = 0.9; __game.applySeasonLook(true); });
+  const snowW = await p.evaluate(() => __game.world.group.children.some(c => c.material && c.material.emissiveIntensity > 0.1 && c.material.emissive.getHex() === 0xffffff));
+  await p.evaluate(() => { __game.season.phase = 0.3; __game.applySeasonLook(true); });
+  const snowS = await p.evaluate(() => __game.world.group.children.some(c => c.material && c.material.emissiveIntensity > 0.1 && c.material.emissive.getHex() === 0xffffff && c.material.map));
+  check("winter shows snow (white emissive on ground/roofs), summer does not", snowW && !snowS, `${snowW} ${snowS}`);
+  check("the season button shows the current season (summer = 夏)", (await p.evaluate(() => document.getElementById("btnSeason").textContent)) === "夏");
+  const sp0 = await p.evaluate(() => ({ ph: __game.season.phase, sp: __game.season.speed }));
+  await p.evaluate(() => document.getElementById("btnSeason").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })));
+  const sp1 = await p.evaluate(() => ({ ph: __game.season.phase, sp: __game.season.speed, toast: document.getElementById("toast").textContent }));
+  check("tapping the season button cycles the speed (標準→高速), keeps the position, and shows a short message", sp0.sp === "normal" && sp1.sp === "fast" && Math.abs(sp1.ph - sp0.ph) < 0.01 && sp1.toast.includes("高速"), JSON.stringify([sp0, sp1]));
+  const gt0 = await p.evaluate(() => __game.game.gameTime), ph0 = await p.evaluate(() => __game.season.phase);
+  await p.waitForFunction(g => __game.game.gameTime > g + 2, gt0, { timeout: 60000 });
+  const ph1 = await p.evaluate(() => __game.season.phase), gt1 = await p.evaluate(() => __game.game.gameTime);
+  check("the season advances with game time at the chosen speed (高速: 600 s per year)", Math.abs((((ph1 - ph0) + 1) % 1) - (gt1 - gt0) / 600) < 0.004, `${ph0.toFixed(4)} -> ${ph1.toFixed(4)} over ${(gt1 - gt0).toFixed(1)} s`);
+  await p.evaluate(() => __game.input.onPause()); await sleep(300); const pa0 = await p.evaluate(() => __game.season.phase); await sleep(1500); const pa1 = await p.evaluate(() => __game.season.phase);
+  check("paused: the season does not advance", pa0 === pa1);
+  check("the menu has the 季節の速さ row with the current speed highlighted", await p.evaluate(() => document.querySelector('[data-set="ss"][data-val="fast"]').classList.contains("on")));
+  await p.click('[data-set="ss"][data-val="slow"]'); check("changing the speed from the menu works and is saved with the position", await p.evaluate(() => { const o = JSON.parse(localStorage.getItem("vindving.prefs.v1")); return o.seasonSpeed === "slow" && typeof o.seasonPhase === "number"; }));
+  const keep = await p.evaluate(() => __game.season.phase); await p.reload(); await p.waitForFunction(() => window.__game, null, { timeout: 30000 }); await sleep(500);
+  check("after a reload the season position and speed are restored (the game still waits at the start)", await p.evaluate(k => Math.abs(__game.season.phase - k) < 0.02 && __game.season.speed === "slow" && __game.game.state === "ready", keep));
+  await p.click("#ovGo"); await sleep(300);
+  check("E5: no page errors", errs.length === 0, errs.join(" | "));
 
   console.log("\n# time of day (A2)");
   const seen = [];

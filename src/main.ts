@@ -17,6 +17,7 @@ import { FlapAssist } from "./assist";
 import { Autopilot } from "./autopilot";
 import { buildSurfaces } from "./perches";
 import { Forage } from "./forage";
+import { SeasonClock, seasonBias, seasonLook, type SeasonSpeed } from "./season";
 import { PerchAssist, PERCH } from "./perchassist";
 import type { AutoPolicy } from "./settings";
 import { SpeedLines, Streaks, speedIntensity } from "./speedfx";
@@ -53,11 +54,13 @@ sky.renderOrder = -1; scene.add(sky);
 const cloudMat = (world.clouds.children[0] as THREE.Mesh).material as THREE.MeshBasicMaterial;
 let hour: number = TIME_PRESETS[1].hour, preset = 1, targetHour: number | null = null;
 const prefs = loadPrefs(); // 前回の操作方式など(壊れていれば既定値)。ゲーム自体は必ず開始待ちで始まる
-const settings = { weather: "clear" as Weather, wind: 1, bearing: 270, time: 0, fx: 2, npc: 2, gfx: 0, ctl: prefs.control as string, apol: prefs.autoPolicy as string, ats: prefs.autoTimeSpeed as string, ahide: prefs.autoHideUi ? "1" : "0" };
+const settings = { weather: "clear" as Weather, wind: 1, bearing: 270, time: 0, fx: 2, npc: 2, gfx: 0, ctl: prefs.control as string, apol: prefs.autoPolicy as string, ats: prefs.autoTimeSpeed as string, ahide: prefs.autoHideUi ? "1" : "0", ss: prefs.seasonSpeed as string };
 const WX_INDEX: Record<Weather, number> = { clear: 0, cloudy: 1, rain: 2 }, WX_NAMES: Weather[] = ["clear", "cloudy", "rain"];
 // 天気の連続値(0晴/1曇/2雨)。手動ではボタンの値、オート中はゆっくり移り変わる
 let wxLevel = 0, appliedWeather: Weather = "clear";
 const WIND_SPEED = [0, 3, 7], WIND_GUST = [0, 0.3, 0.6], TIME_RATE = [0, 24 / 1800, 24 / 180]; // 時間: 停止 / 等速(24h=30分) / 高速(24h=3分)
+const season = new SeasonClock(); season.phase = prefs.seasonPhase; season.speed = prefs.seasonSpeed;
+let seasonApplied = -1, daylightApplied = -1, seasonSaveT = 0;
 let dirty = true; // 一時停止中は、見た目が変わったときだけ再描画する(バッテリー・発熱対策)
 let envHour = -1;
 function applyEnv() {
@@ -100,10 +103,22 @@ function applyWeatherOnly() {
   wind.set(settings.bearing, Math.min(12, WIND_SPEED[settings.wind] * wd.windMul), WIND_GUST[settings.wind]);
   flight.liftScale = wd.liftScale; flight.dragScale = wd.dragScale; rain.setIntensity(wd.rain); applyEnv();
 }
+// --- 季節: 見た目(材質・樹冠・田んぼ)と行動の偏りを、季節が少し進んだとき・昼夜の明るさが変わったときだけ更新する
+function saveSeason() { prefs.seasonPhase = season.phase; prefs.seasonSpeed = season.speed; savePrefs(prefs); seasonSaveT = 0; }
+const SEASON_ORDER: SeasonSpeed[] = ["slow", "normal", "fast"], SEASON_SPEED_NAME: Record<SeasonSpeed, string> = { slow: "ゆったり(60分で1年)", normal: "標準(30分で1年)", fast: "高速(10分で1年)" };
+function updateSeasonButton() { const b = document.getElementById("btnSeason"); if (b) b.textContent = season.name; }
+let toastT = 0; function toast(t: string) { const el = document.getElementById("toast")!; el.textContent = t; el.style.opacity = "1"; toastT = 2; dirty = true; }
+function applySeasonLook(force = false) {
+  const dl = Math.min(1, Math.max(0, envAt(hour).sunI / 1.4));
+  const dp = Math.abs(season.phase - seasonApplied); if (!force && Math.min(dp, 1 - dp) < 0.0015 && Math.abs(dl - daylightApplied) < 0.08) return;
+  seasonApplied = season.phase; daylightApplied = dl; world.setSeason(seasonLook(season.phase), dl);
+  const b = seasonBias(season.phase); autopilot.setSeasonBias(b); npc.setSeasonBias(b); updateSeasonButton(); dirty = true;
+}
 function applySettings() {
   applyControl(); syncWeatherLevel();
   const ts = settings.ats as TimeSpeed, hide = settings.ahide === "1";
   if (prefs.autoTimeSpeed !== ts || prefs.autoHideUi !== hide) { prefs.autoTimeSpeed = ts; prefs.autoHideUi = hide; savePrefs(prefs); }
+  if (season.speed !== settings.ss) { season.setSpeed(settings.ss as SeasonSpeed); saveSeason(); updateSeasonButton(); }
   const wd = weatherAtLevel(wxLevel);
   wind.set(settings.bearing, Math.min(12, WIND_SPEED[settings.wind] * wd.windMul), WIND_GUST[settings.wind]);
   flight.liftScale = wd.liftScale; flight.dragScale = wd.dragScale;
@@ -112,7 +127,7 @@ function applySettings() {
   document.getElementById("rowBearing")!.hidden = settings.wind === 0;
 }
 document.querySelectorAll<HTMLElement>("[data-set]").forEach(b => b.addEventListener("click", () => {
-  (settings as Record<string, unknown>)[b.dataset.set!] = b.dataset.set === "weather" || b.dataset.set === "ctl" || b.dataset.set === "apol" || b.dataset.set === "ats" || b.dataset.set === "ahide" ? b.dataset.val : Number(b.dataset.val); applySettings();
+  (settings as Record<string, unknown>)[b.dataset.set!] = b.dataset.set === "weather" || b.dataset.set === "ctl" || b.dataset.set === "apol" || b.dataset.set === "ats" || b.dataset.set === "ahide" || b.dataset.set === "ss" ? b.dataset.val : Number(b.dataset.val); applySettings();
 }));
 applyEnv();
 input.onTime = () => {
@@ -130,6 +145,8 @@ input.onCamera = () => {
 const autopilot = new Autopilot(world, (Date.now() & 0xffff) + 1); autopilot.setPolicy(prefs.autoPolicy);
 const director = new CameraDirector((Date.now() >>> 3) + 7), drift = new WeatherDrift(0, (Date.now() >>> 5) + 3), uiHider = new UiHider();
 const TS_NAMES: Record<TimeSpeed, string> = { slow: "ゆったり", normal: "標準", fast: "高速" }, TS_ORDER: TimeSpeed[] = ["slow", "normal", "fast"];
+document.getElementById("btnSeason")!.addEventListener("pointerdown", e => { e.preventDefault(); e.stopPropagation(); settings.ss = SEASON_ORDER[(SEASON_ORDER.indexOf(season.speed) + 1) % 3]; applySettings(); toast("季節の速さ: " + SEASON_SPEED_NAME[season.speed]); });
+applySeasonLook(true);
 const autoIn = { x: 0, y: 0, flapHeld: false, flapTap: false, brake: false };
 const POL_NAMES: Record<AutoPolicy, string> = { life: "自然生活", scenic: "景色観賞", adventure: "冒険探索", random: "おまかせ" };
 // オート中は手動入力を読まない(スティックやタップは無視)。解除しても飛行状態はそのまま続く
@@ -174,14 +191,14 @@ function showOverlay() {
 }
 game.onPause = () => input.releaseAll();
 const go = () => { if (game.state === "ready") game.start(); else game.resume(); input.releaseAll(); showOverlay(); };
-const pause = () => { game.pause(); showOverlay(); };
+const pause = () => { game.pause(); saveSeason(); showOverlay(); };
 ovGo.addEventListener("click", go);
 ovReset.addEventListener("click", () => { input.onReset(); go(); });
 document.getElementById("ovAuto")!.addEventListener("click", () => { go(); setAuto(true); });
 document.getElementById("btnPause")!.addEventListener("pointerdown", e => { e.preventDefault(); pause(); });
 input.onPause = () => (game.state === "running" ? pause() : go());
 // 画面OFF・アプリ切替・バックグラウンドでは必ず一時停止
-const away = () => { game.suspend(); showOverlay(); };
+const away = () => { game.suspend(); saveSeason(); showOverlay(); };
 document.addEventListener("visibilitychange", () => { if (document.hidden) away(); else dirty = true; });
 addEventListener("pagehide", away); addEventListener("blur", away);
 showOverlay(); applySettings();
@@ -200,6 +217,8 @@ function frame(now: number) {
   game.update(dt);
   // 時間帯の切替アニメーション(実時間・常に前向き)
   const gdt = game.gameTime - lastGT; lastGT = game.gameTime;
+  season.advance(gdt); if (gdt > 0) { applySeasonLook(); seasonSaveT += dt; if (seasonSaveT > 10) saveSeason(); }
+  if (toastT > 0) { toastT -= dt; if (toastT <= 0) document.getElementById("toast")!.style.opacity = "0"; }
   if (targetHour !== null) {
     const diff = (targetHour - hour + 24) % 24;
     if (diff < 1e-3) { hour = targetHour; targetHour = null; } else hour = (hour + Math.min(diff, 10 * dt)) % 24;
@@ -255,4 +274,4 @@ function updateHud(dt: number, now: number) {
 }
 renderer.setAnimationLoop(frame);
 // テスト・デバッグ用
-(window as unknown as Record<string, unknown>).__game = { game, flight, world, input, cam, camera, renderer, scene, frame, env: () => envAt(hour), stats, npc, lines, streaks, speedIntensity, setHour: (h: number) => { hour = h; targetHour = null; applyEnv(); }, settings, applySettings, assist, prefs, autopilot, setAuto, forage, perchAssist, perchMarker, hour: () => hour, director, drift, uiHider, wxLevel: () => wxLevel, wind, rain, quality };
+(window as unknown as Record<string, unknown>).__game = { game, flight, world, input, cam, camera, renderer, scene, frame, env: () => envAt(hour), stats, npc, lines, streaks, speedIntensity, setHour: (h: number) => { hour = h; targetHour = null; applyEnv(); }, settings, applySettings, assist, prefs, autopilot, setAuto, season, applySeasonLook, saveSeason, forage, perchAssist, perchMarker, hour: () => hour, director, drift, uiHider, wxLevel: () => wxLevel, wind, rain, quality };

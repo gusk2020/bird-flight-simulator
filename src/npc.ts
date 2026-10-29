@@ -46,6 +46,9 @@ const ringPos = (s: number, H = SIDEWALK_HALF) => { // 周回路 s → x,z と�
 };
 
 export class NpcWorld {
+  /** 季節による行動の偏り(1=変化なし)。控えめな値だけ。setSeasonBias で更新 */
+  bias = { ground: 1, roof: 1, forage: 1 };
+  setSeasonBias(b: { ground: number; roof: number; forage: number }) { this.bias.ground = b.ground; this.bias.roof = b.roof; this.bias.forage = b.forage; }
   birds: NpcBird[] = []; peds: Ped[] = []; cars: Car[] = []; clock = 0; level = 0; stats = { turns: 0, flights: 0, landings: 0, flees: 0, escorts: 0 };
   private r: () => number; private lotCells: { x: number; z: number }[] = []; private roofs: { x0: number; x1: number; z0: number; z1: number; top: number }[] = [];
   private escortT = 0; private escort = false;
@@ -83,10 +86,10 @@ export class NpcWorld {
 
   // ------------------------------------------------------------ 鳥
   private spotFor(kind: BirdKind, near?: { x: number; z: number }): { x: number; y: number; z: number; land: NpcBird["land"] } {
-    const r = this.r, roll = r(), w = kind === "pigeon" ? [0.5, 0.3] : kind === "sparrow" ? [0.3, 0.1] : [0.2, 0.5]; // 地面/屋根の確率、残りは電線
+    const r = this.r, roll = r(), bw = kind === "pigeon" ? [0.5, 0.3] : kind === "sparrow" ? [0.3, 0.1] : [0.2, 0.5], w = [Math.min(0.85, bw[0] * this.bias.ground), bw[1] * this.bias.roof]; // 地面/屋根の確率、残りは電線
     for (let tries = 0; tries < 12; tries++) {
       let s: { x: number; y: number; z: number; land: NpcBird["land"] };
-      if (roll < w[0]) { const l = this.lotCells[Math.floor(r() * this.lotCells.length)], px = l.x + (r() - 0.5) * 40, pz = l.z + (r() - 0.5) * 40, gy = this.L.heightAt(px, pz); if (gy > 0.2 || this.L.waterAt(px, pz) || [[3, 0], [-3, 0], [0, 3], [0, -3]].some(([ox, oz]) => this.L.heightAt(px + ox, pz + oz) > 0.2)) continue; s = { x: px, y: gy, z: pz, land: "ground" }; }
+      if (roll < w[0]) { const l = this.lotCells[Math.floor(r() * this.lotCells.length)], px = l.x + (r() - 0.5) * 40, pz = l.z + (r() - 0.5) * 40, gy = this.L.heightAt(px, pz); if (gy > 0.2 || this.L.waterAt(px, pz) || [[3, 0], [-3, 0], [0, 3], [0, -3]].some(([ox, oz]) => this.L.heightAt(px + ox, pz + oz) > 0.2)) continue; const gk = this.L.groundAt(px, pz); if (gk === "paved" ? r() < (this.bias.forage - 1) * 1.2 : r() < 1 - this.bias.forage) continue; /* 季節: 春・秋は草地・土・あぜへ、冬は少なめ */ s = { x: px, y: gy, z: pz, land: "ground" }; }
       else if (roll < w[0] + w[1]) { const q = this.roofs[Math.floor(r() * this.roofs.length)]; const px = q.x0 + r() * Math.max(0, q.x1 - q.x0), pz = q.z0 + r() * Math.max(0, q.z1 - q.z0); s = { x: px, y: this.L.heightAt(px, pz), z: pz, land: "roof" }; }
       else { const id = Math.floor(r() * this.L.wires.length), t = 0.12 + r() * 0.76, o = { x: 0, y: 0, z: 0 }; this.L.perchPoint(id, t, o); if ([[4, 0], [-4, 0], [0, 4], [0, -4], [3, 3], [-3, 3], [3, -3], [-3, -3]].some(([ox, oz]) => this.L.heightAt(o.x + ox, o.z + oz) > o.y - 0.5)) continue; s = { x: o.x, y: o.y, z: o.z, land: "wire" }; }
       if (!near || dist2(s.x, s.z, near.x, near.z) < 140) return s;
@@ -134,6 +137,7 @@ export class NpcWorld {
       return;
     }
     // 飛行: 目標へ旋回しながら進み、高度は巡航→降下
+    b.ty = Math.max(b.ty, this.L.heightAt(b.tx, b.tz)); // 目標が建物の中に入ってしまっても、必ずその上へ降りる
     const dx = b.tx - b.x, dz = b.tz - b.z, dh = Math.hypot(dx, dz), want = Math.atan2(-dx, -dz);
     b.yaw += clamp(wrapAng(want - b.yaw), -2.2 * dt, 2.2 * dt);
     const v = k.v * (b.leader && this.escort ? 1.1 : 1); b.speed += (v - b.speed) * Math.min(1, 2 * dt);
@@ -147,7 +151,7 @@ export class NpcWorld {
     const glide = b.cruise - b.ty; let desired = dh < glide * 4 + 2 ? b.ty + Math.max(0, (dh - 0.6)) / 4 : b.cruise;
     if (dh > 3) desired = Math.max(desired, ahead + 1.2);
     b.y += clamp(desired - b.y, -4 * dt, 3.5 * dt);
-    if (dh > 1.2) { const g = hh(b.x, b.z) + 0.3; if (b.y < g) b.y = g; } // 最後の安全策: 建物の中には入らない
+    { const g = (dh > 1.2 ? hh(b.x, b.z) : Math.min(hh(b.x, b.z), b.ty)) + 0.3; if (b.y < g) b.y = g; } // 最後の安全策: 建物の中には入らない
     // 分離(群れの個体同士が重ならない)
     if (b.flock >= 0) for (const q of this.freeFlock(b)) { const ddx = b.x - q.x, ddz = b.z - q.z, dd = Math.hypot(ddx, ddz); if (dd < 1.4 && dd > 1e-3) { b.x += ddx / dd * 0.8 * dt; b.z += ddz / dd * 0.8 * dt; } }
     if (dh < 1.2 && Math.abs(b.y - b.ty) < 0.9) { // 着地

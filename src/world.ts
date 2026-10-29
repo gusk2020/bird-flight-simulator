@@ -1,8 +1,9 @@
 import * as THREE from "three";
+import type { SeasonLook } from "./season";
 import { generateLayout, Layout, PADDY, PITCH, ROAD, LOT, LOT_TOP, HOUSE_W, HOUSE_D, FLOOR_H, houseHeight, APT_W, APT_D } from "./layout";
 
 export interface PaddyLook { growth: number; rice: number; water: number; waterColor?: number }
-export interface World extends Layout { setPaddyLook(p: PaddyLook): void; group: THREE.Group; clouds: THREE.Group; setLights(level: number): void; lightsLevel(): number; updateLOD(x: number, z: number, force?: boolean): void; lodCounts(): { near: number; far: number } }
+export interface World extends Layout { setSeason(k: SeasonLook, daylight?: number): void; setPaddyLook(p: PaddyLook): void; group: THREE.Group; clouds: THREE.Group; setLights(level: number): void; lightsLevel(): number; updateLOD(x: number, z: number, force?: boolean): void; lodCounts(): { near: number; far: number } }
 
 /** 4x4窓タイルのテクスチャ(色)と、点灯している窓だけを光らせる発光マップ */
 function wallTextures(): { map: THREE.CanvasTexture; emissive: THREE.CanvasTexture } {
@@ -66,7 +67,7 @@ export function buildWorld(): World {
   const group = new THREE.Group();
   const EXT = 2 * 4 * PITCH; // 市街の全幅
   // 地面(草地) と道路
-  const grass = new THREE.Mesh(new THREE.PlaneGeometry(3000, 3000), lam(0xffffff, { map: speckle(3000 / 8, 3000 / 8, "#7c9a5e", 40) })); grass.rotation.x = -Math.PI / 2; grass.position.y = -0.04; group.add(grass);
+  const grassMat = lam(0xffffff, { map: speckle(3000 / 8, 3000 / 8, "#7c9a5e", 40) }), grass = new THREE.Mesh(new THREE.PlaneGeometry(3000, 3000), grassMat); grass.rotation.x = -Math.PI / 2; grass.position.y = -0.04; group.add(grass);
   const asphaltTex = speckle(1, (EXT / 2 + 20) / 6, "#4a4d52", 30); asphaltTex.repeat.set(ROAD / 6, (EXT / 2 + 20) / 6);
   const asphalt = lam(0xffffff, { map: asphaltTex });
   for (const rd of L.roads) {
@@ -82,6 +83,7 @@ export function buildWorld(): World {
   const soilMat = lam(0xffffff, { map: speckle(LOT / 6, LOT / 6, "#8a7554", 30) }), ridgeMat = lam(0xffffff, { map: speckle(LOT / 6, LOT / 6, "#86955a", 26) });
   group.add(inst(lotBox, lotMat, L.lots.filter(l => l.use === "town").map(at)), inst(lotBox, parkMat, L.lots.filter(l => l.use === "park").map(at)));
   group.add(inst(lotBox, soilMat, L.lots.filter(l => l.use === "vacant").map(at)), inst(lotBox, ridgeMat, L.lots.filter(l => l.use === "paddy").map(at)));
+  const patchMat = lam(0xffffff), tuftMat = lam(0xffffff); let tuftMesh: THREE.InstancedMesh | null = null;
   // 空き地: 草むら(平たい緑の斑)と雑草の束。座標は区画ごとに決まった乱数で
   { let sd = 31; const rn = () => ((sd = (sd * 1664525 + 1013904223) >>> 0) / 4294967296), patches: { x: number; y: number; z: number; sx: number; sz: number; color: number }[] = [], tufts: { x: number; y: number; z: number; ry: number; sy: number; color: number }[] = [];
     for (const l of L.lots.filter(q => q.use === "vacant")) {
@@ -89,9 +91,9 @@ export function buildWorld(): World {
       for (let k = 0; k < 90; k++) tufts.push({ x: l.x + (rn() - 0.5) * 42, y: LOT_TOP, z: l.z + (rn() - 0.5) * 42, ry: rn() * 6, sy: 0.6 + rn() * 1.2, color: rn() < 0.5 ? 0x5f8a3c : 0x7a9a45 });
     }
     const disc = new THREE.CircleGeometry(1, 7); disc.rotateX(-Math.PI / 2);
-    group.add(inst(disc, lam(0xffffff), patches));
+    group.add(inst(disc, patchMat, patches));
     const tuft = new THREE.ConeGeometry(0.2, 0.7, 3, 1, true); tuft.translate(0, 0.35, 0);
-    group.add(inst(tuft, lam(0xffffff), tufts)); }
+    tuftMesh = inst(tuft, tuftMat, tufts); group.add(tuftMesh); }
   // 田んぼ: 3×3 の水面(あぜで仕切る)と、その上の稲。稲と水は setPaddyLook で季節に合わせて変える
   const e = LOT / 2 - PADDY.border, cell = (2 * e - 2 * PADDY.ridge) / PADDY.plots, pr = cell / 2 + PADDY.ridge / 2;
   const waterMat = new THREE.MeshLambertMaterial({ color: 0x6f93a8, transparent: true, opacity: 0.85, depthWrite: false }), waterGeo = new THREE.PlaneGeometry(cell, cell); waterGeo.rotateX(-Math.PI / 2);
@@ -132,15 +134,16 @@ export function buildWorld(): World {
     group.add(inst(houseGeo(fl), bm, list.map(h => ({ x: h.x, y: 0, z: h.z, ry: h.ry, color: h.wall }))));
   }
   const roofGeo = new THREE.ConeGeometry(0.7071, 0.9, 4); roofGeo.rotateY(Math.PI / 4); roofGeo.translate(0, 0.45, 0);
+  const roofConeMat = lam(0xffffff);
   for (const rot of [0, Math.PI / 2]) {
     const hs = L.houses.filter(h => h.ry === rot);
-    group.add(inst(roofGeo, lam(0xffffff), hs.map(h => ({ x: h.x, y: houseHeight(h.floors), z: h.z, ry: h.ry, sx: HOUSE_W + 1.4, sy: 1, sz: HOUSE_D + 1.4, color: h.roof }))));
+    group.add(inst(roofGeo, roofConeMat, hs.map(h => ({ x: h.x, y: houseHeight(h.floors), z: h.z, ry: h.ry, sx: HOUSE_W + 1.4, sy: 1, sz: HOUSE_D + 1.4, color: h.roof }))));
   }
   const floorsSet = [...new Set(L.apts.map(a => a.floors))];
   for (const fl of floorsSet) {
     group.add(inst(buildingBox(APT_W, fl * FLOOR_H, APT_D, 3.5 * 4, FLOOR_H * 4), bm, L.apts.filter(a => a.floors === fl).map(a => ({ x: a.x, y: 0, z: a.z, color: a.wall }))));
   }
-  group.add(inst(new THREE.BoxGeometry(5, 2.2, 5), lam(0xb9bcc0), L.tanks.map(t => ({ x: t.x, y: t.y + 1.1, z: t.z }))));
+  const tankMat = lam(0xb9bcc0); group.add(inst(new THREE.BoxGeometry(5, 2.2, 5), tankMat, L.tanks.map(t => ({ x: t.x, y: t.y + 1.1, z: t.z }))));
 
   // 低い障害物と、止まれる構造物・自然物(ベンチ・塀・植え込み・ベランダ・手すり・柵・看板・岩・木の枝)。種類ごとに1つのInstancedMesh
   const lowCol = { bench: 0x8a5a3a, wall: 0xc9c3b4, planter: 0x6f7f5a, balcony: 0xd6d0c4, rail: 0x4a4d52, fence: 0x7a6a55, sign: 0xe8e3d0, rock: 0x8b8982, branch: 0x6b4f3a };
@@ -223,5 +226,20 @@ export function buildWorld(): World {
     side.emissiveIntensity = 0.9 * lv;
     lampMat.color.setHex(0x777777).lerp(new THREE.Color(0xffd98a), lv);
   };
-  return Object.assign(L, { setPaddyLook, group, clouds, setLights, lightsLevel: () => lightsLv, updateLOD, lodCounts: () => ({ near: nNear, far: nFar }) }) as World;
+  // --- 季節: 色(材質の乗算)・積雪(発光で白く)・樹冠(色と葉の量)・田んぼ。毎フレームではなく、季節が少し進んだときだけ呼ぶ
+  const snowMats: [THREE.MeshLambertMaterial, number][] = [[grassMat, 0.9], [lotMat as THREE.MeshLambertMaterial, 0.8], [parkMat as THREE.MeshLambertMaterial, 0.9], [soilMat as THREE.MeshLambertMaterial, 0.9], [ridgeMat as THREE.MeshLambertMaterial, 0.9], [asphalt as THREE.MeshLambertMaterial, 0.45], [roofFlat as THREE.MeshLambertMaterial, 0.8], [roofConeMat, 0.7], [tankMat, 0.5]];
+  for (const [m] of snowMats) { m.emissive.setHex(0xffffff); m.emissiveIntensity = 0; }
+  const setSeason = (k: SeasonLook, daylight = 1) => {
+    for (const m of [grassMat, parkMat, ridgeMat] as THREE.MeshLambertMaterial[]) m.color.setHex(k.grassTint);
+    patchMat.color.setHex(k.grassTint); tuftMat.color.setHex(k.weedTint); if (tuftMesh) tuftMesh.scale.y = k.weedScale;
+    for (const [m, w] of snowMats) m.emissiveIntensity = k.snow * w * 1.0 * Math.max(0.12, daylight); // 夜は雪も暗く
+    const pink = new THREE.Color(0xf7b9cf), c = new THREE.Color();
+    L.trees.forEach((t, i) => {
+      c.setHex(k.leaf).offsetHSL(0, 0, (t.tint - 0.5) * 0.16); if (t.tint < 0.4) c.lerp(pink, k.blossom); c.toArray(tc, i * 3);
+      const sc = k.leafAmount; od.position.set(t.x, LOT_TOP + 2.4 * t.s * 0.9 + t.s * 1.2, t.z); od.rotation.set(0, 0, 0); od.scale.set(t.s * 1.6 * sc, t.s * 1.5 * sc, t.s * 1.6 * sc); od.updateMatrix(); od.matrix.toArray(tm, i * 16);
+    });
+    updateLOD(lodX, lodZ, true);
+    setPaddyLook(k.paddy);
+  };
+  return Object.assign(L, { setSeason, setPaddyLook, group, clouds, setLights, lightsLevel: () => lightsLv, updateLOD, lodCounts: () => ({ near: nNear, far: nFar }) }) as World;
 }

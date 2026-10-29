@@ -137,6 +137,7 @@ export class NpcWorld {
       return;
     }
     // 飛行: 目標へ旋回しながら進み、高度は巡航→降下
+    b.ty = Math.max(b.ty, this.L.heightAt(b.tx, b.tz)); // 目標が建物の中に入ってしまっても、必ずその上へ降りる
     const dx = b.tx - b.x, dz = b.tz - b.z, dh = Math.hypot(dx, dz), want = Math.atan2(-dx, -dz);
     b.yaw += clamp(wrapAng(want - b.yaw), -2.2 * dt, 2.2 * dt);
     const v = k.v * (b.leader && this.escort ? 1.1 : 1); b.speed += (v - b.speed) * Math.min(1, 2 * dt);
@@ -150,7 +151,7 @@ export class NpcWorld {
     const glide = b.cruise - b.ty; let desired = dh < glide * 4 + 2 ? b.ty + Math.max(0, (dh - 0.6)) / 4 : b.cruise;
     if (dh > 3) desired = Math.max(desired, ahead + 1.2);
     b.y += clamp(desired - b.y, -4 * dt, 3.5 * dt);
-    if (dh > 1.2) { const g = hh(b.x, b.z) + 0.3; if (b.y < g) b.y = g; } // 最後の安全策: 建物の中には入らない
+    { const g = (dh > 1.2 ? hh(b.x, b.z) : Math.min(hh(b.x, b.z), b.ty)) + 0.3; if (b.y < g) b.y = g; } // 最後の安全策: 建物の中には入らない
     // 分離(群れの個体同士が重ならない)
     if (b.flock >= 0) for (const q of this.freeFlock(b)) { const ddx = b.x - q.x, ddz = b.z - q.z, dd = Math.hypot(ddx, ddz); if (dd < 1.4 && dd > 1e-3) { b.x += ddx / dd * 0.8 * dt; b.z += ddz / dd * 0.8 * dt; } }
     if (dh < 1.2 && Math.abs(b.y - b.ty) < 0.9) { // 着地

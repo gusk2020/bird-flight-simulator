@@ -30,7 +30,7 @@ export function autopilotTests() {
     check(`${p}: crash incidents are rare (<= 3 per 2.5 min run; a wall hit plus the fall after it counts once) and it keeps flying`, r.every(x => x.incidents <= 3 && x.air > 600));
   }
   const avg = (p: string, k: "landed" | "agl") => res[p].reduce((a, x) => a + x[k], 0) / res[p].length;
-  check("policies differ: life spends more time on the ground than scenic", avg("life", "landed") > avg("scenic", "landed") + 0.1);
+  check("policies differ: life spends more time on the ground than scenic", avg("life", "landed") > avg("scenic", "landed") + 0.1, `life ${avg("life", "landed").toFixed(2)} scenic ${avg("scenic", "landed").toFixed(2)}`);
   check("policies differ: scenic flies higher than life", avg("scenic", "agl") > avg("life", "agl") + 5);
   check("life actually lands and walks; takeoffs happen", res.life.some(x => x.ap.stats.landings > 0) && res.life.some(x => x.ap.stats.takeoffs > 0));
   { const a = sim("random", 5, 40), b = sim("random", 5, 40);

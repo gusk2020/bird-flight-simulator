@@ -12,7 +12,7 @@ export interface WorldQuery {
   wireDir?(id: number): [number, number];
 }
 /** スティックの前倒しで歩き出す閾値(これ未満の前倒しは向き替えだけ) */
-export const WALK_STICK_DEAD = 0.25;
+export const WALK_STICK_DEAD = 0.15;
 export interface FlightInput { x: number; y: number; flapHeld: boolean; flapTap: boolean; brake: boolean }
 export type Mode = "air" | "rollout" | "landed" | "perch";
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
@@ -28,7 +28,9 @@ export class Flight {
   wind: WindSource | null = null; windVec = new THREE.Vector3(); liftScale = 1; dragScale = 1; clock = 0; airspeed = 0;
   /** 着地補助が小ジャンプの初速を一時的に上書きする(次の1回のジャンプでだけ使い、毎ステップ末尾で消す) */
   hopHint: { up: number; fwd: number; yaw?: number } | null = null;
-  groundHold = 0; perchId = -1; perchT = 0; perchCool = 0; perchBlend = 0; walkV = 0; hopping = false; hopT = -1; walkPhase = 0;
+  groundHold = 0; perchId = -1; perchT = 0; perchCool = 0; perchBlend = 0; walkV = 0; hopping = false;
+  /** 旋回の横滑りを機首方向へ向け直すときに残す割合(手動操作=PHYS.turnKeep。0=従来どおり捨てる: オート周遊はこちらで調整済み) */
+  turnKeep: number = P.turnKeep; hopT = -1; walkPhase = 0;
   alpha = 0; speed = 0; agl = 0; braking = false; crashes = 0; resets = 0;
   constructor(public world: WorldQuery) { this.reset(); }
 
@@ -61,7 +63,7 @@ export class Flight {
 
     if (this.mode === "air") this.air(dt, sx, sy);
     else { // 地上・電線: 歩くボタン(長押し)か、スティックを前へ倒すと歩く。前へ倒した量で速さが変わる
-      const walk = this.braking ? 1 : clamp((sy - WALK_STICK_DEAD) / (1 - WALK_STICK_DEAD - 0.3), 0, 1);
+      const walk = this.braking ? 1 : clamp((sy - WALK_STICK_DEAD) / 0.4, 0, 1);
       this.stall = false; this.strokeT = -1;
       if (this.mode === "perch") { this.perchStep(dt, sx, walk > 0, tap, held); this.braking = false; }
       else { this.ground(dt, sx, walk, tap, held); this.braking = this.mode === "rollout" && inp.brake && ctl > 0; }
@@ -119,8 +121,11 @@ export class Flight {
     }
     this.vel.addScaledVector(_a, dt);
     // 横滑りを減衰 (旋回で速度が機首方向へ曲がる)
-    const side = this.vel.dot(_r);
-    this.vel.addScaledVector(_r, -side * (1 - Math.exp(-P.sideDamp * dt)));
+    // 横滑りを機首方向へ向け直す(以前は横成分を捨てていたため、旋回するたびに速度を大きく失い、緩い旋回でも失速→落下していた)。向け直しの損失は一部だけ
+    const side = this.vel.dot(_r), rm = side * (1 - Math.exp(-P.sideDamp * dt)), h2 = this.vel.x * this.vel.x + this.vel.z * this.vel.z;
+    this.vel.addScaledVector(_r, -rm);
+    const keep = h2 - (1 - this.turnKeep) * rm * rm, now = this.vel.x * this.vel.x + this.vel.z * this.vel.z;
+    if (this.turnKeep > 0 && now > 1e-6 && keep > now) { const k = Math.sqrt(keep / now); this.vel.x *= k; this.vel.z *= k; } // 水平成分だけ戻す(沈下は増やさない)
     if (this.vel.length() > P.maxDiveSpeed) this.vel.setLength(P.maxDiveSpeed);
     this.vel.add(w);
     this.pos.addScaledVector(this.vel, dt);

@@ -1,10 +1,13 @@
 /** 片手操作のタッチ判定(DOM非依存)。しきい値はここに集約: 実機で調整するときはこの定数だけ触る。 */
 export const GESTURE = {
-  moveThresholdPx: 12,   // これ以上動いたら「スティック操作」(タップ・長押しにはならない)
+  moveThresholdPx: 16,   // これ以上動いたら「スティック操作」(タップ・長押しにはならない)。親指の小さなぶれをタップとして残すため12→16
   longPressMs: 300,      // 動かさずこれ以上押し続けたら長押し(減速/地上では歩く)。これより短く離せばタップ(羽ばたき/小ジャンプ)=間に「どちらでもない」空白時間は作らない
   deadzone: 0.12,
+  expo: 1.5,             // 小さな倒しをより小さく(中央付近は穏やか、端まで倒せば最大)。急な旋回・昇降を防ぐ
   radiusPx(w: number, h: number) { return Math.max(45, Math.min(75, Math.min(w, h) * 0.13)); },
 };
+/** 不感帯の外側を0から始まるよう詰め直し、指数カーブをかける(不感帯の境目で値が跳ばない) */
+const shape = (v: number) => { const a = Math.abs(v), d = GESTURE.deadzone; if (a <= d) return 0; return Math.sign(v) * Math.pow((a - d) / (1 - d), GESTURE.expo); };
 type Phase = "idle" | "pending" | "stick" | "brake";
 
 /**
@@ -28,7 +31,7 @@ export class OneHandGesture {
       this.phase = "stick"; this.brake = false; // 長押し中に動かした場合も、スティックに切り替わり減速は解除
     }
     let nx = dx / this.R, ny = dy / this.R; const m = Math.sqrt(nx * nx + ny * ny); if (m > 1) { nx /= m; ny /= m; }
-    this.x = Math.abs(nx) < GESTURE.deadzone ? 0 : nx; this.y = Math.abs(ny) < GESTURE.deadzone ? 0 : -ny;
+    this.x = shape(nx); this.y = -shape(ny);
   }
   /** 時間経過の判定(物理ステップごとに呼ぶ) */
   poll(t: number) { if (this.phase === "pending" && t - this.t0 >= GESTURE.longPressMs) { this.phase = "brake"; this.brake = true; } }

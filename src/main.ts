@@ -14,6 +14,7 @@ import { Rain } from "./rain";
 import { Quality } from "./quality";
 import { loadPrefs, savePrefs, ControlMode } from "./settings";
 import { FlapAssist } from "./assist";
+import { PHYS } from "./params";
 import { Autopilot } from "./autopilot";
 import { buildSurfaces } from "./perches";
 import { Forage } from "./forage";
@@ -152,7 +153,7 @@ const POL_NAMES: Record<AutoPolicy, string> = { life: "自然生活", scenic: "�
 // オート中は手動入力を読まない(スティックやタップは無視)。解除しても飛行状態はそのまま続く
 const readInput = () => {
   if (autopilot.enabled) { autoIn.flapTap = false; autoIn.flapHeld = false; autoIn.brake = false; autopilot.busy = forage.active; return forage.apply(autopilot.drive(flight, autoIn, 1 / 60), flight, false); }
-  return forage.apply(assist.apply(perchAssist.apply(input.read(), flight), flight), flight, true);
+  return forage.apply(assist.apply(perchAssist.apply(input.read(), flight), flight, !!perchAssist.target && perchAssist.aimD < 5), flight, true);
 };
 const game = new Game(flight, readInput, () => { input.state.flapTap = false; });
 function applyAuto() {
@@ -168,7 +169,7 @@ function setAuto(on: boolean) {
   if (on === autopilot.enabled) return;
   if (on) { autopilot.setPolicy(settings.apol as AutoPolicy); autopilot.start(flight); drift.level = drift.target = wxLevel; director.reset(); uiHider.touch(); }
   else { // 解除: 到達した時刻・天気はそのまま。カメラは追従へなめらかに戻る
-    autopilot.stop(); director.reset(); cam.setShot(0, 1, 0); if (cam.mode === "third") bird.setVisible(true);
+    autopilot.stop(); flight.turnKeep = PHYS.turnKeep; director.reset(); cam.setShot(0, 1, 0); if (cam.mode === "third") bird.setVisible(true);
     settings.weather = appliedWeather = WX_NAMES[Math.round(wxLevel)]; applySettingsLight();
   }
   input.releaseAll(); applyAuto();

@@ -17,7 +17,7 @@ export function oneHandTests() {
     check("moving past the threshold = stick; time passing never turns it into a brake", g.phase === "stick" && !g.brake && g.x !== 0);
     g.move(1, 500, 300); g.poll(t0 + 5000); g.up(1, t0 + 5100);
     check("returning to the origin keeps it a stick; release gives no tap", !g.consumeTap() && !g.brake); }
-  { const g = new OneHandGesture(); g.down(1, 500, 300, t0, 60); g.move(1, 500 + 60, 300 - 60); check("stick: right+up -> x>0, y>0, clamped to the unit circle", g.x > 0.6 && g.y > 0.6 && g.x * g.x + g.y * g.y <= 1.0001); g.move(1, 500, 300 + 60); check("stick: down -> y<0", g.y < -0.9);
+  { const g = new OneHandGesture(); g.down(1, 500, 300, t0, 60); g.move(1, 500 + 60, 300 - 60); check("stick: right+up -> x>0, y>0, clamped to the unit circle", g.x > 0.5 && g.y > 0.5 && g.x * g.x + g.y * g.y <= 1.0001); g.move(1, 500, 300 + 60); check("stick: down -> y<0", g.y < -0.9);
     g.move(1, 504, 302); check("small movement inside the move threshold stays pending (no stick output)", g.phase === "stick" || (g.x === 0 && g.y === 0)); }
   { const g = new OneHandGesture(); g.down(1, 500, 300, t0); g.poll(t0 + GESTURE.longPressMs + 1); g.move(1, 500 + 40, 300);
     check("moving during a long press switches to stick and releases the brake", g.phase === "stick" && !g.brake); }

@@ -29,7 +29,7 @@ export function structureTests() {
   const idx = buildSurfaces(L);
   const sk = new Set(idx.all.map(s => s.kind));
   check("all kinds are landable surfaces (shared with the perch assist)", kinds.every(k => sk.has(k as never)));
-  check("thin things are edges (rails, fences, signs, branches, poles, walls); balconies and roofs are not", idx.all.filter(s => ["rail", "fence", "sign", "branch", "pole", "wall"].includes(s.kind)).every(s => s.edge) && idx.all.filter(s => ["balcony", "roof"].includes(s.kind)).every(s => !s.edge));
+  check("thin things are edges (rails, fences, signs, branches, poles, walls); roofs are not (balconies are guided lengthwise)", idx.all.filter(s => ["rail", "fence", "sign", "branch", "pole", "wall"].includes(s.kind)).every(s => s.edge) && idx.all.filter(s => ["roof"].includes(s.kind)).every(s => !s.edge));
   const t0 = performance.now(); let acc = 0; for (let i = 0; i < 100000; i++) acc += L.heightAt((i % 400) - 200, ((i * 7) % 400) - 200); const us = (performance.now() - t0) / 100;
   check("heightAt stays cheap with the extra colliders (< 5 us per call)", us < 5 && Number.isFinite(acc), us.toFixed(2) + " us");
   check("collider count is bounded (< 600)", L.colliders.length < 600, String(L.colliders.length));

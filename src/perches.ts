@@ -1,20 +1,20 @@
-import type { Layout } from "./layout";
+import { MIN_HALF, type Layout } from "./layout";
 
 /**
  * 着地できる面(止まり木)の一覧。手動操作の着地補助とオート周遊の双方が同じデータを使う。
  * 面ごとに上面の高さ・広さ・種類を持ち、細長い縁(壁・ベンチ・手すり・柵など)は edge=true で長手方向(axisAlongX)を持つ。
  */
 export type SurfaceKind = "bench" | "wall" | "planter" | "roof" | "tank" | "balcony" | "rail" | "fence" | "pole" | "sign" | "branch" | "rock";
-export interface Surface { id: number; kind: SurfaceKind; minX: number; maxX: number; minZ: number; maxZ: number; top: number; edge: boolean; axisAlongX: boolean }
+export interface Surface { id: number; kind: SurfaceKind; minX: number; maxX: number; minZ: number; maxZ: number; top: number; edge: boolean; axisAlongX: boolean; /** 壁際の足場の「建物の外側」(単位ベクトル xz)。着地誘導が壁側へ寄りすぎないために使う */ outward?: [number, number] }
 
 const CELL = 16;
 export class SurfaceIndex {
   readonly all: Surface[] = [];
   private cells = new Map<number, Surface[]>();
   private key(cx: number, cz: number) { return (cx + 64) * 256 + (cz + 64); }
-  add(kind: SurfaceKind, minX: number, maxX: number, minZ: number, maxZ: number, top: number, edge?: boolean): Surface {
+  add(kind: SurfaceKind, minX: number, maxX: number, minZ: number, maxZ: number, top: number, edge?: boolean, outward?: [number, number]): Surface {
     const w = maxX - minX, d = maxZ - minZ;
-    const s: Surface = { id: this.all.length, kind, minX, maxX, minZ, maxZ, top, edge: edge ?? Math.min(w, d) < 1.2, axisAlongX: w >= d };
+    const s: Surface = { id: this.all.length, kind, minX, maxX, minZ, maxZ, top, edge: edge ?? Math.min(w, d) < 1.2, axisAlongX: w >= d, outward };
     this.all.push(s);
     for (let cx = Math.floor(minX / CELL); cx <= Math.floor(maxX / CELL); cx++) for (let cz = Math.floor(minZ / CELL); cz <= Math.floor(maxZ / CELL); cz++) {
       const k = this.key(cx, cz); let a = this.cells.get(k); if (!a) { a = []; this.cells.set(k, a); } a.push(s);
@@ -41,7 +41,7 @@ export class SurfaceIndex {
 /** 既存の街(屋根・タンク・低い障害物)から着地面を作る。E3で増える構造物は layout 側に足せば自動で含まれる。 */
 export function buildSurfaces(L: Layout): SurfaceIndex {
   const idx = new SurfaceIndex();
-  for (const l of L.lows) idx.add(l.kind, l.x - l.hw, l.x + l.hw, l.z - l.hd, l.z + l.hd, l.top, l.kind === "planter" ? false : undefined);
+  for (const l of L.lows) { const w = Math.max(l.hw, MIN_HALF), d = Math.max(l.hd, MIN_HALF); idx.add(l.kind, l.x - w, l.x + w, l.z - d, l.z + d, l.top, l.kind === "planter" ? false : l.kind === "balcony" ? true : undefined, l.out ? [0, l.out] : undefined); } // 当たり判定と同じ幅
   for (const h of L.houses) { const w = 5, d = 4, t = L.heightAt(h.x, h.z); if (t > 0) idx.add("roof", h.x - w, h.x + w, h.z - d, h.z + d, t, false); }
   for (const a of L.apts) { const t = L.heightAt(a.x, a.z); if (t > 0) idx.add("roof", a.x - a.w / 2, a.x + a.w / 2, a.z - a.d / 2, a.z + a.d / 2, t, false); }
   return idx;

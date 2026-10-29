@@ -4,7 +4,7 @@ export interface Collider { minX: number; maxX: number; minZ: number; maxZ: numb
 export interface House { x: number; z: number; ry: number; floors: 1 | 2; wall: number; roof: number }
 export interface Apt { x: number; z: number; ry: number; floors: number; wall: number; w: number; d: number }
 export interface Tree { x: number; z: number; s: number; tint: number }
-export interface Low { x: number; z: number; hw: number; hd: number; top: number; kind: "bench" | "wall" | "planter" | "balcony" | "rail" | "fence" | "sign" | "rock" | "branch" | "pole" }
+export interface Low { x: number; z: number; hw: number; hd: number; top: number; kind: "bench" | "wall" | "planter" | "balcony" | "rail" | "fence" | "sign" | "rock" | "branch" | "pole"; /** 壁面の外側(z方向の符号) */ out?: number }
 export interface Wire { ax: number; az: number; bx: number; bz: number; off: number; alongX: boolean }
 export const WIRE_TOP = 8.3, WIRE_SAG = 1.2, WIRE_SPACING = 0.9;
 /** 区画の使われ方。town=住宅・集合住宅、park=公園、vacant=空き地、paddy=田んぼ */
@@ -24,6 +24,7 @@ export interface Layout {
   groundAt(x: number, z: number): GroundKind; waterAt(x: number, z: number): boolean;
   heightAt(x: number, z: number): number;
 }
+export const MIN_HALF = 0.25; // 当たり判定・着地面の最小の半幅 m
 export const HOUSE_W = 10, HOUSE_D = 8, FLOOR_H = 3.1, APT_W = 24, APT_D = 15;
 
 function rng(seed: number) {
@@ -41,8 +42,9 @@ export function generateLayout(seed = 7): Layout {
   const pick = <T,>(a: T[]) => a[Math.floor(r() * a.length)];
   const L: Layout = { wires: [], perchAt, perchPoint, wireDir, lows: [], colliders: [], houses: [], apts: [], tanks: [], trees: [], poles: [], poleLines: [], lots: [], roads: [], heightAt, groundAt, waterAt };
   for (let k = 0; k < 8; k++) L.roads.push((k - 3.5) * PITCH);
-  const box = (x: number, z: number, hw: number, hd: number, top: number) =>
-    L.colliders.push({ minX: x - hw, maxX: x + hw, minZ: z - hd, maxZ: z + hd, top });
+  // 当たり判定は、見た目が細くても半幅 MIN_HALF 以上にする(体の半径0.35mの鳥が、幅20cmの壁の上の数cmの帯へ中心を入れるのは非現実的なので、乗れる幅に余裕を持たせる)
+  const box = (x: number, z: number, hw: number, hd: number, top: number) => { const w = Math.max(hw, MIN_HALF), d = Math.max(hd, MIN_HALF);
+    L.colliders.push({ minX: x - w, maxX: x + w, minZ: z - d, maxZ: z + d, top }); };
   // E4: 空き地と田んぼにする区画を、別の乱数列で決める(外側の2周から)。選ばれた区画も元の乱数は同じだけ消費して捨てるので、他の区画の配置は変わらない。
   const rs = rng(seed + 3999), cand: [number, number][] = [];
   for (let i = -HALF; i <= HALF; i++) for (let j = -HALF; j <= HALF; j++) if (Math.max(Math.abs(i), Math.abs(j)) >= 2) cand.push([i, j]);
@@ -141,16 +143,16 @@ export function generateLayout(seed = 7): Layout {
     for (const lv of levels) {
       if (r3() < 0.25) continue;
       const side = r3() < 0.6 ? 1 : -1, bx = a.x + (r3() - 0.5) * 12, bz = a.z + side * (APT_D / 2 + 0.7), top = FLOOR_H * lv;
-      L.lows.push({ x: bx, z: bz, hw: 2.2, hd: 0.7, top, kind: "balcony" }); box(bx, bz, 2.2, 0.7, top);
+      L.lows.push({ x: bx, z: bz, hw: 2.2, hd: 0.7, top, kind: "balcony", out: side }); box(bx, bz, 2.2, 0.7, top);
       const rz = bz + side * 0.62;
-      L.lows.push({ x: bx, z: rz, hw: 2.2, hd: 0.04, top: top + 1.0, kind: "rail" }); box(bx, rz, 2.2, 0.04, top + 1.0);
+      L.lows.push({ x: bx, z: rz, hw: 2.2, hd: 0.04, top: top + 1.0, kind: "rail", out: side }); box(bx, rz, 2.2, 0.04, top + 1.0);
     }
   }
   for (const lot of L.lots) {
     if (lot.park) continue;
     const lw1 = L.lows.length, lc1 = L.colliders.length;
     // 柵: 区画の縁(道路側)に沿って低い柵。壁とは別の辺
-    if (r3() < 0.6) { const sx = r3() < 0.5 ? -1 : 1; L.lows.push({ x: lot.x + sx * 21.8, z: lot.z + (r3() - 0.5) * 18, hw: 0.05, hd: 3.2, top: 1.15, kind: "fence" }); const l = L.lows[L.lows.length - 1]; box(l.x, l.z, l.hw, l.hd, l.top); }
+    if (r3() < 0.6) { const sx = r3() < 0.5 ? -1 : 1; L.lows.push({ x: lot.x + sx * 21.3, z: lot.z + (r3() - 0.5) * 18, hw: 0.05, hd: 3.2, top: 1.15, kind: "fence" }); const l = L.lows[L.lows.length - 1]; box(l.x, l.z, l.hw, l.hd, l.top); }
     // 看板: 区画の角に近い支柱つきの小さな看板(上面が足場)
     if (r3() < 0.35) { const sx = r3() < 0.5 ? -1 : 1, sz = r3() < 0.5 ? -1 : 1; L.lows.push({ x: lot.x + sx * 19, z: lot.z + sz * 21.2, hw: 0.6, hd: 0.07, top: 2.3, kind: "sign" }); const l = L.lows[L.lows.length - 1]; box(l.x, l.z, l.hw, l.hd, l.top); }
     // 岩: ときどき区画の隅に

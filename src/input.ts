@@ -89,9 +89,9 @@ export class Input {
     const k = this.keys, s = this.state;
     if (this.mode !== "both") { // 片手: ジェスチャの結果を状態へ反映(長押し判定もここで進める)
       const g = this.gesture; g.poll(performance.now()); s.brake = g.brake; if (g.consumeTap()) s.flapTap = true;
-      // 指の動きを約0.1秒でなめらかにして渡す(急な旋回・昇降を防ぐ)。離したときは素早く(約0.05秒)中立へ
-      const k = 1 - Math.exp(-(1 / 60) / (g.active ? SMOOTH_S : SMOOTH_S / 2)); s.x += (g.x - s.x) * k; s.y += (g.y - s.y) * k;
-      if (Math.abs(s.x) < 1e-3 && g.x === 0) s.x = 0; if (Math.abs(s.y) < 1e-3 && g.y === 0) s.y = 0;
+      // 指の動きを約0.1秒でなめらかにして渡す(急な旋回・昇降を防ぐ)。指を離したら、その場で中立へ戻す
+      if (g.active) { const k = 1 - Math.exp(-(1 / 60) / SMOOTH_S); s.x += (g.x - s.x) * k; s.y += (g.y - s.y) * k; }
+      else s.x = s.y = 0;
     }
     const kx = (k.has("ArrowRight") || k.has("KeyD") ? 1 : 0) - (k.has("ArrowLeft") || k.has("KeyA") ? 1 : 0);
     const ky = (k.has("ArrowUp") || k.has("KeyW") ? 1 : 0) - (k.has("ArrowDown") || k.has("KeyS") ? 1 : 0);

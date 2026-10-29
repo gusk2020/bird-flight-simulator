@@ -20,8 +20,8 @@ export class FollowCam {
    * 注視点の高さだけを低域通過フィルタに通す: 羽ばたき周期(約3Hz)の揺れは落とし、上昇・下降のような持続的な高度変化には追従する。
    * 遅れが大きくなりすぎないよう、鳥との高さの差には上限(CAM_TUNE.maxLag)を設ける。
    */
-  stableHeight = true; private ay = 0; private vyPk = 0; private vyF = 0; private vyS = 0; private cpSlow = 0; private sw = 0; private fp = 0;
-  snap() { this.ready = false; this.sYaw = this.tYaw = 0; this.sDist = this.tDist = 1; this.sH = this.tH = 0; }
+  stableHeight = true; private ay = 0; private vyPk = 0; private vyF = 0; private vyS = 0; private cpSlow = 0; private landH = 0; private sw = 0; private fp = 0;
+  snap() { this.ready = false; this.landH = 0; this.sYaw = this.tYaw = 0; this.sDist = this.tDist = 1; this.sH = this.tH = 0; }
   // オートのカット(演出): 目標値へなめらかに寄せる。既定(0,1,0)は従来の追従と完全に同じ
   private sYaw = 0; private tYaw = 0; private sDist = 1; private tDist = 1; private sH = 0; private tH = 0;
   setShot(yaw: number, dist: number, h: number) { this.tYaw = yaw; this.tDist = dist; this.tH = h; }
@@ -61,7 +61,10 @@ export class FollowCam {
       this.cam.rotation.set((this.stableHeight ? this.fp : f.pitch) * 0.85, this.yaw, f.roll * 0.6, "YXZ");
       return;
     }
-    this.dist += ((f.mode === "air" ? 5.2 + 2.2 * fx : 4.0) - this.dist) * k(3);
+    // 着地中(地面・屋根・縁・電線の上)は鳥を少し大きく、足場と周囲が見える少し高めの位置へ。離陸すると通常の追従へなめらかに戻る
+    const onGround = f.mode !== "air" || f.hopping;
+    this.dist += ((!onGround ? 5.2 + 2.2 * fx : f.mode === "perch" ? 3.5 : 3.3) - this.dist) * k(3);
+    this.landH += ((onGround ? 0.45 : 0) - this.landH) * k(2.5);
     if (this.sYaw !== this.tYaw || this.sDist !== this.tDist || this.sH !== this.tH) { // カットの切替も、角度・距離・高さを連続的に動かす
       const ks = k(1.4); this.sYaw += wrap(this.tYaw - this.sYaw) * ks; this.sDist += (this.tDist - this.sDist) * ks; this.sH += (this.tH - this.sH) * ks;
       if (Math.abs(wrap(this.tYaw - this.sYaw)) < 1e-3 && Math.abs(this.tDist - this.sDist) < 1e-3 && Math.abs(this.tH - this.sH) < 1e-3) { this.sYaw = this.tYaw; this.sDist = this.tDist; this.sH = this.tH; }
@@ -69,7 +72,7 @@ export class FollowCam {
     const vyaw = this.yaw + this.sYaw, d = this.dist * this.sDist;
     const cpEff = this.stableHeight ? this.cpSlow + (this.cp - this.cpSlow) * this.sw : this.cp; // 持続的な急上昇・急降下(sw大)では素早い追従、巡航中の機首の揺れでは遅い追従 // 持続的な上昇・降下(sw大)では素早い追従、巡航中の機首の揺れでは遅い追従
     const cc = Math.cos(cpEff), dx = -Math.sin(vyaw) * cc, dy = Math.sin(cpEff), dz = -Math.cos(vyaw) * cc;
-    this._o.set(-dx * d, -dy * d + 1.3 * Math.max(0.3, this.sDist) + this.sH, -dz * d);
+    this._o.set(-dx * d, -dy * d + 1.3 * Math.max(0.3, this.sDist) + this.sH + this.landH, -dz * d);
     // 遮蔽: 鳥からカメラへ線を引き、建物・地面に入る手前で止める
     let free = 1;
     for (let i = 1; i <= 10; i++) {

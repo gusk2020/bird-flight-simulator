@@ -16,6 +16,7 @@ export interface Layout {
   lots: { x: number; z: number; park: boolean }[]; roads: number[];
   heightAt(x: number, z: number): number;
 }
+export const MIN_HALF = 0.25; // 当たり判定・着地面の最小の半幅 m
 export const HOUSE_W = 10, HOUSE_D = 8, FLOOR_H = 3.1, APT_W = 24, APT_D = 15;
 
 function rng(seed: number) {
@@ -33,8 +34,9 @@ export function generateLayout(seed = 7): Layout {
   const pick = <T,>(a: T[]) => a[Math.floor(r() * a.length)];
   const L: Layout = { wires: [], perchAt, perchPoint, wireDir, lows: [], colliders: [], houses: [], apts: [], tanks: [], trees: [], poles: [], poleLines: [], lots: [], roads: [], heightAt };
   for (let k = 0; k < 8; k++) L.roads.push((k - 3.5) * PITCH);
-  const box = (x: number, z: number, hw: number, hd: number, top: number) =>
-    L.colliders.push({ minX: x - hw, maxX: x + hw, minZ: z - hd, maxZ: z + hd, top });
+  // 当たり判定は、見た目が細くても半幅 MIN_HALF 以上にする(体の半径0.35mの鳥が、幅20cmの壁の上の数cmの帯へ中心を入れるのは非現実的なので、乗れる幅に余裕を持たせる)
+  const box = (x: number, z: number, hw: number, hd: number, top: number) => { const w = Math.max(hw, MIN_HALF), d = Math.max(hd, MIN_HALF);
+    L.colliders.push({ minX: x - w, maxX: x + w, minZ: z - d, maxZ: z + d, top }); };
   for (let i = -HALF; i <= HALF; i++) for (let j = -HALF; j <= HALF; j++) {
     const cx = i * PITCH, cz = j * PITCH, ring = Math.max(Math.abs(i), Math.abs(j));
     const park = i === 0 && j === 0;

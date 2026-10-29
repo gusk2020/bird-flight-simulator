@@ -22,6 +22,8 @@ export class Flight {
   mode: Mode = "air";
   stun = 0; stall = false; strokeT = -1; strokes = 0;
   wind: WindSource | null = null; windVec = new THREE.Vector3(); liftScale = 1; dragScale = 1; clock = 0; airspeed = 0;
+  /** 着地補助が小ジャンプの初速を一時的に上書きする(次の1回のジャンプでだけ使い、毎ステップ末尾で消す) */
+  hopHint: { up: number; fwd: number; yaw?: number } | null = null;
   groundHold = 0; perchId = -1; perchT = 0; perchCool = 0; perchBlend = 0; walkV = 0; hopping = false; hopT = -1; walkPhase = 0;
   alpha = 0; speed = 0; agl = 0; braking = false; crashes = 0; resets = 0;
   constructor(public world: WorldQuery) { this.reset(); }
@@ -56,6 +58,7 @@ export class Flight {
     if (this.mode === "air") this.air(dt, sx, sy);
     else if (this.mode === "perch") { this.stall = false; this.strokeT = -1; this.perchStep(dt, sx, inp.brake && ctl > 0, tap, held); this.braking = false; }
     else { this.stall = false; this.strokeT = -1; this.ground(dt, sx, inp.brake && ctl > 0, tap, held); this.braking = this.mode === "rollout" && inp.brake && ctl > 0; }
+    this.hopHint = null;
     this.finish();
   }
 
@@ -195,7 +198,7 @@ export class Flight {
         this.mode = "air"; this.pitch = 0.25; this.pos.y += 0.05; this.strokeT = 0; this.strokes++; return;
       }
       // 小ジャンプ (押し続ければ hopTapTime 後に離陸の羽ばたきが始まる)
-      this.vel.copy(_f).multiplyScalar(this.walkV + P.hopForward); this.vel.y = P.hopUp;
+      const hh = this.hopHint; if (hh && hh.yaw !== undefined) { this.yaw = hh.yaw; _f.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw)); } this.vel.copy(_f).multiplyScalar(hh ? hh.fwd : this.walkV + P.hopForward); this.vel.y = hh ? hh.up : P.hopUp;
       this.mode = "air"; this.hopping = true; this.hopT = 0; this.walkV = 0; this.pos.y += 0.03; return;
     }
     let hs = Math.max(0, this.vel.dot(_f));
@@ -230,6 +233,7 @@ export class Flight {
       const c = cs[i];
       if (prevFeet >= c.top - 0.05) continue;
       if (grounded && c.top - prevFeet <= P.stepUp) continue; // 低い段差は壁にせず、そのまま乗り上がる
+      if (!grounded && c.top - prevFeet <= P.edgeForgive && Math.hypot(this.vel.x, this.vel.z) < P.edgeForgiveSpeed) continue; // 空中でも、上面すれすれ(足が上面の0.45m以内)の低速接触は壁にせず、上へ乗り上げる
       const cx = clamp(this.pos.x, c.minX, c.maxX), cz = clamp(this.pos.z, c.minZ, c.maxZ);
       let nx = this.pos.x - cx, nz = this.pos.z - cz, pen: number;
       const d = Math.sqrt(nx * nx + nz * nz);

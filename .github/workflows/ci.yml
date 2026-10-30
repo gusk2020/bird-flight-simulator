@@ -60,6 +60,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
-      - run: |
-          echo "unit=${{ needs.unit.result }} browser=${{ needs.browser.result }} endurance=${{ needs.endurance.result }}"
-          [ "${{ needs.unit.result }}" = success ] && [ "${{ needs.browser.result }}" = success ] && { [ "${{ needs.endurance.result }}" = success ] || [ "${{ needs.endurance.result }}" = skipped ]; }
+      # unit と browser は常に success が必須。endurance は PR のときだけ skipped を許可し、
+      # main への push と手動実行(workflow_dispatch)では success が必須。failure / cancelled / 予期しない skipped は必ず失敗
+      - env:
+          EVENT: ${{ github.event_name }}
+          UNIT: ${{ needs.unit.result }}
+          BROWSER: ${{ needs.browser.result }}
+          ENDURANCE: ${{ needs.endurance.result }}
+        run: |
+          echo "event=$EVENT unit=$UNIT browser=$BROWSER endurance=$ENDURANCE"
+          ok=1
+          [ "$UNIT" = success ] || ok=0
+          [ "$BROWSER" = success ] || ok=0
+          if [ "$EVENT" = pull_request ]; then
+            [ "$ENDURANCE" = skipped ] || [ "$ENDURANCE" = success ] || ok=0   # PRでは skipped が通常。将来PRでも走らせる場合の success も可
+          else
+            [ "$ENDURANCE" = success ] || ok=0
+          fi
+          [ "$ok" = 1 ] || { echo "::error::required jobs did not all pass"; exit 1; }

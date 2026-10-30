@@ -37,3 +37,14 @@ const pol: AutoPolicy[] = ["life", "scenic", "adventure", "random"], all: R[] = 
 for (const p of pol) for (let s = 1; s <= nSeeds; s++) { const r = sim(p, s * 7 + 1); all.push(r); console.log(`${p.padEnd(9)} seed${String(r.seed).padStart(2)} crash=${r.crashes} tele=${r.teleports} stuck=${r.stuck} out=${r.out} inside=${r.inside} land=${r.landings} walk=${r.walks} perch=${r.perches} takeoff=${r.takeoffs} peck=${r.pecks} ground=${(100 * r.ground).toFixed(0)}% maxStep=${r.maxStep.toFixed(2)}${r.crashAt.length ? "  [" + r.crashAt.join("; ") + "]" : ""}`); }
 const sum = (k: keyof R) => all.reduce((a, r) => a + (r[k] as number), 0);
 console.log(`TOTAL (${all.length} runs x ${minutes} min = ${all.length * minutes} min): crashes=${sum("crashes")} teleports=${sum("teleports")} stuck=${sum("stuck")} out=${sum("out")} inside=${sum("inside")} landings=${sum("landings")} walks=${sum("walks")} perches=${sum("perches")} takeoffs=${sum("takeoffs")} pecks=${sum("pecks")}`);
+// --assert: CIの長時間検査用。テレポート・範囲外・建物の中が1回でもあれば失敗。クラッシュは30分×12回で上限を超えたら失敗(現状は約50〜60)
+if (process.argv.includes("--assert")) {
+  const bad: string[] = [];
+  if (sum("teleports") > 0) bad.push(`teleports=${sum("teleports")}`);
+  if (sum("out") > 0) bad.push(`out=${sum("out")}`);
+  if (sum("inside") > 0) bad.push(`inside=${sum("inside")}`);
+  if (sum("crashes") > 90 * (all.length / 12)) bad.push(`crashes=${sum("crashes")} (limit ${90 * (all.length / 12)})`);
+  if (sum("stuck") > 8 * (all.length / 12)) bad.push(`stuck=${sum("stuck")}`);
+  if (bad.length) { console.log("ENDURANCE FAIL: " + bad.join(", ")); process.exit(1); }
+  console.log("endurance checks passed");
+}

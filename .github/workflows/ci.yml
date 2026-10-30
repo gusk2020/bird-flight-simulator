@@ -40,15 +40,7 @@ jobs:
         with: { node-version: 20, cache: npm }
       - run: npm ci
       - run: npm run build
-      - id: pw
-        run: node -e "console.log('v=' + require('playwright/package.json').version)" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@v4
-        id: pwcache
-        with:
-          path: ~/.cache/ms-playwright
-          key: pw-${{ runner.os }}-${{ steps.pw.outputs.v }}-shell
-      - if: steps.pwcache.outputs.cache-hit != 'true'
-        run: npx playwright install --only-shell chromium
+      - run: npx playwright install --only-shell chromium   # headless shellだけ(約4秒)。キャッシュするより速くて単純
       - run: node test/browser.mjs --shard ${{ matrix.shard }}/3   # 開始/停止/入力解除/着地/復帰/視点安定/片手操作/オート/季節
 
   endurance:

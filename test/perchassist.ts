@@ -18,8 +18,8 @@ export function perchAssistTests() {
   const r = run(60);
   check("hop assist: ground -> bench >= 95% (without assist < 70%)", r.bench.hop[1] >= 57 && r.bench.hop[0] < 42, `${r.bench.hop[0]}/60 -> ${r.bench.hop[1]}/60`);
   check("hop assist: ground -> 1 m stone wall >= 90% (without assist < 20%)", r.wall.hop[1] >= 54 && r.wall.hop[0] < 12, `${r.wall.hop[0]}/60 -> ${r.wall.hop[1]}/60`);
-  check("air landing on open roofs: with assist >= 80% and more than 3x better than without", r.roof.air[1] >= 48 && r.roof.air[1] > r.roof.air[0] * 3, `${r.roof.air[0]}/60 -> ${r.roof.air[1]}/60`);
-  check("air landing on small benches/walls improves but stays hard (>= without assist)", r.bench.air[1] >= r.bench.air[0] && r.wall.air[1] >= r.wall.air[0], `bench ${r.bench.air[0]}->${r.bench.air[1]} wall ${r.wall.air[0]}->${r.wall.air[1]} of 60`);
+  check("air landing on open roofs: with assist >= 80% and clearly better than without (varied approaches since F2)", r.roof.air[1] >= 48 && r.roof.air[1] >= r.roof.air[0] + 10, `${r.roof.air[0]}/60 -> ${r.roof.air[1]}/60`);
+  check("F2: air landing on small benches/walls with the touch-down snap: bench >= 35%, wall >= 40% (without assist ~0%)", r.bench.air[1] >= 21 && r.wall.air[1] >= 24 && r.bench.air[0] <= 3, `bench ${r.bench.air[0]}->${r.bench.air[1]} wall ${r.wall.air[0]}->${r.wall.air[1]} of 60`);
   { // 候補がなければ従来のジャンプ(初速を上書きしない)
     const f = new Flight(world), pa = new PerchAssist(idx); f.pos.set(-2000 + 2000 + 3, 0.12 + P.feetOffset, 3); f.pos.set(0, world.heightAt(0, 0) + P.feetOffset, 0); f.prevPos.copy(f.pos); f.mode = "landed";
     for (const s of idx.near(0, 0, 8, [])) void s;

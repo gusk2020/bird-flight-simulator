@@ -13,7 +13,16 @@ export const PERCH = {
   maxDecel: 28,          // 着地直前の速度補正の上限 m/s²(急停止・急旋回を避ける)
   slideDecel: 30,        // 足場に降りたあとの滑走を止める摩擦 m/s²
   edgeAlign: 1.0,        // 縁に沿って歩く補助: 向きが縁の軸から rad 以内のとき
+  // 接触直前の着地成立(短距離スナップ)。通常の物理とは別に、条件を満たしたときだけ足場の上へ置く
+  snapTol: 0.45,         // 足場の縁から水平にこれだけ外れていても着地にする m
+  snapBelow: 0.45,       // 足が上面よりこれだけ低くても(側面に当たる前なら)上へ乗せる m
+  snapAbove: 0.9,        // 上面よりこれだけ上から、降りてくる途中なら着地にする m
+  snapMaxSpeed: 8.5,     // これより速い水平速度は着地にしない(高速衝突は衝突のまま)
+  snapLook: 0.12,        // 何秒先まで見て「もうすぐ触れる」とみなすか
+  settleAbove: 1.8,      // 足場の真上をこの高さ以内で、
+  settleSpeed: 5.5,      // この速さ以下で通るときは、その場で穏やかに降ろす(位置は動かさない)
 };
+const dIn = (x: number, z: number, s: Surface) => x >= s.minX && x <= s.maxX && z >= s.minZ && z <= s.maxZ;
 const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 
@@ -27,8 +36,8 @@ export class PerchAssist {
   enabled = true;
   target: Surface | null = null;           // 目印の対象(最も狙っている候補)
   aimX = 0; aimZ = 0; aimD = 99;            // 目印を置く点(面の内側)と、そこまでの水平距離
-  stats = { guided: 0, hopAssists: 0, edgeStops: 0, edgeAligns: 0, captures: 0, maxStep: 0, rolloutStops: 0, brakeHolds: 0 };
-  private near: Surface[] = []; private under: Surface[] = []; private t = -1;
+  stats = { snaps: 0, settles: 0, guided: 0, hopAssists: 0, edgeStops: 0, edgeAligns: 0, captures: 0, maxStep: 0, rolloutStops: 0, brakeHolds: 0 };
+  private near: Surface[] = []; private fromId = -1; private fromT = -9; private under: Surface[] = []; private t = -1;
   constructor(private idx: SurfaceIndex) {}
 
   /** 進行方向(速度があれば速度、なければ向き)に対する候補の選別。毎フレームではなく約8Hzで更新。 */
@@ -56,6 +65,8 @@ export class PerchAssist {
 
   apply(inp: FlightInput, f: Flight): FlightInput {
     if (!this.enabled) return inp;
+    if (f.mode !== "air") { const u = this.idx.under(f.pos.x, f.pos.y - P.feetOffset, f.pos.z, this.under); this.fromId = u ? u.id : -1; this.fromT = f.clock; }
+    if (f.mode === "air" && f.stun <= 0 && this.snap(inp, f)) return inp;
     if (f.mode === "air" && !f.hopping && f.stun <= 0) { this.air(inp, f); return inp; }
     this.target = null;
     if (f.stun > 0) return inp;
@@ -64,6 +75,73 @@ export class PerchAssist {
     else if (f.mode === "landed") this.edge(inp, f);
     return inp;
   }
+
+  /**
+   * 接触直前の着地成立判定。足場の縁から数十cm以内・上面付近を、ゆっくり(低速で)通る/降りるとき、
+   * 側面にぶつかったり縁から滑り落ちたりする前に、足場の上へ短く置き直す(最大でも水平 snapTol・垂直 snapBelow/snapAbove)。
+   * 遠くからの吸着・ワープ・壁の貫通はしない。速すぎる・上昇中・羽ばたいて上がっている、ときは何もしない(通常の物理のまま)。
+   */
+  private snap(inp: FlightInput, f: Flight): boolean {
+    const px = f.pos.x, pz = f.pos.z, feet = f.pos.y - P.feetOffset, vx = f.vel.x, vz = f.vel.z, vy = f.vel.y, hs = Math.hypot(vx, vz);
+    if (hs > PERCH.snapMaxSpeed || vy > 1.2 || -vy > P.safeSink || (inp.flapHeld && vy > 0.3)) return false;
+    const T = PERCH.snapLook, qx = px + vx * T, qz = pz + vz * T, qFeet = feet + vy * T, tol = PERCH.snapTol;
+    this.idx.near(px, pz, 2, this.near);
+    let best: Surface | null = null, bd = 1e9;
+    for (const s of this.near) {
+      if (s.kind === "roof" || s.kind === "tank") continue; // 広い面は通常の着地で十分
+      if (s.id === this.fromId && f.clock - this.fromT < 0.8) continue; // いま降りた/飛び立った足場へは引き戻さない
+      const a = feet - s.top, aq = qFeet - s.top;
+      const above = s.kind === "balcony" ? 1.4 : PERCH.snapAbove; // ベランダは手すり(+1m)を越えてから降りるので、少し上から受け止める
+      if (a < -PERCH.snapBelow || a > above) continue;
+      if (a > 0.08 && aq > 0.08 && !(s.kind === "balcony" && dIn(px, pz, s) && vy < 0.3)) continue; // まだ上空を通過中(もうすぐ触れる高さまで降りていない)。ベランダの真上に入ったら受け止める
+      const dNow = Math.hypot(px - clamp(px, s.minX, s.maxX), pz - clamp(pz, s.minZ, s.maxZ));
+      const dNext = Math.hypot(qx - clamp(qx, s.minX, s.maxX), qz - clamp(qz, s.minZ, s.maxZ)), d = Math.min(dNow, dNext);
+      if (d > tol + (Math.min(s.maxX - s.minX, s.maxZ - s.minZ) < 0.7 ? 0.15 : 0)) continue; // 細い物(手すり・柵・枝・電柱の頭)は少し広めに許す
+      if (dNow > 0.05 && dNext > dNow + 0.02 && a < 0.08) continue; // 横から: 離れていく向きなら乗せない
+      if (dNow > tol + 0.3) continue; // 置き直す距離は短く(先読みぶんを含めても0.75m程度まで)
+      if (d < bd) { bd = d; best = s; }
+    }
+    if (!best) return this.settle(inp, f);
+    const s = best, inX = Math.min(0.12, (s.maxX - s.minX) * 0.35), inZ = Math.min(0.12, (s.maxZ - s.minZ) * 0.35);
+    const tx = clamp(px, s.minX + inX, s.maxX - inX), tz = clamp(pz, s.minZ + inZ, s.maxZ - inZ); // 今いる位置から最も近い足場上の点(最短距離)
+    if (this.cover(tx, tz, s.top)) return false; // 上に別の物がある(ベランダの下など)
+    // 速度: 細い縁は軸方向だけ残して歩く速さへ、広い面は少し残して止まる。滑り落ちない
+    let ux = vx, uz = vz;
+    if (s.edge) { const ax = s.axisAlongX ? 1 : 0, az = s.axisAlongX ? 0 : 1, va = vx * ax + vz * az; ux = ax * va; uz = az * va; }
+    const us = Math.hypot(ux, uz), keep = Math.min(us, s.edge ? P.walkSpeed : 3);
+    f.pos.set(tx, s.top + P.feetOffset, tz);
+    f.vel.set(us > 1e-6 ? ux / us * keep : 0, 0, us > 1e-6 ? uz / us * keep : 0);
+    f.mode = "landed"; f.walkV = keep; f.hopping = false; f.hopT = -1; f.stall = false; f.strokeT = -1; f.agl = 0;
+    if (keep > 0.3) f.yaw = Math.atan2(-f.vel.x, -f.vel.z);
+    else if (s.edge) { const a1 = s.axisAlongX ? -Math.PI / 2 : 0; f.yaw = Math.abs(wrap(a1 - f.yaw)) < Math.PI / 2 ? a1 : a1 + Math.PI; } // 細い縁へ横から降りたら、縁に沿う向きへ向き直る(すぐ歩ける)
+    this.stats.snaps++; this.target = null;
+    return true;
+  }
+  /**
+   * 足場の真上(縁から snapTol 以内)を、ゆっくり(低速で)少し高めに通っているとき: その場で穏やかに降ろす。
+   * 位置は動かさず速度だけを、加速度の上限つきで変える(急停止・急降下にしない)。触れる直前になれば snap が受け止める。
+   */
+  private settle(inp: FlightInput, f: Flight): boolean {
+    const px = f.pos.x, pz = f.pos.z, feet = f.pos.y - P.feetOffset, hs = Math.hypot(f.vel.x, f.vel.z);
+    if (hs > PERCH.settleSpeed || f.vel.y > 0.5 || inp.flapHeld || f.hopping) return false;
+    let best: Surface | null = null, ba = 1e9;
+    for (const s of this.near) {
+      if (s.kind === "roof" || s.kind === "tank" || (s.id === this.fromId && f.clock - this.fromT < 0.8)) continue;
+      const a = feet - s.top, d = Math.hypot(px - clamp(px, s.minX, s.maxX), pz - clamp(pz, s.minZ, s.maxZ));
+      if (a <= 0.05 || a > PERCH.settleAbove || d > PERCH.snapTol * 0.8) continue;
+      if (this.cover(clamp(px, s.minX, s.maxX), clamp(pz, s.minZ, s.maxZ), s.top)) continue;
+      if (a < ba) { ba = a; best = s; }
+    }
+    if (!best) return false;
+    const s = best, tx = clamp(px, s.minX + 0.1, s.maxX - 0.1), tz = clamp(pz, s.minZ + 0.1, s.maxZ - 0.1);
+    // 水平: 足場の内側へ寄せつつ歩く速さ程度まで落とす / 垂直: 少し速めに降りる。どちらも1ステップの変化に上限
+    const k = Math.min(1, hs > 1e-6 ? P.walkSpeed / hs : 1), want = Math.max(1.6, ba * 3.5);
+    this.ease(f, f.vel.x * k + (tx - px) * 3, f.vel.z * k + (tz - pz) * 3, PERCH.maxDecel);
+    f.vel.y += clamp(-want - f.vel.y, -PERCH.maxDecel / 60, PERCH.maxDecel / 60);
+    inp.brake = false; inp.flapTap = false; this.stats.settles++;
+    return false; // 物理はそのまま進める(位置は物理が動かす)
+  }
+  private cover(x: number, z: number, top: number) { return this.idx.heightAt ? this.idx.heightAt(x, z) > top + 0.1 : false; }
 
   private air(inp: FlightInput, f: Flight) {
     if (f.clock - this.t > 0.12 || this.t < 0) { this.t = f.clock; this.pick(f); }

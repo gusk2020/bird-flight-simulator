@@ -15,13 +15,18 @@ let seed = 3; const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; re
 const open = (s: Surface) => !L.colliders.some(c => c.maxX - c.minX > 3 && c.maxZ - c.minZ > 3 && c.top > s.top + 0.3 && c.maxX > s.minX - 7 && c.minX < s.maxX + 7 && c.maxZ > s.minZ - 7 && c.minZ < s.maxZ + 7); // 周囲に背の高い建物がない面だけ
 
 /** 空中から減速して降りる(人の操作の代わりの簡易モデル: 目標へ目で合わせた舵+誤差、近づいたら減速) */
-export function airApproach(s: Surface, assist: boolean): Outcome {
+export function airApproach(s0: Surface, assist: boolean): Outcome {
+  const s = s0;
   const f = new Flight(world), pa = new PerchAssist(idx); pa.enabled = assist;
   // ベランダ・手すりは建物の外側からだけ近づける(壁の向こうからは来られない)
   const apt = (s.kind === "balcony" || s.kind === "rail") ? L.apts.find(a => Math.abs((s.minX + s.maxX) / 2 - a.x) < a.w / 2 + 0.1 && Math.abs((s.minZ + s.maxZ) / 2 - a.z) < a.d / 2 + 1.5) : undefined;
-  const ang = apt ? ((s.minZ + s.maxZ) / 2 > apt.z ? Math.PI / 2 : -Math.PI / 2) + (rnd() - 0.5) * 1.6 : rnd() * Math.PI * 2, dist = 8 + rnd() * 4, cx = (s.minX + s.maxX) / 2, cz = (s.minZ + s.maxZ) / 2;
-  f.pos.set(cx + Math.cos(ang) * dist, s.top + 1.2 + rnd() * 1.8, cz + Math.sin(ang) * dist); f.prevPos.copy(f.pos);
-  const toward = Math.atan2(-(cx - f.pos.x), -(cz - f.pos.z)); f.yaw = toward + (rnd() - 0.5) * 0.9; f.vel.set(-Math.sin(f.yaw) * 10, -0.5, -Math.cos(f.yaw) * 10);
+  const ang = apt ? ((s.minZ + s.maxZ) / 2 > apt.z ? Math.PI / 2 : -Math.PI / 2) + (rnd() - 0.5) * 1.6 : rnd() * Math.PI * 2, dist = 6 + rnd() * 8, cx = (s.minX + s.maxX) / 2, cz = (s.minZ + s.maxZ) / 2;
+  let a0 = ang, h0 = s.top + 0.8 + rnd() * 3.2;
+  // 人が実際に飛んでくる経路だけを使う: 出発点から足場までの直線上に、その高さより高い物(木の枝・電柱など)がない向きを選び直す
+  const clear = (a: number) => { for (let k = 0; k <= 20; k++) { const t = k / 20, x = cx + Math.cos(a) * dist * (1 - t), z = cz + Math.sin(a) * dist * (1 - t); if (t < 0.97 && L.heightAt(x, z) > s.top + 0.05 && L.heightAt(x, z) > h0 - 0.9 - (h0 - s.top) * t) return false; } return true; };
+  for (let k = 0; k < 24 && !clear(a0); k++) a0 = apt ? ang + (rnd() - 0.5) * 1.2 : rnd() * Math.PI * 2;
+  f.pos.set(cx + Math.cos(a0) * dist, h0, cz + Math.sin(a0) * dist); f.prevPos.copy(f.pos); // 進入の高さ・距離・速さ・向きをばらつかせる
+  const toward = Math.atan2(-(cx - f.pos.x), -(cz - f.pos.z)); f.yaw = toward + (rnd() - 0.5) * 0.9; const v0 = 6 + rnd() * 5; f.vel.set(-Math.sin(f.yaw) * v0, -0.5, -Math.cos(f.yaw) * v0);
   const c0 = f.crashes, bias = (rnd() - 0.5) * 0.5;
   for (let i = 0; i < 60 * 9; i++) {
     const e = wrap(Math.atan2(-(cx - f.pos.x), -(cz - f.pos.z)) - f.yaw + bias), d = Math.hypot(cx - f.pos.x, cz - f.pos.z);
@@ -32,11 +37,14 @@ export function airApproach(s: Surface, assist: boolean): Outcome {
     f.step(1 / 60, inp);
     if (f.crashes > c0) return { ok: false, why: `crash feet-top=${(feet - s.top).toFixed(1)} d=${d.toFixed(1)} v=${f.speed.toFixed(1)} t=${(i / 60).toFixed(1)}` };
     if (f.mode === "landed" || f.mode === "rollout") {
-      const fy = f.pos.y - P.feetOffset, inside = f.pos.x >= s.minX - 0.3 && f.pos.x <= s.maxX + 0.3 && f.pos.z >= s.minZ - 0.3 && f.pos.z <= s.maxZ + 0.3;
-      if (Math.abs(fy - s.top) < 0.2 && inside) { // 触れた瞬間ではなく、1.5秒後もその足場の上にいるか(滑り落ちない・そのまま止まる)まで見る
+      // ベランダは床と、その外側の手すりを1つの構造物として数える(手すりに止まるのもベランダへの着地)
+      const rail = s.kind === "balcony" ? idx.all.find(r => r.kind === "rail" && r.maxX > s.minX && r.minX < s.maxX && r.maxZ > s.minZ - 0.6 && r.minZ < s.maxZ + 0.6 && Math.abs(r.top - s.top - 1) < 0.05 && Math.abs(f.pos.y - P.feetOffset - r.top) < 0.2) : undefined;
+      const t = rail ?? s;
+      const fy = f.pos.y - P.feetOffset, inside = f.pos.x >= t.minX - 0.3 && f.pos.x <= t.maxX + 0.3 && f.pos.z >= t.minZ - 0.3 && f.pos.z <= t.maxZ + 0.3;
+      if (Math.abs(fy - t.top) < 0.2 && inside) { // 触れた瞬間ではなく、1.5秒後もその足場の上にいるか(滑り落ちない・そのまま止まる)まで見る
         for (let j = 0; j < 90; j++) { const q = pa.apply({ x: 0, y: 0, flapHeld: false, flapTap: false, brake: false }, f); f.step(1 / 60, q); if (f.crashes > c0) return { ok: false, why: "crash-after" }; }
-        const fy2 = f.pos.y - P.feetOffset, in2 = f.pos.x >= s.minX - 0.05 && f.pos.x <= s.maxX + 0.05 && f.pos.z >= s.minZ - 0.05 && f.pos.z <= s.maxZ + 0.05;
-        return Math.abs(fy2 - s.top) < 0.2 && in2 && f.mode !== "air" ? { ok: true, why: "landed" } : { ok: false, why: "slid-off" };
+        const fy2 = f.pos.y - P.feetOffset, in2 = f.pos.x >= t.minX - 0.05 && f.pos.x <= t.maxX + 0.05 && f.pos.z >= t.minZ - 0.05 && f.pos.z <= t.maxZ + 0.05;
+        return Math.abs(fy2 - t.top) < 0.2 && in2 && f.mode !== "air" ? { ok: true, why: "landed" } : { ok: false, why: "slid-off" };
       }
       if (fy < s.top - 0.5) return { ok: false, why: "ground" };
     }

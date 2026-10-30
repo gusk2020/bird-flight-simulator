@@ -17,5 +17,6 @@ import { structureTests } from "./structures";
 import { forageTests } from "./forage";
 import { seasonTests } from "./season";
 import { f1WalkTests } from "./f1walk";
-physicsTests(); cameraTests(); gameTests(); envTests(); stageBTests(); speedFxTests(); walkTests(); perchTests(); npcTests(); oneHandTests(); autopilotTests(); autoViewTests(); cameraStableTests(); perchAssistTests(); structureTests(); forageTests(); seasonTests(); f1WalkTests();
+import { f2LandingTests } from "./f2landing";
+physicsTests(); cameraTests(); gameTests(); envTests(); stageBTests(); speedFxTests(); walkTests(); perchTests(); npcTests(); oneHandTests(); autopilotTests(); autoViewTests(); cameraStableTests(); perchAssistTests(); structureTests(); forageTests(); seasonTests(); f1WalkTests(); f2LandingTests();
 finish();

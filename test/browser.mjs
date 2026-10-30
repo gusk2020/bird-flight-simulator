@@ -223,6 +223,16 @@ try {
   await p.evaluate(() => { const g = __game, f = g.flight; f.pos.set(28, 0.32, 60); f.prevPos.copy(f.pos); f.vel.set(0, 0, 0); f.mode = "landed"; f.walkV = 0; g.input.releaseAll(); }); await sleep(300);
   await tp("touchStart", [{ x: 200, y: 250, id: 15 }]); await sleep(700); const gw0 = await S(); await sleep(500); const gw1 = await S(); await tp("touchEnd", []);
   check("on the ground a long press walks (no auto flapping)", Math.hypot(gw1.x - gw0.x, gw1.z - gw0.z) > 0.3 && gw1.mode === "landed", `moved=${Math.hypot(gw1.x - gw0.x, gw1.z - gw0.z).toFixed(2)}`);
+  // F1: 地上でスティックを前へスライドしたまま歩く・斜めで曲がりながら歩く・指を離すと止まる(実際のタッチ入力)
+  await sleep(300); await p.evaluate(() => { const g = __game, f = g.flight; f.pos.set(28, 0.32, 60); f.prevPos.copy(f.pos); f.vel.set(0, 0, 0); f.yaw = 0; f.mode = "landed"; f.walkV = 0; g.input.releaseAll(); }); await sleep(300);
+  const Y = () => p.evaluate(() => __game.flight.yaw);
+  await tp("touchStart", [{ x: 200, y: 320, id: 30 }]); await tp("touchMove", [{ x: 200, y: 260, id: 30 }]); await sleep(400); const sw0 = await S(); await sleep(1200); const sw1 = await S(); d = await G();
+  const swd = Math.hypot(sw1.x - sw0.x, sw1.z - sw0.z);
+  check("F1: on the ground, sliding the thumb forward walks (no long press)", swd > 0.8 && sw1.mode === "landed" && d.ph === "stick" && d.y > 0.5, `moved=${swd.toFixed(2)} m y=${d.y.toFixed(2)} ph=${d.ph}`);
+  const yw0 = await Y(); await tp("touchMove", [{ x: 245, y: 265, id: 30 }]); await sleep(1200); const yw1 = await Y(); const sw2 = await S();
+  check("F1: diagonal thumb turns while walking", Math.abs(yw1 - yw0) > 0.3 && Math.hypot(sw2.x - sw1.x, sw2.z - sw1.z) > 0.8, `turned=${Math.abs(yw1 - yw0).toFixed(2)} rad`);
+  await tp("touchEnd", []); await sleep(500); const sw3 = await S(); await sleep(400); const sw4 = await S();
+  check("F1: lifting the thumb stops walking (still controllable, landed)", Math.hypot(sw4.x - sw3.x, sw4.z - sw3.z) < 0.05 && sw4.mode === "landed");
   await sleep(600); await p.evaluate(() => { const f = __game.flight; f.vel.set(0, 0, 0); f.walkV = 0; }); await sleep(300);
   await tapAt(200, 250, 16); await p.waitForFunction(() => __game.flight.hopping || __game.flight.mode === "air", null, { timeout: 5000 }).catch(() => {});
   d = await G(); check("on the ground a tap becomes a small hop (not swallowed by the assist)", d.hop || d.mode === "air", JSON.stringify({ hop: d.hop, mode: d.mode }));

@@ -8,7 +8,7 @@ export const FORAGE = {
   peckMin: 1, peckMax: 3,        // ついばむ回数
   peckTime: 0.5,                 // 1回のついばみ s
   idleMin: 2.5, idleMax: 5,      // 立ち止まったままのときに、ついばみ始めるまで s
-  stick: 0.4, stickY: 0.5,       // これ以上のスティック入力(手動)は「強い入力」として中断
+  stick: 0.4, stickY: 0.35,      // ついばみ開始時からこれ以上スティックを動かした(手動)ら「強い入力」として中断
 };
 export type ForageState = "idle" | "pause" | "peck";
 const FORAGE_GROUND: GroundKind[] = ["grass", "soil", "ridge"];
@@ -18,7 +18,7 @@ export class Forage {
   state: ForageState = "idle";
   head = 0;                       // 頭の下がり具合 0..1(モデル用)
   stats = { sequences: 0, pecks: 0, interrupts: 0 };
-  private walked = 0; private target = 2; private t = 0; private left = 0; private phase = 0; private idleT = 0; private idleGoal = 3; private seed: number;
+  private walked = 0; private target = 2; private t = 0; private left = 0; private phase = 0; private idleT = 0; private idleGoal = 3; private seed: number; private x0 = 0; private y0 = 0;
   constructor(private groundAt: (x: number, z: number) => GroundKind, seed = 1) { this.seed = seed >>> 0; this.target = this.rnd(FORAGE.stepMin, FORAGE.stepMax); this.idleGoal = this.rnd(FORAGE.idleMin, FORAGE.idleMax); }
   private rnd(a: number, b: number) { this.seed = (this.seed * 1664525 + 1013904223) >>> 0; return a + (b - a) * (this.seed / 4294967296); }
   get active() { return this.state !== "idle"; }
@@ -28,7 +28,9 @@ export class Forage {
   apply(inp: FlightInput, f: Flight, stickStrong: boolean): FlightInput {
     const onGround = f.mode === "landed" && !f.hopping && f.stun <= 0 && f.agl < 0.15 && FORAGE_GROUND.includes(this.groundAt(f.pos.x, f.pos.z));
     if (!onGround) { if (this.state !== "idle") this.reset(); else this.head += (0 - this.head) * 0.2; return inp; }
-    const strong = inp.flapTap || inp.flapHeld || (stickStrong && (Math.abs(inp.x) > FORAGE.stick || Math.abs(inp.y) > FORAGE.stickY));
+    // 強い入力=羽ばたき、またはついばみ開始時から大きく変えたスティック(前へ倒したまま歩き続けている指は「変えていない」ので、ついばみは成立する)
+    if (this.state === "idle") { this.x0 = inp.x; this.y0 = inp.y; }
+    const strong = inp.flapTap || inp.flapHeld || (stickStrong && (Math.abs(inp.x - this.x0) > FORAGE.stick || inp.y - this.y0 > FORAGE.stickY));
     if (strong && this.state !== "idle") { this.state = "idle"; this.walked = 0; this.idleT = 0; this.stats.interrupts++; }
     switch (this.state) {
       case "idle": {
@@ -37,12 +39,12 @@ export class Forage {
         break;
       }
       case "pause": {
-        inp.brake = false; this.t += DT;
+        inp.brake = false; inp.y = Math.min(inp.y, 0); this.t += DT;
         if (this.t >= this.left) { this.state = "peck"; this.phase = 0; this.t = 0; this.left = Math.round(this.rnd(FORAGE.peckMin - 0.49, FORAGE.peckMax + 0.49)); this.left = Math.max(FORAGE.peckMin, Math.min(FORAGE.peckMax, this.left)); }
         break;
       }
       case "peck": {
-        inp.brake = false; this.phase += DT / FORAGE.peckTime;
+        inp.brake = false; inp.y = Math.min(inp.y, 0); this.phase += DT / FORAGE.peckTime;
         if (this.phase >= 1) { this.phase -= 1; this.stats.pecks++; if (--this.left <= 0) { this.state = "idle"; this.walked = 0; this.idleT = 0; this.target = this.rnd(FORAGE.stepMin, FORAGE.stepMax); this.idleGoal = this.rnd(FORAGE.idleMin, FORAGE.idleMax); } }
         break;
       }

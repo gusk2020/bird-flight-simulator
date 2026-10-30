@@ -39,7 +39,7 @@ export function f1WalkTests() {
   { const r = new Rig(landed(gx, gz, 0)); const x0 = r.f.pos.clone(); r.down(); r.slide(0, -45); let vmax = 0; r.run(4, rr => { vmax = Math.max(vmax, rr.f.walkV); });
     const d = Math.hypot(r.f.pos.x - x0.x, r.f.pos.z - x0.z);
     check("stick forward on the ground walks (no long press needed)", d > 4 && r.f.mode === "landed", `${d.toFixed(2)} m in 4 s, vmax=${vmax.toFixed(2)} m/s, mode=${r.f.mode}`);
-    r.slide(0, -18); const v1: number[] = []; r.run(1.5, rr => v1.push(rr.f.walkV)); r.slide(0, -45); r.run(1.5);
+    r.slide(0, -25); const v1: number[] = []; r.run(1.5, rr => v1.push(rr.f.walkV)); r.slide(0, -45); r.run(1.5);
     check("a small forward push walks slower (speed follows the stick)", v1[v1.length - 1] > 0.1 && v1[v1.length - 1] < P.walkSpeed * 0.7, `v=${v1[v1.length - 1].toFixed(2)}`);
     r.up(); r.run(1); check("lifting the thumb stops the walk", r.f.walkV < 0.05 && flat(r.f) < 1e-3); }
   { const r = new Rig(landed(gx, gz, 0)); const y0 = r.f.yaw, p0 = r.f.pos.clone(); r.down(); r.slide(30, -40); r.run(3);

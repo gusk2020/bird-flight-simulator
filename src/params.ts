@@ -31,6 +31,7 @@ export const PHYS = {
   maxBank: 0.9,
   bankResponse: 5.0,
   sideDamp: 4.5,       // 横滑りが消える速さ (小さいと慣性で流れる)
+  turnKeep: 0.9,       // 横滑りを機首方向へ向け直すとき、その速さのうち残す割合(1=損失なし)
   // --- 地面・着地 ---
   feetOffset: 0.32,    // 中心から足先まで
   bodyRadius: 0.35,

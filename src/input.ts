@@ -2,6 +2,8 @@ import type { FlightInput } from "./flight";
 import { GESTURE, OneHandGesture } from "./gesture";
 import type { ControlMode } from "./settings";
 
+/** 片手操作のスティックのなめらかさ(秒) */
+export const SMOOTH_S = 0.1;
 /** タッチ/キーボード入力。指を離す・取消・画面外・アプリ切替で必ず解除する。 */
 export class Input {
   state: FlightInput = { x: 0, y: 0, flapHeld: false, flapTap: false, brake: false };
@@ -86,7 +88,10 @@ export class Input {
   read(): FlightInput {
     const k = this.keys, s = this.state;
     if (this.mode !== "both") { // 片手: ジェスチャの結果を状態へ反映(長押し判定もここで進める)
-      const g = this.gesture; g.poll(performance.now()); s.x = g.x; s.y = g.y; s.brake = g.brake; if (g.consumeTap()) s.flapTap = true;
+      const g = this.gesture; g.poll(performance.now()); s.brake = g.brake; if (g.consumeTap()) s.flapTap = true;
+      // 指の動きを約0.1秒でなめらかにして渡す(急な旋回・昇降を防ぐ)。指を離したら、その場で中立へ戻す
+      if (g.active) { const k = 1 - Math.exp(-(1 / 60) / SMOOTH_S); s.x += (g.x - s.x) * k; s.y += (g.y - s.y) * k; }
+      else s.x = s.y = 0;
     }
     const kx = (k.has("ArrowRight") || k.has("KeyD") ? 1 : 0) - (k.has("ArrowLeft") || k.has("KeyA") ? 1 : 0);
     const ky = (k.has("ArrowUp") || k.has("KeyW") ? 1 : 0) - (k.has("ArrowDown") || k.has("KeyS") ? 1 : 0);

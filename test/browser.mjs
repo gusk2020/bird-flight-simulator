@@ -1,22 +1,35 @@
 // ブラウザ動作テスト: ビルド済み(dist)を vite preview で配信し、Chromium(ソフトウェアGL)で操作する。失敗時は exit 1。
+//
+// 検査は6つのグループに分かれ、グループごとに新しいブラウザコンテキスト(保存データも空)から始める。
+// グループ同士は状態を引き継がないので、順序に関係なく・別プロセス(CIのシャード)でも同じ結果になる。
+//   node test/browser.mjs                 全グループを順に実行(ローカル)
+//   node test/browser.mjs --shard 1/3     CI用: 3分割の1番目(各シャードの内訳は SHARD_PLAN)
+//   node test/browser.mjs --only g1,g4    指定したグループだけ
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 
-const PORT = 4173;
-const srv = spawn("npx", ["vite", "preview", "--port", String(PORT), "--strictPort"], { stdio: "ignore" });
+const args = process.argv.slice(2), arg = k => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : null; };
+const PORT = Number(arg("--port") || process.env.PORT || 4173);
 let fails = 0;
 const check = (name, ok, detail = "") => { console.log(`  ${ok ? "ok  " : "FAIL"} ${name}${detail ? "  (" + detail + ")" : ""}`); if (!ok) fails++; };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-try {
-  for (let i = 0; i < 40; i++) { try { if ((await fetch(`http://localhost:${PORT}/`)).ok) break; } catch {} await sleep(250); }
-  const b = await chromium.launch({ args: ["--use-gl=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"] });
+
+/** 新しいコンテキスト(保存データ空)でページを開く。start=true なら開始ボタンまで押す(物理が動いている状態) */
+async function open(b, start) {
   const ctx = await b.newContext({ viewport: { width: 892, height: 412 }, hasTouch: true, deviceScaleFactor: 1 });
   const p = await ctx.newPage();
   const errs = []; p.on("pageerror", e => errs.push(e.message)); p.on("console", m => { if (m.type() === "error") errs.push(m.text()); });
   await p.goto(`http://localhost:${PORT}/`); await p.waitForFunction(() => window.__game, null, { timeout: 30000 }); await sleep(1500);
+  const cdp = await ctx.newCDPSession(p);
+  if (start) { await p.click("#ovGo"); await sleep(800); }
+  return { ctx, p, cdp, errs };
+}
+
+
+// ---- g1: 基本(開始・タッチ・一時停止・着地復帰)
+async function g1({ p, cdp, errs }) {
   const S = () => p.evaluate(() => { const g = __game, f = g.flight; return { st: g.game.state, t: g.game.gameTime, steps: g.game.steps, x: f.pos.x, y: f.pos.y, z: f.pos.z, mode: f.mode, speed: f.speed, inx: g.input.state.x, iny: g.input.state.y, flap: g.input.state.flapHeld, brake: g.input.state.brake, ov: !document.getElementById("overlay").hidden }; });
   const dist = (a, c) => Math.hypot(a.x - c.x, a.y - c.y, a.z - c.z);
-  const cdp = await ctx.newCDPSession(p);
   const tp = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
 
   console.log("\n# start screen");
@@ -69,6 +82,14 @@ try {
   check("NaN injection recovers", Number.isFinite(s.x) && Number.isFinite(s.y) && s.y > 0);
   await p.evaluate(() => { __game.flight.pos.y = -50; }); await sleep(500); s = await S(); check("falling out of world recovers", s.y > -1);
   await p.click("#btnReset"); await sleep(300); s = await S(); check("reset button keeps working", s.y > 8 && s.mode === "air");
+}
+
+
+// ---- g2: 見た目(急降下カメラ・天気風時間・速度演出LOD)
+async function g2({ p, cdp, errs }) {
+  const S = () => p.evaluate(() => { const g = __game, f = g.flight; return { st: g.game.state, t: g.game.gameTime, steps: g.game.steps, x: f.pos.x, y: f.pos.y, z: f.pos.z, mode: f.mode, speed: f.speed, inx: g.input.state.x, iny: g.input.state.y, flap: g.input.state.flapHeld, brake: g.input.state.brake, ov: !document.getElementById("overlay").hidden }; });
+  const dist = (a, c) => Math.hypot(a.x - c.x, a.y - c.y, a.z - c.z);
+  const tp = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
 
   console.log("\n# dive view stability (A1, in browser)");
   const dive = await p.evaluate(() => new Promise(res => {
@@ -119,6 +140,15 @@ try {
   const lod = await p.evaluate(() => { const w = __game.world; w.updateLOD(0, 0, true); const a = w.lodCounts(); w.updateLOD(190, 190, true); const b = w.lodCounts(); return { a, b, n: w.trees.length, tris: __game.renderer.info.render.triangles }; });
   check("tree LOD: near+far always equals the tree count, near set is a subset", lod.a.near + lod.a.far === lod.n && lod.b.near + lod.b.far === lod.n && lod.a.near < lod.n / 2, JSON.stringify(lod));
   check("triangle budget (LOD) under 80k", lod.tris < 80000, `tris=${lod.tris}`);
+}
+
+
+// ---- g3: 地上・電線・街の動き・一時停止中の描画
+async function g3({ p, cdp, errs }) {
+  const S = () => p.evaluate(() => { const g = __game, f = g.flight; return { st: g.game.state, t: g.game.gameTime, steps: g.game.steps, x: f.pos.x, y: f.pos.y, z: f.pos.z, mode: f.mode, speed: f.speed, inx: g.input.state.x, iny: g.input.state.y, flap: g.input.state.flapHeld, brake: g.input.state.brake, ov: !document.getElementById("overlay").hidden }; });
+  const dist = (a, c) => Math.hypot(a.x - c.x, a.y - c.y, a.z - c.z);
+  const tp = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
+  let s;
 
   console.log("\n# walking / hop / dawn lights (C2)");
   await p.evaluate(() => { const g = __game, f = g.flight; f.pos.set(28, 6, 60); f.prevPos.copy(f.pos); f.vel.set(0, 0, -9); });
@@ -181,6 +211,14 @@ try {
   await sleep(1000); const f4 = await fr(); check("...and then drawing stops again", f4 === f3);
   await p.click('[data-set="weather"][data-val="clear"]'); await p.click("#ovGo"); await sleep(800); const f5 = await fr();
   check("resume draws every frame again", f5 > f4 + 2, `frames ${f4}->${f5}`);
+}
+
+
+// ---- g4: 片手操作(D1)と歩行(F1)
+async function g4({ p, cdp, errs }) {
+  const S = () => p.evaluate(() => { const g = __game, f = g.flight; return { st: g.game.state, t: g.game.gameTime, steps: g.game.steps, x: f.pos.x, y: f.pos.y, z: f.pos.z, mode: f.mode, speed: f.speed, inx: g.input.state.x, iny: g.input.state.y, flap: g.input.state.flapHeld, brake: g.input.state.brake, ov: !document.getElementById("overlay").hidden }; });
+  const dist = (a, c) => Math.hypot(a.x - c.x, a.y - c.y, a.z - c.z);
+  const tp = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
 
   console.log("\n# one-hand controls (D1)");
   const G = () => p.evaluate(() => { const g = __game, i = g.input; return { ctl: document.body.dataset.ctl, x: i.state.x, y: i.state.y, brake: i.state.brake, tap: i.state.flapTap, ph: i.gesture.phase, strokes: g.flight.strokes, af: g.assist.autoFlaps, mode: g.flight.mode, hop: g.flight.hopping, flapDisp: getComputedStyle(document.getElementById("flap")).display, zone: (() => { const r = document.getElementById("stick").getBoundingClientRect(); return { l: Math.round(r.left), w: Math.round(r.width), h: Math.round(r.height) }; })() }; });
@@ -249,6 +287,15 @@ try {
   await p.context().addInitScript(() => { if (!sessionStorage.getItem("brokenOnce")) { sessionStorage.setItem("brokenOnce", "1"); localStorage.setItem("vindving.prefs.v1", "{broken"); } }); await p.evaluate(() => sessionStorage.removeItem("brokenOnce")); await p.reload(); await p.waitForFunction(() => window.__game, null, { timeout: 30000 }); await sleep(600);
   check("a corrupted saved value starts safely with defaults", (await p.evaluate(() => document.body.dataset.ctl)) === "both");
   await p.click("#ovGo"); await sleep(500);
+}
+
+
+// ---- g5: オート周遊(D2)とオート演出(D3)
+async function g5({ p, cdp, errs }) {
+  const S = () => p.evaluate(() => { const g = __game, f = g.flight; return { st: g.game.state, t: g.game.gameTime, steps: g.game.steps, x: f.pos.x, y: f.pos.y, z: f.pos.z, mode: f.mode, speed: f.speed, inx: g.input.state.x, iny: g.input.state.y, flap: g.input.state.flapHeld, brake: g.input.state.brake, ov: !document.getElementById("overlay").hidden }; });
+  const dist = (a, c) => Math.hypot(a.x - c.x, a.y - c.y, a.z - c.z);
+  const tp = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
+  const tapAt = (x, y, id) => p.evaluate(([x, y, id]) => { const z = document.getElementById("stick"), o = { bubbles: true, pointerId: id, clientX: x, clientY: y, pointerType: "touch" }; z.dispatchEvent(new PointerEvent("pointerdown", o)); z.dispatchEvent(new PointerEvent("pointerup", o)); }, [x, y, id]);
 
   console.log("\n# autopilot (D2)");
   await p.setViewportSize({ width: 892, height: 412 });
@@ -312,6 +359,14 @@ try {
   check("paused: UI is shown", await p.evaluate(() => !document.body.classList.contains("ui-hidden")));
   await p.click("#ovGo"); await sleep(300);
   check("D3: no page errors", errs.length === 0, errs.join(" | "));
+}
+
+
+// ---- g6: 着地補助・田んぼ・季節・時刻
+async function g6({ p, cdp, errs }) {
+  const S = () => p.evaluate(() => { const g = __game, f = g.flight; return { st: g.game.state, t: g.game.gameTime, steps: g.game.steps, x: f.pos.x, y: f.pos.y, z: f.pos.z, mode: f.mode, speed: f.speed, inx: g.input.state.x, iny: g.input.state.y, flap: g.input.state.flapHeld, brake: g.input.state.brake, ov: !document.getElementById("overlay").hidden }; });
+  const dist = (a, c) => Math.hypot(a.x - c.x, a.y - c.y, a.z - c.z);
+  const tp = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
 
   console.log("\n# perch assist (E2)");
   if (await p.evaluate(() => document.getElementById("overlay").hidden === false)) { await p.click("#ovGo"); await sleep(300); }
@@ -379,6 +434,31 @@ try {
   const dawn = seen[2].e; check("dawn: warm horizon", ((dawn.hor >> 16) & 255) - (dawn.hor & 255) > 40);
   await p.setViewportSize({ width: 412, height: 892 }); await sleep(600);
   check("portrait: no errors", errs.length === 0, errs.join(" | "));
+}
+
+
+const GROUPS = [
+  ["g1", g1, false], ["g2", g2, true], ["g3", g3, true], ["g4", g4, true], ["g5", g5, false], ["g6", g6, true],
+];
+// CIの3分割(各シャードの所要時間がほぼ等しくなるように)
+const SHARD_PLAN = [["g1", "g3"], ["g2", "g5"], ["g4", "g6"]];
+
+let want = GROUPS.map(g => g[0]);
+const only = arg("--only"), shard = arg("--shard");
+if (only) want = only.split(",");
+if (shard) { const [i, n] = shard.split("/").map(Number); want = n === SHARD_PLAN.length ? SHARD_PLAN[i - 1] : want.filter((_, k) => k % n === i - 1); }
+
+const srv = spawn("npx", ["vite", "preview", "--port", String(PORT), "--strictPort"], { stdio: "ignore" });
+try {
+  for (let i = 0; i < 40; i++) { try { if ((await fetch(`http://localhost:${PORT}/`)).ok) break; } catch {} await sleep(250); }
+  const b = await chromium.launch({ args: ["--use-gl=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"] });
+  for (const [id, fn, start] of GROUPS) {
+    if (!want.includes(id)) continue;
+    const t0 = Date.now(), s = await open(b, start);
+    try { await fn(s); } catch (e) { console.log(`  FAIL exception in ${id}`, e); fails++; }
+    await s.ctx.close();
+    console.log(`  (${id} ${((Date.now() - t0) / 1000).toFixed(1)} s)`);
+  }
   await b.close();
 } catch (e) { console.log("  FAIL exception", e); fails++; }
 finally { srv.kill(); }

@@ -41,7 +41,7 @@ jobs:
       - run: npm ci
       - run: npm run build
       - id: pw
-        run: echo "v=$(node -p \"require('playwright/package.json').version\")" >> "$GITHUB_OUTPUT"
+        run: node -e "console.log('v=' + require('playwright/package.json').version)" >> "$GITHUB_OUTPUT"
       - uses: actions/cache@v4
         id: pwcache
         with:

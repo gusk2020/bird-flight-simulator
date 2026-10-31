@@ -41,6 +41,7 @@ export class Autopilot {
 
   setPolicy(p: AutoPolicy) { this.policy = p; if (p !== "random") this.active = p; else this.policyT = 0; } // 次の判断から変わるだけ(位置・速度は変えない)
   start(f: Flight) {
+    f.wallRecovery = false; // 壁衝突からの自動復帰・かすりの緩和は手動操作用。オート周遊は専用の復旧を持つので競合させない
     f.turnKeep = 0; // オート周遊は従来の旋回モデルで調整済み(手動操作へ戻すときは main が元に戻す)
     this.enabled = true; this.t = 0; this.decideT = 0; this.sx = this.sy = 0; this.tgt = null; this.px = f.pos.x; this.pz = f.pos.z; this.progT = 0; this.watchT = 0; this.lastCrashes = f.crashes; this.emerg = 0;
     if (this.policy === "random") this.pickActive();

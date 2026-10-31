@@ -169,7 +169,7 @@ function setAuto(on: boolean) {
   if (on === autopilot.enabled) return;
   if (on) { autopilot.setPolicy(settings.apol as AutoPolicy); autopilot.start(flight); drift.level = drift.target = wxLevel; director.reset(); uiHider.touch(); }
   else { // 解除: 到達した時刻・天気はそのまま。カメラは追従へなめらかに戻る
-    autopilot.stop(); flight.turnKeep = PHYS.turnKeep; director.reset(); cam.setShot(0, 1, 0); if (cam.mode === "third") bird.setVisible(true);
+    autopilot.stop(); flight.turnKeep = PHYS.turnKeep; flight.wallRecovery = true; director.reset(); cam.setShot(0, 1, 0); if (cam.mode === "third") bird.setVisible(true);
     settings.weather = appliedWeather = WX_NAMES[Math.round(wxLevel)]; applySettingsLight();
   }
   input.releaseAll(); applyAuto();

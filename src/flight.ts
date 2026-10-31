@@ -32,12 +32,16 @@ export class Flight {
   /** 旋回の横滑りを機首方向へ向け直すときに残す割合(手動操作=PHYS.turnKeep。0=従来どおり捨てる: オート周遊はこちらで調整済み) */
   turnKeep: number = P.turnKeep; hopT = -1; walkPhase = 0;
   alpha = 0; speed = 0; agl = 0; braking = false; crashes = 0; resets = 0;
+  /** G1-2: 壁への衝突から自動で安全な向きへ復帰する(手動操作)。オート周遊は専用の復旧を持つので Autopilot.start が切り、止めたときに main が戻す */
+  wallRecovery = true;
+  /** 計測・テスト用: かすり回数 / 復帰回数 / 直近の逃げる向き(yaw)と理由 */
+  grazes = 0; escapes = 0; escapeYaw = 0; escapeT = 0; escapeGuard = 0; escapeKind: "" | "left" | "right" | "back" = "";
   constructor(public world: WorldQuery) { this.reset(); }
 
   reset() {
     this.pos.set(28, 14, 110); this.prevPos.copy(this.pos); this.vel.set(0, 0, -10);
     this.yaw = 0; this.pitch = 0.1; this.roll = 0; this.mode = "air";
-    this.stun = 0; this.stall = false; this.strokeT = -1; this.resets++; this.walkV = 0; this.hopping = false; this.hopT = -1; this.perchId = -1; this.perchCool = 0;
+    this.stun = 0; this.escapeT = 0; this.escapeGuard = 0; this.stall = false; this.strokeT = -1; this.resets++; this.walkV = 0; this.hopping = false; this.hopT = -1; this.perchId = -1; this.perchCool = 0;
   }
   forward(out: THREE.Vector3, yaw = this.yaw, pitch = this.pitch) {
     return out.set(-Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
@@ -46,6 +50,11 @@ export class Flight {
   step(dt: number, inp: FlightInput) {
     this.prevPos.copy(this.pos); this.clock += dt; if (this.perchCool > 0) this.perchCool -= dt;
     if (this.stun > 0) this.stun = Math.max(0, this.stun - dt);
+    if (this.escapeGuard > 0) this.escapeGuard -= dt;
+    if (this.escapeT > 0) { // 逃げる向きへ機首を回す(硬直中も)
+      this.escapeT -= dt; let e = this.escapeYaw - this.yaw; e = Math.atan2(Math.sin(e), Math.cos(e));
+      this.yaw += clamp(e, -P.escapeTurn * dt, P.escapeTurn * dt);
+    }
     const ctl = this.stun > 0 ? 0 : 1;
     const sx = clamp(inp.x, -1, 1) * ctl, sy = clamp(inp.y, -1, 1) * ctl;
     const held = inp.flapHeld && ctl > 0, tap = inp.flapTap && ctl > 0;
@@ -244,6 +253,34 @@ export class Flight {
     else this.pos.y = gh + P.feetOffset;                                 // 小さな段差は歩いて昇降(接地を維持)
   }
 
+  /**
+   * G1-2: 壁に当たったら、壁の接線(左右)と真後ろのうち、先がいちばん開けている向きへ機首を向け、壁から離れる速度を与える。
+   * 左右を優先(壁に沿って抜けるほうが自然)し、どちらも塞がっていれば後方。位置は動かさない(壁の押し戻しは collide が行う)ので、壁を貫通しない。
+   */
+  private beginEscape(nx: number, nz: number, hs0: number) {
+    const cands: { d: [number, number]; kind: "left" | "right" | "back"; bias: number }[] = [
+      { d: [-nz, nx], kind: "left", bias: 0 }, { d: [nz, -nx], kind: "right", bias: 0 }, { d: [nx, nz], kind: "back", bias: 3 },
+    ];
+    const vx = this.vel.x, vz = this.vel.z, feet = this.pos.y - P.feetOffset;
+    let best = cands[0], bs = 1e9;
+    for (const c of cands) {
+      // 先 3,6,10,16 m と左右1.5mを調べ、自分の高さ(-1m)より高い建物があるぶんを「塞がり」として足す。壁沿いに続けて飛んでいた向きは少し有利
+      let block = 0;
+      for (const dist of [3, 6, 10, 16]) for (const side of [-1.5, 0, 1.5]) {
+        const x = this.pos.x + c.d[0] * dist + -c.d[1] * side, z = this.pos.z + c.d[1] * dist + c.d[0] * side;
+        const h = this.world.heightAt(x, z); if (h > feet - 1) block += 2 + Math.min(6, h - feet + 1) * 0.2;
+      }
+      const along = (vx * c.d[0] + vz * c.d[1]) / Math.max(hs0, 1);
+      const score = block + c.bias - along * 1.5;
+      if (score < bs) { bs = score; best = c; }
+    }
+    const sp = clamp(hs0 * 0.6, P.escapeSpeedMin, P.escapeSpeedMax);
+    this.vel.x = best.d[0] * sp + nx * P.escapeAway; this.vel.z = best.d[1] * sp + nz * P.escapeAway;
+    this.vel.y = Math.max(this.vel.y, P.escapeClimb);
+    this.escapeYaw = Math.atan2(-this.vel.x, -this.vel.z); this.escapeT = 0.6; this.escapeGuard = P.escapeGuard; this.escapeKind = best.kind; this.escapes++;
+    this.pitch = 0.05; this.roll = 0;
+  }
+
   /** 建物の壁との衝突。上面は heightAt が受け持つ。 */
   private collide(grounded = false) {
     const R = P.bodyRadius, prevFeet = this.prevPos.y - P.feetOffset;
@@ -266,8 +303,13 @@ export class Flight {
       this.pos.x += nx * pen; this.pos.z += nz * pen;
       const vn = this.vel.x * nx + this.vel.z * nz;
       if (vn < 0) {
-        this.vel.x -= 1.2 * vn * nx; this.vel.z -= 1.2 * vn * nz;
-        if (-vn > P.wallCrashSpeed) this.crash();
+        const hs = Math.hypot(this.vel.x, this.vel.z), graze = this.wallRecovery && -vn / Math.max(hs, 0.1) < P.grazeIncidence;
+        this.vel.x -= (graze ? 1 : 1.2) * vn * nx; this.vel.z -= (graze ? 1 : 1.2) * vn * nz; // かすりは壁に沿って滑る(跳ね返さない)
+        if (-vn > P.wallCrashSpeed) {
+          if (graze) { this.vel.x *= P.grazeDrag; this.vel.z *= P.grazeDrag; this.grazes++; } // 翼先がかする程度: 軽い減速だけ
+          else if (this.wallRecovery) { if (this.escapeGuard <= 0) { this.crash(); this.stun = P.wallStunTime; this.beginEscape(nx, nz, hs); } }
+          else this.crash();
+        }
       }
     }
   }

@@ -16,6 +16,7 @@ export const AUTOLAND = {
   brakeMargin: 1.17,                           // 目標の速さをこれ(m/s)超えたら減速
   hSlope: 0.176, hFinal: 0.426,                // 目標の高さ = 足場の上 hFinal + (d-2.5)*hSlope
   downFast: -0.165, downSlow: -0.564, upMax: 0.134, // 降下の勾配の下限(速すぎるとき/ふつう)と上限
+  vBig: 6.6,                                   // 広い面(12 m²超)の手前での最低の目標速度
   yGain: 0.235, flapSpeed: 6.82, flapSink: 1.9,
 };
 export type AutoLandEnd = "success" | "user" | "danger" | "lost" | "timeout" | "crash" | "fail";
@@ -106,7 +107,8 @@ export class AutoLand {
     const ax = usePlan ? pl!.tx : clamp(px, s.minX + 0.2, s.maxX - 0.2), az = usePlan ? pl!.tz : clamp(pz, s.minZ + 0.2, s.maxZ - 0.2), da = Math.hypot(ax - px, az - pz);
     const e = da > 0.3 ? wrap(Math.atan2(-(ax - px), -(az - pz)) - f.yaw) : 0;
     raw.x = -clamp(e * 1.8, -1, 1) * (Math.abs(e) < 0.03 ? 0 : 1);
-    const hDes = usePlan ? Math.max(pl!.h, s.top + 0.25) + Math.max(0, da - 2.5) * AUTOLAND.hSlope * 0.5 : s.top + AUTOLAND.hFinal + Math.max(0, d - 2.5) * AUTOLAND.hSlope, vT = clamp(AUTOLAND.vBase + da * AUTOLAND.vK, AUTOLAND.vMin, AUTOLAND.vMax);
+    const big = (s.maxX - s.minX) * (s.maxZ - s.minZ) > 12;
+    const hDes = usePlan ? Math.max(pl!.h, s.top + 0.25) + Math.max(0, da - 2.5) * AUTOLAND.hSlope * 0.5 : s.top + AUTOLAND.hFinal + Math.max(0, d - 2.5) * AUTOLAND.hSlope, vT0 = clamp(AUTOLAND.vBase + da * AUTOLAND.vK, AUTOLAND.vMin, AUTOLAND.vMax), vT = big ? Math.max(vT0, AUTOLAND.vBig) : vT0; // 屋根のような広い面は、縁を越えるまで失速速度に近づけない(縁の手前で沈むため)。減速は面の上で着地補助が行う
     // 降下: 目標の高さへ向かう勾配(下り最大約19度)を決め、その縦速度に合わせて機首を上下する(高さの差に直接比例させると、遠くで急降下して足場より低くなる)
     const slope = clamp((hDes - feet) / Math.max(da - 1.5, 1.5), hs > vT + 1.5 ? AUTOLAND.downFast : AUTOLAND.downSlow, AUTOLAND.upMax); // 速すぎるうちは急降下しない(降下で速さが増す)
     raw.y = clamp((slope * Math.max(hs, 4) - f.vel.y) * AUTOLAND.yGain, -0.6, 0.5);

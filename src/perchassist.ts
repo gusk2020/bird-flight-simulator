@@ -204,7 +204,8 @@ export class PerchAssist {
     let tx: number, tz: number, hDes: number, dStart = 0;
     if (best) { tx = best.tx; tz = best.tz; dStart = best.dStart; hDes = s.top + (dStart > 0 ? 0.4 + dStart * 0.3 : 0.25); }   // 入口へ向けて浅く降り、面の上では低く
     else {
-      const mx = Math.min(0.35, (s.maxX - s.minX) * 0.3), mz = Math.min(0.35, (s.maxZ - s.minZ) * 0.3);
+      const bigS = !s.edge && (s.maxX - s.minX) * (s.maxZ - s.minZ) > 12, mm = bigS ? 1.2 : 0.35; // 広い面(屋根)は縁から離れた点を狙う(縁の端で降りない)
+      const mx = Math.min(mm, (s.maxX - s.minX) * 0.3), mz = Math.min(mm, (s.maxZ - s.minZ) * 0.3);
       tx = clamp(px, s.minX + mx, s.maxX - mx); tz = clamp(pz, s.minZ + mz, s.maxZ - mz); const dd0 = Math.hypot(tx - px, tz - pz);
       hDes = s.top + 0.45 + Math.max(0, dd0 - 1) * 0.3;
     }
@@ -216,6 +217,8 @@ export class PerchAssist {
     inp.x += (gx - inp.x) * k; inp.y += (gy - inp.y) * Math.min(1, k * 1.5); // 高さの誘導は少し強め(減速で機首が上がって浮きやすいので)
     // --- 終端の「受け止め」(穏やかに): 速すぎる・走路が足りないときは何もしない(無理に着地へ変換しない)
     const above = feet - s.top;
+    // 広い面(屋根など)は、縁の手前で減速せず(失速して縁の手前で沈む)、面の上(縁から0.6 m以内)に入ってから受け止める
+    const bigSurf = !s.edge && (s.maxX - s.minX) * (s.maxZ - s.minZ) > 12, nearOver = px > s.minX - 0.6 && px < s.maxX + 0.6 && pz > s.minZ - 0.6 && pz < s.maxZ + 0.6;
     if (lengthwise && dStart > 0 && dStart < 4 && above < 2 && hs < 9 && Math.abs(lat - off) < 1.5) { // 入口の手前: 横ずれを中心線へゆるやかに寄せる(急な横移動にならない上限つき)
       const vN = f.vel.x * nx + f.vel.z * nz, dv = (clamp(-(lat - off) * 3, -1, 1) - vN) * 0.12; f.vel.x += nx * dv; f.vel.z += nz * dv;
     }
@@ -228,7 +231,7 @@ export class PerchAssist {
         const want = -clamp(above * 1.4, 0.5, 2.5); if (f.vel.y > want) f.vel.y += (want - f.vel.y) * 0.25;
         this.stats.captures++;
       }
-    } else if (d < 2.2 && above < 1.8 && above > -0.3 && hs < 9) {
+    } else if ((bigSurf ? nearOver : d < 2.2) && above < 1.8 && above > -0.3 && hs < 9) {
       // 面のすぐ手前・すぐ上(水平2.2m・高さ1.8m以内)では、水平速度を落とし、面へ向けて降りる速さを高さに比例させる
       const kk = Math.exp(-6 / 60), want = -clamp(above * 1.4, 0.5, 2.5); if (f.vel.y > want) f.vel.y += (want - f.vel.y) * 0.25;
       let tvx = f.vel.x * kk + (d > 0.25 ? (dx / d) * 0.15 : 0), tvz = f.vel.z * kk + (d > 0.25 ? (dz / d) * 0.15 : 0);
@@ -240,7 +243,7 @@ export class PerchAssist {
     }
     // 降下線より1.2m以上高いうちは、減速(機首が上がって浮く)を一時的に外して先に降りる。線に乗ったら減速して降りる。
     const high = feet - hDes > 1.2 && d > 4;
-    if (inp.brake && high && hs > 7.5) { inp.brake = false; this.stats.brakeHolds++; }
+    if (inp.brake && high && hs > 7.5 && !this.forced) { inp.brake = false; this.stats.brakeHolds++; }
     else if (!inp.brake && (lengthwise ? dStart < 9 : d < 13) && hs > 6.5 && feet - s.top < 4 && !high) inp.brake = true; // 近づいたら速度を落として降りる
     this.stats.guided++;
   }

@@ -12,11 +12,11 @@ export const AUTOLAND = {
   loseMargin: 6,       // 足場までの距離が、始めたときよりこれ以上遠ざかったら中止
   dangerEvery: 0.25,   // 前方の危険を調べる間隔 s
   // --- 進入の調整値(tools/autoland_success.ts の計測で決めた)
-  vBase: 4.2, vK: 0.45, vMin: 5, vMax: 9,      // 距離 d での目標の速さ = clamp(vBase + vK*d, vMin, vMax)
-  brakeMargin: 0.6,                            // 目標の速さをこれ(m/s)超えたら減速
-  hSlope: 0.28, hFinal: 0.4,                   // 目標の高さ = 足場の上 hFinal + (d-2.5)*hSlope
-  downFast: -0.2, downSlow: -0.45, upMax: 0.2, // 降下の勾配の下限(速すぎるとき/ふつう)と上限
-  yGain: 0.18, flapSpeed: 7.2, flapSink: 1.3,
+  vBase: 3.75, vK: 0.556, vMin: 5.33, vMax: 8.64,      // 距離 d での目標の速さ = clamp(vBase + vK*d, vMin, vMax)
+  brakeMargin: 1.03,                           // 目標の速さをこれ(m/s)超えたら減速
+  hSlope: 0.168, hFinal: 0.393,                // 目標の高さ = 足場の上 hFinal + (d-2.5)*hSlope
+  downFast: -0.192, downSlow: -0.483, upMax: 0.18, // 降下の勾配の下限(速すぎるとき/ふつう)と上限
+  yGain: 0.214, flapSpeed: 6.97, flapSink: 1.76,
 };
 export type AutoLandEnd = "success" | "user" | "danger" | "lost" | "timeout" | "crash" | "fail";
 
@@ -101,12 +101,14 @@ export class AutoLand {
     if (this.danger >= AUTOLAND.dangerEvery) { this.danger = 0; if (d > 2.5 && this.pathDanger(f, s)) { this.cancel("danger"); return; } }
 
     // --- 進入: 足場の内側の点へ向き、降下角を保ち、速さを落とす
-    const ax = clamp(px, s.minX + 0.2, s.maxX - 0.2), az = clamp(pz, s.minZ + 0.2, s.maxZ - 0.2);
-    const e = d > 0.3 ? wrap(Math.atan2(-(ax - px), -(az - pz)) - f.yaw) : 0;
+    // 目標点: 着地補助が立てた計画(細長い面は端から長手方向に入る点)があればそれ、なければ足場の内側でいちばん近い点
+    const pl = this.pa.plan, usePlan = !!pl && f.clock - pl.t < 0.15 && d < 14;
+    const ax = usePlan ? pl!.tx : clamp(px, s.minX + 0.2, s.maxX - 0.2), az = usePlan ? pl!.tz : clamp(pz, s.minZ + 0.2, s.maxZ - 0.2), da = Math.hypot(ax - px, az - pz);
+    const e = da > 0.3 ? wrap(Math.atan2(-(ax - px), -(az - pz)) - f.yaw) : 0;
     raw.x = -clamp(e * 1.8, -1, 1) * (Math.abs(e) < 0.03 ? 0 : 1);
-    const hDes = s.top + AUTOLAND.hFinal + Math.max(0, d - 2.5) * AUTOLAND.hSlope, vT = clamp(AUTOLAND.vBase + d * AUTOLAND.vK, AUTOLAND.vMin, AUTOLAND.vMax);
+    const hDes = usePlan ? Math.max(pl!.h, s.top + 0.25) + Math.max(0, da - 2.5) * AUTOLAND.hSlope * 0.5 : s.top + AUTOLAND.hFinal + Math.max(0, d - 2.5) * AUTOLAND.hSlope, vT = clamp(AUTOLAND.vBase + da * AUTOLAND.vK, AUTOLAND.vMin, AUTOLAND.vMax);
     // 降下: 目標の高さへ向かう勾配(下り最大約19度)を決め、その縦速度に合わせて機首を上下する(高さの差に直接比例させると、遠くで急降下して足場より低くなる)
-    const slope = clamp((hDes - feet) / Math.max(d - 1.5, 1.5), hs > vT + 1.5 ? AUTOLAND.downFast : AUTOLAND.downSlow, AUTOLAND.upMax); // 速すぎるうちは急降下しない(降下で速さが増す)
+    const slope = clamp((hDes - feet) / Math.max(da - 1.5, 1.5), hs > vT + 1.5 ? AUTOLAND.downFast : AUTOLAND.downSlow, AUTOLAND.upMax); // 速すぎるうちは急降下しない(降下で速さが増す)
     raw.y = clamp((slope * Math.max(hs, 4) - f.vel.y) * AUTOLAND.yGain, -0.6, 0.5);
     raw.brake = hs > vT + AUTOLAND.brakeMargin;   // 速すぎるときは減速(機首が上がるぶんは、上の降下制御が補う)
     raw.flapTap = false;

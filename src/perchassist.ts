@@ -44,6 +44,8 @@ export class PerchAssist {
   marker: Surface | null = null; private markerUntil = 0;
   /** G1-5: 自動着地が指定した足場。あるとき pick() は進行方向の円錐に関係なくこの足場を選び、空中の誘導は減速/羽ばたきの意図がなくても働く */
   forced: Surface | null = null;
+  /** 直近の空中誘導が立てた着地計画(目標点・その高さ・長手方向に沿って入るか)。自動着地が進入の目標に使う */
+  plan: { tx: number; tz: number; h: number; lengthwise: boolean; t: number } | null = null;
   private near: Surface[] = []; private fromId = -1; private fromT = -9; private under: Surface[] = []; private t = -1;
   constructor(private idx: SurfaceIndex) {}
 
@@ -206,6 +208,7 @@ export class PerchAssist {
       tx = clamp(px, s.minX + mx, s.maxX - mx); tz = clamp(pz, s.minZ + mz, s.maxZ - mz); const dd0 = Math.hypot(tx - px, tz - pz);
       hDes = s.top + 0.45 + Math.max(0, dd0 - 1) * 0.3;
     }
+    this.plan = { tx, tz, h: hDes, lengthwise, t: f.clock };
     const dx = tx - px, dz = tz - pz, d = Math.hypot(dx, dz), e = d > 0.3 ? wrap(Math.atan2(-dx, -dz) - f.yaw) : 0;
     let k = (this.forced ? 0.85 : PERCH.strength) * (d < 0.3 ? 0 : 1) * (d < 4 ? 1.5 : 1); // 近づくほど誘導を強めに(小さな面でも外れにくい)
     const gx = -clamp(e * (lengthwise ? 3.5 : 1.8), -1, 1), gy = clamp((hDes - feet) * 0.3, -0.8, 0.45);

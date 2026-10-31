@@ -20,6 +20,7 @@ import { buildSurfaces } from "./perches";
 import { Forage } from "./forage";
 import { SeasonClock, seasonBias, seasonLook, type SeasonSpeed } from "./season";
 import { PerchAssist, PERCH } from "./perchassist";
+import { AutoLand } from "./autoland";
 import type { AutoPolicy } from "./settings";
 import { SpeedLines, Streaks, speedIntensity } from "./speedfx";
 import { NpcWorld } from "./npc";
@@ -81,12 +82,24 @@ const npcPlayer = () => { npcP.x = flight.pos.x; npcP.y = flight.pos.y; npcP.z =
 function applyQuality() { renderer.setPixelRatio(Math.min(devicePixelRatio, quality.pixelRatio)); resize(); rain.setDensity(quality.rainDensity); }
 const assist = new FlapAssist();
 // 着地補助: 常時オン(切替UIなし)。手動操作のときだけ働き、オート周遊は自分の判断で降りる
-const perchAssist = new PerchAssist(buildSurfaces(world));
+const surfaces = buildSurfaces(world);
+const perchAssist = new PerchAssist(surfaces);
+// G1-5: ◯をタップしたときの自動着地(手動飛行の一部。オート周遊とは別)
+const autoLand = new AutoLand(surfaces, perchAssist, world.heightAt);
 // 自動ついばみ(草地・土・あぜ道で、数歩ごとに止まって頭を下げる)。手動もオートも同じ仕組みで、強い入力(羽ばたき・大きなスティック)があれば中断する
 const forage = new Forage(world.groundAt, (Date.now() & 0xffff) + 11);
 // 着地できそうな場所を示す、控えめな半透明の目印(最も狙っている候補だけ)
 const perchMarker = new THREE.Mesh(new THREE.RingGeometry(0.42, 0.55, 24).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xfff1b0, transparent: true, opacity: 0.4, depthWrite: false, fog: false }));
 perchMarker.visible = false; perchMarker.renderOrder = 2; scene.add(perchMarker);
+const markerPt = { x: 0, z: 0, top: 0, d: 0, on(pa: PerchAssist, f: Flight) { return pa.markerPoint(f, markerPt); } }; const markerV = new THREE.Vector3();
+/** ◯の画面上の位置(CSS px)。タップの当たり判定に使う: 見た目より広く(指で押しやすい約48dp相当の半径) */
+const ring = { visible: false, x: 0, y: 0, hit: 48 };
+const autolandBar = document.getElementById("autoland")!;
+input.ringHit = (x, y) => ring.visible && !autoLand.active && Math.hypot(x - ring.x, y - ring.y) <= ring.hit;
+input.onRingTap = () => {
+  const m = perchAssist.marker; if (autopilot.enabled || !m) return;
+  if (autoLand.start(flight, m)) toast("自動着地"); else toast("ここへは安全に降りられません");
+};
 const CTL_NAMES: Record<ControlMode, string> = { both: "両手", right: "右手", left: "左手" };
 function applyControl() {
   const m = settings.ctl as ControlMode;
@@ -153,7 +166,9 @@ const POL_NAMES: Record<AutoPolicy, string> = { life: "自然生活", scenic: "�
 // オート中は手動入力を読まない(スティックやタップは無視)。解除しても飛行状態はそのまま続く
 const readInput = () => {
   if (autopilot.enabled) { autoIn.flapTap = false; autoIn.flapHeld = false; autoIn.brake = false; autopilot.busy = forage.active; return forage.apply(autopilot.drive(flight, autoIn, 1 / 60), flight, false); }
-  return forage.apply(assist.apply(perchAssist.apply(input.read(), flight), flight, !!perchAssist.target && perchAssist.aimD < 5), flight, true);
+  const raw = input.read();
+  autoLand.drive(flight, raw); // 自動着地中だけ、手動入力を進入の入力に置き換える(大きなスティック・羽ばたきがあれば手動へ戻る)
+  return forage.apply(assist.apply(perchAssist.apply(raw, flight), flight, autoLand.active || (!!perchAssist.target && perchAssist.aimD < 5)), flight, true);
 };
 const game = new Game(flight, readInput, () => { input.state.flapTap = false; });
 function applyAuto() {
@@ -249,10 +264,22 @@ function frame(now: number) {
     const sh = director.update(vdt, flight); cam.setShot(sh.yaw, sh.dist, sh.h); bird.setVisible(cam.shotDist >= FIRST_PERSON_BELOW);
   }
   cam.update(vdt, flight, bp, fxc);
-  { // 着地候補の目印: 手動・空中・近くに候補があるときだけ
-    const tg = perchAssist.target, show = !!tg && !autopilot.enabled && flight.mode === "air" && !flight.hopping && perchAssist.aimD < PERCH.showRange && flight.stun <= 0;
+  { // 着地候補の目印(◯): 手動・空中のときだけ。候補が一瞬見えなくなっても数秒は保つ(PerchAssist.marker)。◯をタップすると自動着地
+    const mk = perchAssist.marker, manual = !autopilot.enabled && flight.mode === "air" && !flight.hopping && flight.stun <= 0;
+    let show = false;
+    if (mk && manual && markerPt.on(perchAssist, flight) && markerPt.d < PERCH.showRange * 1.6) {
+      markerV.set(markerPt.x, markerPt.top + 0.05, markerPt.z).project(camera);
+      show = markerV.z < 1 && Math.abs(markerV.x) < 1.15 && Math.abs(markerV.y) < 1.15;  // 画面の外・後ろなら解除
+      if (!show && !autoLand.active) perchAssist.clearMarker();
+    }
     if (show !== perchMarker.visible) { perchMarker.visible = show; dirty = true; }
-    if (show) { const k = 1 + 0.12 * Math.sin(now * 0.006); perchMarker.position.set(perchAssist.aimX, tg!.top + 0.05, perchAssist.aimZ); perchMarker.scale.setScalar(k * Math.min(1.6, Math.max(0.8, Math.min(tg!.maxX - tg!.minX, tg!.maxZ - tg!.minZ) + 0.6))); }
+    ring.visible = show; if (show) { ring.x = (markerV.x * 0.5 + 0.5) * innerWidth; ring.y = (-markerV.y * 0.5 + 0.5) * innerHeight; }
+    if (show) {
+      const k = 1 + 0.12 * Math.sin(now * 0.006), sz = Math.min(1.6, Math.max(0.8, Math.min(mk!.maxX - mk!.minX, mk!.maxZ - mk!.minZ) + 0.6));
+      perchMarker.position.set(markerPt.x, markerPt.top + 0.05, markerPt.z); perchMarker.scale.setScalar(k * sz);
+      (perchMarker.material as THREE.MeshBasicMaterial).color.setHex(autoLand.active ? 0x9be8b0 : 0xfff1b0); // 自動着地中は緑
+    }
+    const lbl = autoLand.active ? "自動着地中(操作でやめる)" : "", el = autolandBar; if (el.textContent !== lbl) { el.textContent = lbl; el.style.opacity = lbl ? "0.8" : "0"; }
   }
   const tfx = performance.now();
   streaks.update(camera.position, flight.vel, running ? fxc : 0); stats.fxMs += (performance.now() - tfx - stats.fxMs) * 0.05;
@@ -275,4 +302,4 @@ function updateHud(dt: number, now: number) {
 }
 renderer.setAnimationLoop(frame);
 // テスト・デバッグ用
-(window as unknown as Record<string, unknown>).__game = { game, flight, world, input, cam, camera, renderer, scene, frame, env: () => envAt(hour), stats, npc, lines, streaks, speedIntensity, setHour: (h: number) => { hour = h; targetHour = null; applyEnv(); }, settings, applySettings, assist, prefs, autopilot, setAuto, season, applySeasonLook, saveSeason, forage, perchAssist, perchMarker, hour: () => hour, director, drift, uiHider, wxLevel: () => wxLevel, wind, rain, quality };
+(window as unknown as Record<string, unknown>).__game = { game, flight, world, input, cam, camera, renderer, scene, frame, env: () => envAt(hour), stats, npc, lines, streaks, speedIntensity, setHour: (h: number) => { hour = h; targetHour = null; applyEnv(); }, settings, applySettings, assist, prefs, autopilot, setAuto, season, applySeasonLook, saveSeason, forage, perchAssist, perchMarker, autoLand, ring, npcView, npcUpdate: () => npcView.update(npc, camera.position, 220, world.lightsLevel()), hour: () => hour, director, drift, uiHider, wxLevel: () => wxLevel, wind, rain, quality };

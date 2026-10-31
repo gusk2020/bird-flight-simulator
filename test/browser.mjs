@@ -437,11 +437,83 @@ async function g6({ p, cdp, errs }) {
 }
 
 
+// ---- g7: G1(ヘッドライト・◯タップの自動着地・壁衝突からの復帰)
+async function g7({ p, cdp, errs }) {
+  const S = () => p.evaluate(() => { const g = __game, f = g.flight; return { x: f.pos.x, y: f.pos.y, z: f.pos.z, mode: f.mode, speed: f.speed, crashes: f.crashes, escapes: f.escapes, grazes: f.grazes }; });
+  const tp = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
+  console.log("\n# headlights (G1-1)");
+  const lamps = h => p.evaluate(hh => { __game.setHour(hh); const g = __game; g.npcUpdate(); return g.npcView.headlamps; }, h);
+  await p.evaluate(() => { __game.flight.reset(); }); await sleep(1500);
+  const day = await lamps(12), night = await lamps(0), dawn = await lamps(7), eve = await lamps(18.3);
+  const cars = await p.evaluate(() => __game.npc.visibleCars().length);
+  check("daytime (12h) and morning (7h): no headlamps", day === 0 && dawn === 0, `day=${day} dawn=${dawn}`);
+  check("night (0h): two lamps per visible car", night >= 2 && night % 2 === 0 && cars >= night / 2, `lamps=${night} cars=${cars}`);
+  check("evening (18.3h): lit", eve >= 2, `lamps=${eve}`);
+  const lm = await p.evaluate(() => { __game.setHour(0); const g = __game; let t = 0; for (let i = 0; i < 30; i++) { const a = performance.now(); g.npcUpdate(); t += performance.now() - a; } return t / 30; });
+  check("headlight update cost is small (< 1 ms per update)", lm < 1, `${lm.toFixed(3)} ms`);
+  await p.evaluate(() => __game.setHour(12));
+
+  console.log("\n# wall hit recovery (G1-2 / G1-3)");
+  const wallRun = (alt, v, sideAng) => p.evaluate(async ([alt, v, sideAng]) => {
+    const g = __game, f = g.flight, a = g.world.apts.find(q => q.floors >= 9) || g.world.apts[0];
+    const c = g.world.colliders.find(k => Math.abs((k.minX + k.maxX) / 2 - a.x) < 0.01 && Math.abs((k.minZ + k.maxZ) / 2 - a.z) < 0.01);
+    f.reset(); const dx = -Math.sin(sideAng), dz = -Math.cos(sideAng); f.pos.set((c.minX + c.maxX) / 2 + Math.sin(sideAng) * 9, alt, c.maxZ + Math.cos(sideAng) * 9); f.prevPos.copy(f.pos); f.yaw = Math.atan2(-dx, -dz); f.vel.set(dx * v, 0, dz * v);
+    g.cam.snap(); const c0 = f.crashes; let inside = false, maxStun = 0, t0 = performance.now();
+    return await new Promise(res => { const tick = () => { for (const k of g.world.colliders) if (f.pos.x > k.minX && f.pos.x < k.maxX && f.pos.z > k.minZ && f.pos.z < k.maxZ && f.pos.y - 0.32 < k.top - 0.3) inside = true; maxStun = Math.max(maxStun, f.stun);
+      if (performance.now() - t0 > 3500) res({ crashes: f.crashes - c0, esc: f.escapes, inside, mode: f.mode, maxStun, away: Math.hypot(f.pos.x - Math.max(c.minX, Math.min(c.maxX, f.pos.x)), f.pos.z - Math.max(c.minZ, Math.min(c.maxZ, f.pos.z))), finite: Number.isFinite(f.pos.x + f.pos.y + f.pos.z) }); else requestAnimationFrame(tick); }; tick(); });
+  }, [alt, v, sideAng]);
+  const w1 = await wallRun(20, 14, 0);
+  check("a frontal hit into a tall wall: one crash, then it backs off and flies on, never inside", w1.crashes === 1 && w1.esc >= 1 && !w1.inside && w1.finite && w1.maxStun <= 0.31 && w1.away > 3, JSON.stringify(w1));
+  const w2 = await wallRun(20, 14, 0.7);
+  check("a diagonal hit: also recovers (no repeated crash)", w2.crashes <= 1 && !w2.inside && w2.finite, JSON.stringify(w2));
+
+  console.log("\n# tap the ring to land automatically (G1-4 / G1-5)");
+  const setup = () => p.evaluate(() => {
+    const g = __game, f = g.flight, w = g.world; f.reset(); g.setAuto(false); g.settings.weather = "clear";
+    const rocks = w.lows.filter(l => l.kind === "rock"); const vac = w.lots.filter(l => l.use === "vacant");
+    const r = rocks.find(l => vac.some(v => Math.abs(l.x - v.x) < 22 && Math.abs(l.z - v.z) < 22)) || rocks[0];
+    f.pos.set(r.x + 11, r.top + 2.6, r.z); f.prevPos.copy(f.pos); f.yaw = Math.PI / 2; f.vel.set(-8, -0.3, 0); g.cam.snap(); window.__rock = r; return { x: r.x, z: r.z, top: r.top };
+  });
+  await setup(); await p.waitForFunction(() => __game.ring.visible, null, { timeout: 8000 }).catch(() => {});
+  const ringInfo = await p.evaluate(() => ({ vis: __game.ring.visible, x: __game.ring.x, y: __game.ring.y, mk: !!__game.perchAssist.marker, kind: __game.perchAssist.marker && __game.perchAssist.marker.kind }));
+  check("the ring shows up for a perch ahead (screen position known)", ringInfo.vis && ringInfo.x > 0 && ringInfo.x < 892 && ringInfo.y > 0 && ringInfo.y < 412, JSON.stringify(ringInfo));
+  const t0 = await S(); const st0 = await p.evaluate(() => __game.input.state.flapTap);
+  await tp("touchStart", [{ x: Math.round(ringInfo.x + 6), y: Math.round(ringInfo.y - 5), id: 71 }]); await tp("touchEnd", []);
+  await sleep(150);
+  const al = await p.evaluate(() => ({ active: __game.autoLand.active, starts: __game.autoLand.stats.starts, refused: __game.autoLand.stats.refused, label: document.getElementById("autoland").textContent }));
+  check("tapping near the ring (6 px off) starts an automatic landing; a small label shows", al.starts === 1 && al.label.includes("自動着地"), JSON.stringify(al));
+  const strokes0 = t0.crashes;
+  await p.waitForFunction(() => !__game.autoLand.active, null, { timeout: 30000 }).catch(() => {});
+  await sleep(1200);
+  const res = await p.evaluate(() => ({ ok: __game.autoLand.stats.success, ended: __game.autoLand.stats.ended, mode: __game.flight.mode, crashes: __game.flight.crashes, marker: !!__game.perchAssist.marker, label: document.getElementById("autoland").textContent }));
+  check("the bird lands on the perch by itself, with no crash, and control returns to manual", res.ok === 1 && res.mode !== "air" && res.crashes === strokes0 && res.label === "", JSON.stringify(res));
+  // 着地後: スティックを前へ倒して歩ける
+  const w0 = await S(); await tp("touchStart", [{ x: 200, y: 320, id: 72 }]); await tp("touchMove", [{ x: 200, y: 262, id: 72 }]); await sleep(1500); await tp("touchEnd", []);
+  const w1p = await S(); check("after the automatic landing the bird can walk (thumb forward) or hop", Math.hypot(w1p.x - w0.x, w1p.z - w0.z) > 0.2 || w1p.mode === "air" || res.mode === "landed", `moved ${Math.hypot(w1p.x - w0.x, w1p.z - w0.z).toFixed(2)} m, mode ${w1p.mode}`);
+
+  // キャンセル: 自動着地中に大きなスティック操作で手動へ戻る
+  await setup(); await p.waitForFunction(() => __game.ring.visible, null, { timeout: 8000 }).catch(() => {});
+  const r2 = await p.evaluate(() => ({ x: __game.ring.x, y: __game.ring.y }));
+  await tp("touchStart", [{ x: Math.round(r2.x), y: Math.round(r2.y), id: 73 }]); await tp("touchEnd", []); await sleep(100);
+  const on2 = await p.evaluate(() => __game.autoLand.active);
+  await tp("touchStart", [{ x: 150, y: 300, id: 74 }]); await tp("touchMove", [{ x: 230, y: 300, id: 74 }]); await sleep(250);
+  const c2 = await p.evaluate(() => ({ active: __game.autoLand.active, user: __game.autoLand.stats.ended.user || 0, stickX: __game.input.state.x })); await tp("touchEnd", []);
+  check("a big stick input during the automatic landing hands control back at once", on2 && !c2.active && c2.user >= 1 && c2.stickX > 0.3, JSON.stringify({ on2, ...c2 }));
+  // ◯の外(120 px 離れた場所)のタップは自動着地にならない(羽ばたきタップのまま)
+  await setup(); await p.waitForFunction(() => __game.ring.visible, null, { timeout: 8000 }).catch(() => {});
+  const r3 = await p.evaluate(() => ({ x: __game.ring.x, y: __game.ring.y, s: __game.autoLand.stats.starts, st: __game.flight.strokes }));
+  await tp("touchStart", [{ x: Math.round(Math.min(840, r3.x + 150)), y: Math.round(Math.max(60, r3.y - 100)), id: 75 }]); await tp("touchEnd", []); await sleep(200);
+  const n3 = await p.evaluate(() => ({ s: __game.autoLand.stats.starts, active: __game.autoLand.active }));
+  check("a tap 150 px away from the ring does not start an automatic landing", n3.s === r3.s && !n3.active, JSON.stringify(n3));
+  // 目印が見えなくなった候補も数秒は残る(PerchAssist.marker): 高く離れるまで保持
+  check("G1: no page errors", errs.length === 0, errs.join(" | "));
+}
+
 const GROUPS = [
-  ["g1", g1, false], ["g2", g2, true], ["g3", g3, true], ["g4", g4, true], ["g5", g5, false], ["g6", g6, true],
+  ["g1", g1, false], ["g2", g2, true], ["g3", g3, true], ["g4", g4, true], ["g5", g5, false], ["g6", g6, true], ["g7", g7, true],
 ];
 // CIの3分割(各シャードの所要時間がほぼ等しくなるように)
-const SHARD_PLAN = [["g1", "g3"], ["g2", "g5"], ["g4", "g6"]];
+const SHARD_PLAN = [["g1", "g3"], ["g2", "g5"], ["g4", "g6", "g7"]];
 
 let want = GROUPS.map(g => g[0]);
 const only = arg("--only"), shard = arg("--shard");

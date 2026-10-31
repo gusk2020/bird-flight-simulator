@@ -10,6 +10,8 @@ export class Input {
   onReset = () => {}; onCamera = () => {}; onTime = () => {}; onPause = () => {};
   /** G1-5: 画面の座標が着地候補の◯の上か(main が毎フレーム、◯の画面位置から判定する)と、◯がタップされたとき */
   ringHit: (x: number, y: number) => boolean = () => false; onRingTap = () => {};
+  /** テスト用の計数: ◯タップになった回数 / 片手操作のタップ(=羽ばたき)になった回数 */
+  stats = { ringTaps: 0, gestureTaps: 0 };
   private ringCand = new Map<number, { x: number; y: number; t: number }>(); private ringFired = new Set<number>();
   private out: FlightInput = { x: 0, y: 0, flapHeld: false, flapTap: false, brake: false };
   mode: ControlMode = "both"; readonly gesture = new OneHandGesture();
@@ -30,7 +32,7 @@ export class Input {
     document.addEventListener("pointermove", e => { const c = this.ringCand.get(e.pointerId); if (c && Math.hypot(e.clientX - c.x, e.clientY - c.y) > RING_SLOP_PX) this.ringCand.delete(e.pointerId); }, true);
     document.addEventListener("pointerup", e => {
       const c = this.ringCand.get(e.pointerId); this.ringCand.delete(e.pointerId);
-      if (c && e.timeStamp - c.t < RING_TAP_MS && Math.hypot(e.clientX - c.x, e.clientY - c.y) <= RING_SLOP_PX && this.ringHit(e.clientX, e.clientY)) { this.ringFired.add(e.pointerId); this.onRingTap(); }
+      if (c && e.timeStamp - c.t < RING_TAP_MS && Math.hypot(e.clientX - c.x, e.clientY - c.y) <= RING_SLOP_PX && this.ringHit(e.clientX, e.clientY)) { this.ringFired.add(e.pointerId); this.stats.ringTaps++; this.onRingTap(); }
     }, true);
     document.addEventListener("pointercancel", e => { this.ringCand.delete(e.pointerId); this.ringFired.delete(e.pointerId); }, true);
     zone.addEventListener("pointerdown", e => {
@@ -109,7 +111,7 @@ export class Input {
   read(): FlightInput {
     const k = this.keys, s = this.state;
     if (this.mode !== "both") { // 片手: ジェスチャの結果を状態へ反映(長押し判定もここで進める)
-      const g = this.gesture; g.poll(performance.now()); s.brake = g.brake; if (g.consumeTap()) s.flapTap = true;
+      const g = this.gesture; g.poll(performance.now()); s.brake = g.brake; if (g.consumeTap()) { s.flapTap = true; this.stats.gestureTaps++; }
       // 指の動きを約0.1秒でなめらかにして渡す(急な旋回・昇降を防ぐ)。指を離したら、その場で中立へ戻す
       if (g.active) { const k = 1 - Math.exp(-(1 / 60) / SMOOTH_S); s.x += (g.x - s.x) * k; s.y += (g.y - s.y) * k; }
       else s.x = s.y = 0;

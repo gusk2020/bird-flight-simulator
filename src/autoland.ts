@@ -32,6 +32,8 @@ const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
  */
 export class AutoLand {
   active = false; target: Surface | null = null; end: AutoLandEnd | "" = ""; t = 0;
+  /** 直近に開始を断った理由(表示・診断用) */
+  lastRefusal = "";
   stats = { starts: 0, refused: 0, success: 0, ended: { user: 0, danger: 0, lost: 0, timeout: 0, crash: 0, fail: 0 } as Record<string, number>, time: 0 };
   dbg = ""; private d0 = 0; private c0 = 0; private danger = 0; private lastFlap = -9; private under: Surface[] = [];
   constructor(private idx: SurfaceIndex, private pa: PerchAssist, private heightAt: (x: number, z: number) => number) {}
@@ -68,7 +70,7 @@ export class AutoLand {
 
   start(f: Flight, s: Surface): boolean {
     const c = this.check(f, s);
-    if (!c.ok) { this.stats.refused++; this.end = ""; return false; }
+    if (!c.ok) { this.stats.refused++; this.end = ""; this.lastRefusal = c.why; return false; }
     this.active = true; this.target = s; this.t = 0; this.end = ""; this.d0 = this.dist(f, s); this.c0 = f.crashes; this.danger = 0; this.lastFlap = f.clock - 9;
     this.pa.forced = s; this.stats.starts++; return true;
   }

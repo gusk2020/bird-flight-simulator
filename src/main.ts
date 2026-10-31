@@ -98,7 +98,9 @@ const autolandBar = document.getElementById("autoland")!;
 input.ringHit = (x, y) => ring.visible && !autoLand.active && Math.hypot(x - ring.x, y - ring.y) <= ring.hit;
 input.onRingTap = () => {
   const m = perchAssist.marker; if (autopilot.enabled || !m) return;
-  if (autoLand.start(flight, m)) toast("自動着地"); else toast("ここへは安全に降りられません");
+  if (autoLand.start(flight, m)) { toast("自動着地"); return; }
+  const why: Record<string, string> = { "too far": "遠すぎます", "too high": "高すぎます", "dangerous path": "途中に建物があります", "unreachable (below)": "足場より低い位置です" }; // 開始を断った理由を短く知らせる
+  toast("ここへは安全に降りられません" + (why[autoLand.lastRefusal] ? "(" + why[autoLand.lastRefusal] + ")" : ""));
 };
 const CTL_NAMES: Record<ControlMode, string> = { both: "両手", right: "右手", left: "左手" };
 function applyControl() {
@@ -302,4 +304,4 @@ function updateHud(dt: number, now: number) {
 }
 renderer.setAnimationLoop(frame);
 // テスト・デバッグ用
-(window as unknown as Record<string, unknown>).__game = { game, flight, world, input, cam, camera, renderer, scene, frame, env: () => envAt(hour), stats, npc, lines, streaks, speedIntensity, setHour: (h: number) => { hour = h; targetHour = null; applyEnv(); }, settings, applySettings, assist, prefs, autopilot, setAuto, season, applySeasonLook, saveSeason, forage, perchAssist, perchMarker, autoLand, ring, npcView, npcUpdate: () => npcView.update(npc, camera.position, 220, world.lightsLevel()), hour: () => hour, director, drift, uiHider, wxLevel: () => wxLevel, wind, rain, quality };
+(window as unknown as Record<string, unknown>).__game = { game, flight, world, input, cam, camera, renderer, scene, frame, env: () => envAt(hour), stats, npc, lines, streaks, speedIntensity, setHour: (h: number) => { hour = h; targetHour = null; applyEnv(); }, settings, applySettings, assist, prefs, autopilot, setAuto, season, applySeasonLook, saveSeason, forage, perchAssist, perchMarker, autoLand, ring, surfaces, npcView, npcUpdate: () => npcView.update(npc, camera.position, 220, world.lightsLevel()), hour: () => hour, director, drift, uiHider, wxLevel: () => wxLevel, wind, rain, quality };

@@ -12,11 +12,11 @@ export const AUTOLAND = {
   loseMargin: 6,       // 足場までの距離が、始めたときよりこれ以上遠ざかったら中止
   dangerEvery: 0.25,   // 前方の危険を調べる間隔 s
   // --- 進入の調整値(tools/autoland_success.ts の計測で決めた)
-  vBase: 3.75, vK: 0.556, vMin: 5.33, vMax: 8.64,      // 距離 d での目標の速さ = clamp(vBase + vK*d, vMin, vMax)
-  brakeMargin: 1.03,                           // 目標の速さをこれ(m/s)超えたら減速
-  hSlope: 0.168, hFinal: 0.393,                // 目標の高さ = 足場の上 hFinal + (d-2.5)*hSlope
-  downFast: -0.192, downSlow: -0.483, upMax: 0.18, // 降下の勾配の下限(速すぎるとき/ふつう)と上限
-  yGain: 0.214, flapSpeed: 6.97, flapSink: 1.76,
+  vBase: 3.63, vK: 0.507, vMin: 5.29, vMax: 7.38,      // 距離 d での目標の速さ = clamp(vBase + vK*d, vMin, vMax)
+  brakeMargin: 1.17,                           // 目標の速さをこれ(m/s)超えたら減速
+  hSlope: 0.176, hFinal: 0.426,                // 目標の高さ = 足場の上 hFinal + (d-2.5)*hSlope
+  downFast: -0.165, downSlow: -0.564, upMax: 0.134, // 降下の勾配の下限(速すぎるとき/ふつう)と上限
+  yGain: 0.235, flapSpeed: 6.82, flapSink: 1.9,
 };
 export type AutoLandEnd = "success" | "user" | "danger" | "lost" | "timeout" | "crash" | "fail";
 

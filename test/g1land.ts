@@ -69,10 +69,10 @@ export function g1LandTests() {
     check("below the perch top: refused", !al.start(solo(bench, 8, -1.5, 8), bench));
     const g = solo(bench, 8, 2.5, 8); g.mode = "landed"; check("not flying: refused", !al.start(g, bench));
     // 足場とのあいだに高い壁がある
-    const wallBlock = idx.all.find(s => s.kind === "roof" && s.top > 15)!; const c = L.colliders.find(k => Math.abs((k.minX + k.maxX) / 2 - (wallBlock.minX + wallBlock.maxX) / 2) < 0.1)!;
+    const c = L.colliders.filter(k => k.maxX - k.minX >= 8 && k.maxX - k.minX <= 11 && k.top > 5).sort((a, b) => (a.maxX - a.minX) - (b.maxX - b.minX))[0];
     const tgt = idx.all.find(s => s.kind === "bench" || s.kind === "wall" || s.kind === "planter");
-    const f2 = new Flight(world); f2.pos.set(c.minX - 6, 4, (c.minZ + c.maxZ) / 2); f2.prevPos.copy(f2.pos); f2.vel.set(8, 0, 0); f2.yaw = -Math.PI / 2;
-    const blocked: Surface = { id: 9999, kind: "bench", minX: c.maxX + 4, maxX: c.maxX + 5, minZ: (c.minZ + c.maxZ) / 2 - 0.3, maxZ: (c.minZ + c.maxZ) / 2 + 0.3, top: 0.5, edge: true, axisAlongX: true };
+    const f2 = new Flight(world); f2.pos.set(c.minX - 2.5, 3, (c.minZ + c.maxZ) / 2); f2.prevPos.copy(f2.pos); f2.vel.set(8, 0, 0); f2.yaw = -Math.PI / 2;
+    const blocked: Surface = { id: 9999, kind: "bench", minX: c.maxX + 2.5, maxX: c.maxX + 3.5, minZ: (c.minZ + c.maxZ) / 2 - 0.3, maxZ: (c.minZ + c.maxZ) / 2 + 0.3, top: 0.5, edge: true, axisAlongX: true };
     check("a tall building between the bird and the perch: refused (dangerous path)", !al.start(f2, blocked) && al.check(f2, blocked).why === "dangerous path", al.check(f2, blocked).why); void tgt;
   }
   { // 危険・時間切れで中止して、安定飛行を保つ(落ちない)

@@ -378,7 +378,7 @@ async function g6({ p, cdp, errs }) {
   check("approaching a roof with the brake held: a candidate marker is shown and guidance is active", mk.vis && mk.tgt === "roof" && mk.guided > 0, JSON.stringify(mk));
   await p.evaluate(() => { __game.input.state.brake = false; __game.setAuto(true); }); await sleep(400);
   check("the marker is hidden during auto flight", await p.evaluate(() => !__game.perchMarker.visible));
-  await p.evaluate(() => { __game.setAuto(false); const f = __game.flight; f.reset(); f.pos.set(-60, 30, -60); f.prevPos.copy(f.pos); f.vel.set(0, 0, -10); });
+  await p.evaluate(() => { __game.setAuto(false); const f = __game.flight; f.reset(); f.pos.set(28, 60, 150); f.prevPos.copy(f.pos); f.vel.set(0, 0, -10); }); // 建物のない上空(以前の(-60,30,-60)は高層アパートの壁に当たる位置で、衝突の復帰でカメラ距離が変わっていた)
   await sleep(500);
   check("far from any landing candidate the marker is not shown", await p.evaluate(() => !__game.perchMarker.visible));
   // 着地中のカメラは鳥を近く(大きく)映す

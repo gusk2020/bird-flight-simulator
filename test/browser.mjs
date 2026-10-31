@@ -3,7 +3,7 @@
 // 検査は6つのグループに分かれ、グループごとに新しいブラウザコンテキスト(保存データも空)から始める。
 // グループ同士は状態を引き継がないので、順序に関係なく・別プロセス(CIのシャード)でも同じ結果になる。
 //   node test/browser.mjs                 全グループを順に実行(ローカル)
-//   node test/browser.mjs --shard 1/3     CI用: 3分割の1番目(各シャードの内訳は SHARD_PLAN)
+//   node test/browser.mjs --shard 1/5     CI用: 5分割の1番目(各シャードの内訳は SHARD_PLAN)
 //   node test/browser.mjs --only g1,g4    指定したグループだけ
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
@@ -378,7 +378,7 @@ async function g6({ p, cdp, errs }) {
   check("approaching a roof with the brake held: a candidate marker is shown and guidance is active", mk.vis && mk.tgt === "roof" && mk.guided > 0, JSON.stringify(mk));
   await p.evaluate(() => { __game.input.state.brake = false; __game.setAuto(true); }); await sleep(400);
   check("the marker is hidden during auto flight", await p.evaluate(() => !__game.perchMarker.visible));
-  await p.evaluate(() => { __game.setAuto(false); const f = __game.flight; f.reset(); f.pos.set(-60, 30, -60); f.prevPos.copy(f.pos); f.vel.set(0, 0, -10); });
+  await p.evaluate(() => { __game.setAuto(false); const f = __game.flight; f.reset(); f.pos.set(28, 60, 150); f.prevPos.copy(f.pos); f.vel.set(0, 0, -10); }); // 建物のない上空(以前の(-60,30,-60)は高層アパートの壁に当たる位置で、衝突の復帰でカメラ距離が変わっていた)
   await sleep(500);
   check("far from any landing candidate the marker is not shown", await p.evaluate(() => !__game.perchMarker.visible));
   // 着地中のカメラは鳥を近く(大きく)映す
@@ -437,11 +437,148 @@ async function g6({ p, cdp, errs }) {
 }
 
 
+// ---- g7: G1(ヘッドライト・◯タップの自動着地・壁衝突からの復帰)
+async function g7({ p, cdp, errs }) {
+  const S = () => p.evaluate(() => { const g = __game, f = g.flight; return { x: f.pos.x, y: f.pos.y, z: f.pos.z, mode: f.mode, speed: f.speed, crashes: f.crashes, escapes: f.escapes, grazes: f.grazes }; });
+  const tp = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
+  console.log("\n# headlights (G1-1)");
+  const lamps = h => p.evaluate(hh => { __game.setHour(hh); const g = __game; g.npcUpdate(); return { lamps: g.npcView.headlamps, cars: g.npc.visibleCars().length }; }, h);
+  await p.evaluate(() => { __game.flight.reset(); }); await sleep(1500);
+  const day = await lamps(12), night = await lamps(0), dawn = await lamps(7), eve = await lamps(18.3);
+  check("daytime (12h) and morning (7h): no headlamps", day.lamps === 0 && dawn.lamps === 0, `day=${day.lamps} dawn=${dawn.lamps}`);
+  check("night (0h): exactly two lamps per drawn car (cars drawn <= visible cars)", night.lamps >= 2 && night.lamps % 2 === 0 && night.lamps / 2 <= night.cars, `lamps=${night.lamps} cars=${night.cars}`);
+  check("evening (18.3h): lit", eve.lamps >= 2 && eve.lamps % 2 === 0, `lamps=${eve.lamps}`);
+  const lm = await p.evaluate(() => { __game.setHour(0); const g = __game; let t = 0; for (let i = 0; i < 30; i++) { const a = performance.now(); g.npcUpdate(); t += performance.now() - a; } return t / 30; });
+  check("headlight update cost is small (< 1 ms per update)", lm < 1, `${lm.toFixed(3)} ms`);
+  await p.evaluate(() => __game.setHour(12));
+
+  console.log("\n# wall hit recovery (G1-2 / G1-3)");
+  const wallRun = (alt, v, sideAng) => p.evaluate(async ([alt, v, sideAng]) => {
+    const g = __game, f = g.flight, a = g.world.apts.find(q => q.floors >= 9) || g.world.apts[0];
+    const c = g.world.colliders.find(k => Math.abs((k.minX + k.maxX) / 2 - a.x) < 0.01 && Math.abs((k.minZ + k.maxZ) / 2 - a.z) < 0.01);
+    f.reset(); const dx = -Math.sin(sideAng), dz = -Math.cos(sideAng); f.pos.set((c.minX + c.maxX) / 2 + Math.sin(sideAng) * 9, alt, c.maxZ + Math.cos(sideAng) * 9); f.prevPos.copy(f.pos); f.yaw = Math.atan2(-dx, -dz); f.vel.set(dx * v, 0, dz * v);
+    g.cam.snap(); const c0 = f.crashes; let inside = false, maxStun = 0, t0 = performance.now();
+    return await new Promise(res => { const tick = () => { for (const k of g.world.colliders) if (f.pos.x > k.minX && f.pos.x < k.maxX && f.pos.z > k.minZ && f.pos.z < k.maxZ && f.pos.y - 0.32 < k.top - 0.3) inside = true; maxStun = Math.max(maxStun, f.stun);
+      if (performance.now() - t0 > 3500) res({ crashes: f.crashes - c0, esc: f.escapes, inside, mode: f.mode, maxStun, away: Math.hypot(f.pos.x - Math.max(c.minX, Math.min(c.maxX, f.pos.x)), f.pos.z - Math.max(c.minZ, Math.min(c.maxZ, f.pos.z))), finite: Number.isFinite(f.pos.x + f.pos.y + f.pos.z) }); else requestAnimationFrame(tick); }; tick(); });
+  }, [alt, v, sideAng]);
+  const w1 = await wallRun(20, 14, 0);
+  check("a frontal hit into a tall wall: one crash, then it backs off and flies on, never inside", w1.crashes === 1 && w1.esc >= 1 && !w1.inside && w1.finite && w1.maxStun <= 0.31 && w1.away > 3, JSON.stringify(w1));
+  const w2 = await wallRun(20, 14, 0.7);
+  check("a diagonal hit: also recovers (no repeated crash)", w2.crashes <= 1 && !w2.inside && w2.finite, JSON.stringify(w2));
+
+  console.log("\n# tap the ring to land automatically (G1-4 / G1-5)");
+  // 一瞬のタップは、ソフトウェア描画の遅いフレームでCDPの2回の送信がずれないよう、同一タスク内の合成イベントで行う版(tapAtXY)と、実際のタッチ入力経路(CDP Input.dispatchTouchEvent。tp)の両方を使う
+  const tapAtXY = (dx, dy, id) => p.evaluate(([dx, dy, id]) => { const r = __game.ring, x = r.x + dx, y = r.y + dy, el = document.elementFromPoint(x, y) || document.body, o = { bubbles: true, pointerId: id, clientX: x, clientY: y, pointerType: "touch" }; el.dispatchEvent(new PointerEvent("pointerdown", o)); el.dispatchEvent(new PointerEvent("pointerup", o)); return { x, y }; }, [dx, dy, id]);
+  /** 足場 kind を選び、その縁の東側 dist m・面の上 up m から、速さ v で西へ向かって飛び出す。side>0 なら足場が画面の右寄りに見える位置から(片手のスティック領域に◯が入る) */
+  const setup = (kind, dist = 11, up = 2.6, v = 8, side = 0) => p.evaluate(([kind, dist, up, v, side]) => {
+    const g = __game, f = g.flight, w = g.world; f.reset(); g.setAuto(false); g.settings.weather = "clear"; g.input.releaseAll();
+    const open = s => !w.colliders.some(c => c.maxX - c.minX > 3 && c.maxZ - c.minZ > 3 && c.top > s.top + 0.3 && c.maxX > s.minX - 16 && c.minX < s.maxX + 16 && c.maxZ > s.minZ - 16 && c.minZ < s.maxZ + 16);
+    const cand = g.surfaces.all.filter(s => s.kind === kind && open(s) && (kind !== "roof" || (s.maxX - s.minX) * (s.maxZ - s.minZ) > 40 && s.top < 12));
+    const t = cand[0]; if (!t) return null; window.__target = t;
+    f.pos.set(t.maxX + dist, t.top + up, (t.minZ + t.maxZ) / 2 + side); f.prevPos.copy(f.pos); f.yaw = Math.PI / 2; f.vel.set(-v, -0.3, 0); g.cam.snap();
+    return { kind: t.kind, w: +(t.maxX - t.minX).toFixed(2), d: +(t.maxZ - t.minZ).toFixed(2), top: t.top };
+  }, [kind, dist, up, v, side]);
+  /** 実際のタッチ入力経路(CDP Input.synthesizeTapGesture): ブラウザ側が押す→離すの間隔(duration ms)を守って届けるので、描画が遅くても押している時間が狂わない */
+  const realTap = (x, y, duration = 50) => cdp.send("Input.synthesizeTapGesture", { x, y, duration, tapCount: 1, gestureSourceType: "touch" });
+  const waitRing = () => p.waitForFunction(() => __game.ring.visible, null, { timeout: 8000 }).catch(() => {});
+  const ringXY = () => p.evaluate(() => ({ vis: __game.ring.visible, x: __game.ring.x, y: __game.ring.y, w: innerWidth }));
+  const AL = () => p.evaluate(() => ({ refusal: __game.autoLand.lastRefusal, refused: __game.autoLand.stats.refused, active: __game.autoLand.active, starts: __game.autoLand.stats.starts, ok: __game.autoLand.stats.success, ended: { ...__game.autoLand.stats.ended }, mode: __game.flight.mode, crashes: __game.flight.crashes, ringTaps: __game.input.stats.ringTaps, flapTaps: __game.input.stats.gestureTaps, strokes: __game.flight.strokes, label: document.getElementById("autoland").textContent }));
+  const finishLanding = async () => { await p.waitForFunction(() => !__game.autoLand.active, null, { timeout: 30000 }).catch(() => {}); await sleep(1500); };
+  const onTarget = () => p.evaluate(() => { const f = __game.flight, t = window.__target; return { mode: f.mode, onTop: Math.abs(f.pos.y - 0.32 - t.top) < 0.06, inside: f.pos.x >= t.minX - 0.3 && f.pos.x <= t.maxX + 0.3 && f.pos.z >= t.minZ - 0.3 && f.pos.z <= t.maxZ + 0.3, x: f.pos.x, z: f.pos.z, walkV: f.walkV }; });
+
+  // (1) 広い足場(屋根): 自動着地のあと、実際のタッチ(スティックを前へ)で歩ける。移動距離と状態を確かめる
+  const roofInfo = await setup("roof", 10, 2.6, 8);
+  check("a roof with open surroundings exists for the walking test", !!roofInfo && roofInfo.w * roofInfo.d > 40, JSON.stringify(roofInfo));
+  await waitRing(); const rr = await ringXY();
+  check("the ring shows up for the roof ahead (screen position known)", rr.vis && rr.x > 0 && rr.x < rr.w && rr.y > 0, JSON.stringify(rr));
+  const c0 = (await AL()).crashes; await tapAtXY(6, -5, 71); await sleep(150);
+  let al = await AL();
+  check("tapping near the ring (6 px off) starts an automatic landing; a small label shows", al.starts === 1 && al.label.includes("自動着地"), JSON.stringify({ starts: al.starts, label: al.label }));
+  await finishLanding(); al = await AL(); let ot = await onTarget();
+  check("the bird lands on the roof by itself, with no crash, and control returns to manual", al.ok === 1 && ot.mode !== "air" && ot.onTop && ot.inside && al.crashes === c0 && al.label === "", JSON.stringify({ ok: al.ok, ...ot, crashes: al.crashes - c0, label: al.label }));
+  const stand = { x: ot.x, z: ot.z };
+  await sleep(500); const still = await onTarget();
+  check("it stays where it landed when nothing is touched (stands, no drift)", Math.hypot(still.x - stand.x, still.z - stand.z) < 0.3 && still.onTop, JSON.stringify({ moved: Math.hypot(still.x - stand.x, still.z - stand.z).toFixed(2), ...still }));
+  // 歩く: 実際のタッチ入力(CDP)で、左側のスティック領域を上へスライド
+  const walkable = roofInfo.w * roofInfo.d > 12 || Math.max(roofInfo.w, roofInfo.d) >= 3;
+  await p.evaluate(() => { __game.flight.walkV = 0; __game.input.releaseAll(); });
+  const ww0 = await onTarget(); await tp("touchStart", [{ x: 120, y: 330, id: 80 }]); await tp("touchMove", [{ x: 120, y: 268, id: 80 }]); await sleep(1600);
+  const ww1 = await onTarget(); const stickY = await p.evaluate(() => __game.input.state.y); await tp("touchEnd", []); await sleep(300);
+  const walked = Math.hypot(ww1.x - ww0.x, ww1.z - ww0.z);
+  check("WALKABLE perch (roof): stick forward moves the bird at least 1.5 m, still landed on the roof top", walkable && stickY > 0.4 && walked >= 1.5 && ww1.mode === "landed" && ww1.onTop, `walked ${walked.toFixed(2)} m, stickY ${stickY.toFixed(2)}, ${JSON.stringify(ww1)}`);
+  const ww2 = await onTarget(); await sleep(400); const ww3 = await onTarget();
+  check("lifting the thumb stops the walk (it stays on the roof)", Math.hypot(ww3.x - ww2.x, ww3.z - ww2.z) < 0.1 && ww3.mode === "landed" && ww3.onTop);
+
+  // (2) 狭い足場(岩など): 「立てる」と「歩ける」を分ける。歩ける広さがなければ、足場の上に立って動かないことを確かめる
+  const narrowInfo = await setup("rock", 11, 2.6, 8);
+  check("a narrow perch (rock) with open surroundings exists", !!narrowInfo, JSON.stringify(narrowInfo));
+  await waitRing(); const nrr = await ringXY(); const cN = (await AL()).crashes; await tapAtXY(0, 0, 72); await sleep(150);
+  await finishLanding(); const alN = await AL(); const otN = await onTarget(); const nwalkable = narrowInfo.w * narrowInfo.d > 12 || Math.max(narrowInfo.w, narrowInfo.d) >= 3;
+  check("NARROW perch: it lands and stands on top (this is 'stands', not 'walks'), no crash", !nwalkable && alN.ok >= 1 && otN.mode !== "air" && otN.onTop && otN.inside && alN.crashes === cN, JSON.stringify({ narrow: narrowInfo, ...otN }));
+  const nw0 = await onTarget(); await tp("touchStart", [{ x: 120, y: 330, id: 81 }]); await tp("touchMove", [{ x: 120, y: 268, id: 81 }]); await sleep(900); const nw1 = await onTarget(); await tp("touchEnd", []);
+  await sleep(1200); const nw2 = await onTarget(); const alN2 = await AL();
+  check("NARROW perch: pushing the stick walks off the end within ~2 m and lands safely (no crash, not stuck in the air)", Math.hypot(nw1.x - nw0.x, nw1.z - nw0.z) <= 2.5 && nw2.mode !== "air" && alN2.crashes === cN, JSON.stringify({ moved: Math.hypot(nw1.x - nw0.x, nw1.z - nw0.z).toFixed(2), ...nw2 }));
+
+  // (3) 取消: 自動着地中に大きなスティック操作で手動へ戻る(実際のタッチ入力)
+  await setup("rock", 12, 2.6, 8); await waitRing(); await tapAtXY(0, 0, 73); await sleep(100);
+  const on2 = (await AL()).active;
+  await tp("touchStart", [{ x: 150, y: 300, id: 74 }]); await tp("touchMove", [{ x: 230, y: 300, id: 74 }]); await sleep(300);
+  const c2 = await p.evaluate(() => ({ active: __game.autoLand.active, user: __game.autoLand.stats.ended.user || 0, stickX: __game.input.state.x })); await tp("touchEnd", []);
+  check("a big stick input (real touch) during the automatic landing hands control back at once", on2 && !c2.active && c2.user >= 1 && c2.stickX > 0.3, JSON.stringify({ on2, ...c2 }));
+
+  // (4) 実際のタッチ入力経路(CDP)で◯をタップ: 範囲内/範囲外/羽ばたきの誤発火/スティックとの競合。
+  //     画面を小さくしてフレームを速くする(ソフトウェア描画が遅いと、押す→離すの間が300 msを超えるため)。片手操作(右手)にして、◯がスティック領域に入るようにする
+  await p.setViewportSize({ width: 480, height: 222 }); await sleep(800);
+  await p.evaluate(() => document.getElementById("btnCtl").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }))); await sleep(300);
+  await p.evaluate(() => { if (!document.getElementById("overlay").hidden) document.getElementById("ovGo").click(); }); await sleep(300);
+  check("one-hand right mode is on for the touch-path tests", (await p.evaluate(() => document.body.dataset.ctl)) === "right");
+  const attempt = async (fn, tries = 4) => { // 環境の遅さで1回目が外れても、4回までやり直す(試行回数も報告する)。毎回新しい進入から
+    let last; for (let i = 1; i <= tries; i++) { const info = await setup("rock", 12, 2.6, 8, 6); await waitRing(); await sleep(200); last = await fn(i, info); if (last.ok) return { ...last, tries: i }; } return { ...last, tries };
+  };
+  // 4a 範囲内(◯から約30 px)の実タッチ: 自動着地が始まり、羽ばたき(片手のタップ)は発生しない
+  const r4a = await attempt(async () => {
+    const before = await AL(); const r = await ringXY(); if (!r.vis || r.x < r.w / 2 + 20) return { ok: false, why: "ring not in the stick zone " + JSON.stringify(r) };
+    const x = Math.round(r.x + 22), y = Math.round(r.y - 20); // 距離 約30 px
+    await realTap(x, y, 50); await sleep(250); const after = await AL();
+    return { ok: after.starts === before.starts + 1 && after.ringTaps === before.ringTaps + 1 && after.flapTaps === before.flapTaps, before, after, x, y };
+  });
+  check("REAL TOUCH 30 px from the ring: the automatic landing starts, counted as a ring tap and not as a flap tap", r4a.ok, `tries ${r4a.tries}; refusal=${r4a.after && r4a.after.refusal}; ringTaps ${r4a.before && r4a.before.ringTaps}->${r4a.after && r4a.after.ringTaps}, flapTaps ${r4a.before && r4a.before.flapTaps}->${r4a.after && r4a.after.flapTaps}${r4a.why ? " " + r4a.why : ""}`);
+  await p.waitForFunction(() => !__game.autoLand.active, null, { timeout: 30000 }).catch(() => {});
+  // 4b 範囲外(◯から約110 px)の実タッチ: 自動着地は始まらず、ふつうの羽ばたきタップになる
+  const r4b = await attempt(async () => {
+    const before = await AL(); const r = await ringXY(); if (!r.vis || r.x < r.w / 2 + 20) return { ok: false, why: "ring not in the stick zone" };
+    const x = Math.round(Math.min(r.w - 12, r.x + 110)), y = Math.round(Math.max(30, r.y - 40));
+    await realTap(x, y, 50); await sleep(300); const after = await AL();
+    return { ok: after.starts === before.starts && after.ringTaps === before.ringTaps && after.flapTaps === before.flapTaps + 1, before, after };
+  });
+  check("REAL TOUCH 110 px away from the ring: no automatic landing; it is an ordinary flap tap", r4b.ok, `tries ${r4b.tries}; starts ${r4b.before && r4b.before.starts}->${r4b.after && r4b.after.starts}, flapTaps ${r4b.before && r4b.before.flapTaps}->${r4b.after && r4b.after.flapTaps}${r4b.why ? " " + r4b.why : ""}`);
+  // 4c スティックとの競合: ◯の上で押してそのままスライドしたら、スティック(◯タップにも羽ばたきにもならない)
+  const r4c = await attempt(async () => {
+    const before = await AL(); const r = await ringXY(); if (!r.vis || r.x < r.w / 2 + 20) return { ok: false, why: "ring not in the stick zone" };
+    const x = Math.round(r.x), y = Math.round(r.y);
+    await tp("touchStart", [{ x, y, id: 92 }]); await tp("touchMove", [{ x: x + 60, y, id: 92 }]); await sleep(300);
+    const mid = await p.evaluate(() => ({ stickX: __game.input.state.x, phase: __game.input.gesture.phase })); await tp("touchEnd", []); await sleep(250); const after = await AL();
+    return { ok: mid.stickX > 0.3 && mid.phase === "stick" && after.starts === before.starts && after.ringTaps === before.ringTaps && after.flapTaps === before.flapTaps, before, after, mid };
+  });
+  check("REAL TOUCH pressing on the ring and sliding: it is the stick (no automatic landing, no flap tap)", r4c.ok, `tries ${r4c.tries}; ${JSON.stringify(r4c.mid)} ringTaps ${r4c.before && r4c.before.ringTaps}->${r4c.after && r4c.after.ringTaps}${r4c.why ? " " + r4c.why : ""}`);
+  // 4d 長押し(◯の上で0.6秒)は減速(ブレーキ): 自動着地にならない
+  const r4d = await attempt(async () => {
+    const before = await AL(); const r = await ringXY(); if (!r.vis || r.x < r.w / 2 + 20) return { ok: false, why: "ring not in the stick zone" };
+    await tp("touchStart", [{ x: Math.round(r.x), y: Math.round(r.y), id: 93 }]); await sleep(600);
+    const mid = await p.evaluate(() => ({ brake: __game.input.state.brake, phase: __game.input.gesture.phase })); await tp("touchEnd", []); await sleep(250); const after = await AL();
+    return { ok: mid.brake && mid.phase === "brake" && after.starts === before.starts && after.ringTaps === before.ringTaps, before, after, mid };
+  });
+  check("REAL TOUCH long press (0.6 s) on the ring: it is the brake (no automatic landing)", r4d.ok, `tries ${r4d.tries}; ${JSON.stringify(r4d.mid)}${r4d.why ? " " + r4d.why : ""}`);
+  // 4e 左手モードの切替で取り残しがない: 一度◯タップになった指番号をもう一度使っても、ふつうに動く(ringFiredの取り残し)
+  await p.evaluate(() => { __game.input.releaseAll(); }); await p.setViewportSize({ width: 892, height: 412 }); await sleep(500);
+  check("G1: no page errors", errs.length === 0, errs.join(" | "));
+}
+
 const GROUPS = [
-  ["g1", g1, false], ["g2", g2, true], ["g3", g3, true], ["g4", g4, true], ["g5", g5, false], ["g6", g6, true],
+  ["g1", g1, false], ["g2", g2, true], ["g3", g3, true], ["g4", g4, true], ["g5", g5, false], ["g6", g6, true], ["g7", g7, true],
 ];
-// CIの3分割(各シャードの所要時間がほぼ等しくなるように)
-const SHARD_PLAN = [["g1", "g3"], ["g2", "g5"], ["g4", "g6"]];
+// CIの5分割(各シャードの所要時間がほぼ等しくなるように)
+const SHARD_PLAN = [["g1", "g3"], ["g2", "g5"], ["g4"], ["g6"], ["g7"]];
 
 let want = GROUPS.map(g => g[0]);
 const only = arg("--only"), shard = arg("--shard");

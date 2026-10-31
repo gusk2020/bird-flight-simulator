@@ -8,6 +8,11 @@ export const SMOOTH_S = 0.1;
 export class Input {
   state: FlightInput = { x: 0, y: 0, flapHeld: false, flapTap: false, brake: false };
   onReset = () => {}; onCamera = () => {}; onTime = () => {}; onPause = () => {};
+  /** G1-5: 画面の座標が着地候補の◯の上か(main が毎フレーム、◯の画面位置から判定する)と、◯がタップされたとき */
+  ringHit: (x: number, y: number) => boolean = () => false; onRingTap = () => {};
+  /** テスト用の計数: ◯タップになった回数 / 片手操作のタップ(=羽ばたき)になった回数 */
+  stats = { ringTaps: 0, gestureTaps: 0 };
+  private ringCand = new Map<number, { x: number; y: number; t: number }>(); private ringFired = new Set<number>();
   private out: FlightInput = { x: 0, y: 0, flapHeld: false, flapTap: false, brake: false };
   mode: ControlMode = "both"; readonly gesture = new OneHandGesture();
   private stickId = -1; private ox = 0; private oy = 0; private R = 60;
@@ -16,6 +21,20 @@ export class Input {
 
   constructor() {
     const zone = document.getElementById("stick")!;
+    // ◯のタップ(G1-5): スティックや羽ばたきタップより先(キャプチャ段階)に見る。◯の上で押して、ほとんど動かさず短く離したときだけ「◯タップ」。
+    // 動かせばスティック、長く押せば減速/歩行として今までどおり扱う。◯タップになった指は、羽ばたきタップにも歩行にもしない
+    const RING_TAP_MS = 300, RING_SLOP_PX = 14;
+    document.addEventListener("pointerdown", e => {
+      this.ringFired.delete(e.pointerId); // 前に使った指番号の取り残しを消す
+      const el = e.target as Element | null; if (el && el.closest && el.closest("button,.btn,#overlay")) return;
+      if (this.ringHit(e.clientX, e.clientY)) this.ringCand.set(e.pointerId, { x: e.clientX, y: e.clientY, t: e.timeStamp });
+    }, true);
+    document.addEventListener("pointermove", e => { const c = this.ringCand.get(e.pointerId); if (c && Math.hypot(e.clientX - c.x, e.clientY - c.y) > RING_SLOP_PX) this.ringCand.delete(e.pointerId); }, true);
+    document.addEventListener("pointerup", e => {
+      const c = this.ringCand.get(e.pointerId); this.ringCand.delete(e.pointerId);
+      if (c && e.timeStamp - c.t < RING_TAP_MS && Math.hypot(e.clientX - c.x, e.clientY - c.y) <= RING_SLOP_PX && this.ringHit(e.clientX, e.clientY)) { this.ringFired.add(e.pointerId); this.stats.ringTaps++; this.onRingTap(); }
+    }, true);
+    document.addEventListener("pointercancel", e => { this.ringCand.delete(e.pointerId); this.ringFired.delete(e.pointerId); }, true);
     zone.addEventListener("pointerdown", e => {
       if (this.mode !== "both") { // 片手操作: スライド=スティック、短いタップ=羽ばたき、長押し=減速(地上では歩く)
         if (this.gesture.down(e.pointerId, e.clientX, e.clientY, e.timeStamp, GESTURE.radiusPx(innerWidth, innerHeight))) {
@@ -35,6 +54,10 @@ export class Input {
     });
     // 描画が重くても、タップ/長押しは指が触れた実際の時刻(e.timeStamp)で判定する
     const end = (e: PointerEvent) => {
+      if (e.type === "pointerup" && this.ringFired.delete(e.pointerId)) { // ◯タップ: 羽ばたきにも歩行にもしない
+        if (this.mode !== "both") { if (e.pointerId === this.gesture.id) { this.gesture.cancel(); this.showStick(false); } } else if (e.pointerId === this.stickId) this.endStick();
+        return;
+      }
       if (this.mode !== "both") { if (e.pointerId === this.gesture.id) { if (e.type === "pointerup") this.gesture.up(e.pointerId, e.timeStamp); else this.gesture.cancel(); this.showStick(false); } return; }
       if (e.pointerId === this.stickId) this.endStick();
     };
@@ -88,7 +111,7 @@ export class Input {
   read(): FlightInput {
     const k = this.keys, s = this.state;
     if (this.mode !== "both") { // 片手: ジェスチャの結果を状態へ反映(長押し判定もここで進める)
-      const g = this.gesture; g.poll(performance.now()); s.brake = g.brake; if (g.consumeTap()) s.flapTap = true;
+      const g = this.gesture; g.poll(performance.now()); s.brake = g.brake; if (g.consumeTap()) { s.flapTap = true; this.stats.gestureTaps++; }
       // 指の動きを約0.1秒でなめらかにして渡す(急な旋回・昇降を防ぐ)。指を離したら、その場で中立へ戻す
       if (g.active) { const k = 1 - Math.exp(-(1 / 60) / SMOOTH_S); s.x += (g.x - s.x) * k; s.y += (g.y - s.y) * k; }
       else s.x = s.y = 0;

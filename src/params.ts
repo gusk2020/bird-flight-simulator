@@ -59,6 +59,16 @@ export const PHYS = {
   takeoffUp: 4.5,
   wallCrashSpeed: 7,
   stunTime: 0.7,
+  // G1-3: 翼先のかすり。壁に対して浅い角度(壁沿い)で触れたときは胴体が当たってもそのまま滑らせ、墜落にしない(正面・斜め衝突は従来どおり)
+  grazeIncidence: 0.5,  // 壁の法線方向の速度/水平速度 がこれ未満なら「かすり」(約30°より浅い入射)
+  grazeDrag: 0.985,     // かすり中の軽い減速(1ステップごと)
+  // G1-2: 壁への衝突からの復帰(手動操作のみ)
+  wallStunTime: 0.3,    // 壁衝突の硬直(従来 0.7)
+  escapeTurn: 7,        // 逃げる向きへ機首を向ける速さ rad/s
+  escapeSpeedMin: 6.5, escapeSpeedMax: 12, // 壁から離れて飛び直す速さ(失速速度より上)
+  escapeAway: 2.5,      // 壁から離れる向きの速さ成分
+  escapeClimb: 0.8,     // 衝突直後の上向き速度の下限
+  escapeGuard: 0.8,     // 復帰開始から、この秒数の間は壁への再衝突を墜落にしない(連続衝突の防止。壁の押し戻しは有効)
   bound: 205,
   maxAltitude: 160,
 };

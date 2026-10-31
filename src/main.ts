@@ -244,7 +244,7 @@ function frame(now: number) {
   fxSmooth += (fxTarget - fxSmooth) * (1 - Math.exp(-6 * vdt));
   const fxc = Math.min(1, fxSmooth);
   world.updateLOD(bp.x, bp.z);
-  const tn = performance.now(); if (running) npc.update(dt, npcPlayer(), hour); npcView.update(npc, camera.position); stats.npcMs += (performance.now() - tn - stats.npcMs) * 0.05;
+  const tn = performance.now(); if (running) npc.update(dt, npcPlayer(), hour); npcView.update(npc, camera.position, 220, world.lightsLevel()); stats.npcMs += (performance.now() - tn - stats.npcMs) * 0.05;
   if (autopilot.enabled && cam.mode === "third") { // オートのカット(危険な場面では自動で追従へ戻る)
     const sh = director.update(vdt, flight); cam.setShot(sh.yaw, sh.dist, sh.h); bird.setVisible(cam.shotDist >= FIRST_PERSON_BELOW);
   }

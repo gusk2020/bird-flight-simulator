@@ -157,7 +157,7 @@ async function g3({ p, cdp, errs }) {
   check("landed: brake button becomes 歩く", (await p.textContent("#brake")) === "歩く" && (await S()).mode === "landed");
   await p.evaluate(() => { const g = __game, f = g.flight; let best = f.yaw, bd = -1; for (let k = 0; k < 16; k++) { const y = k * Math.PI / 8; let d = 0; while (d < 6 && g.world.heightAt(f.pos.x - Math.sin(y) * (d + 1), f.pos.z - Math.cos(y) * (d + 1)) < 0.3 && (Math.abs(f.pos.x - Math.sin(y) * (d + 1)) < 203 || Math.abs(f.pos.x - Math.sin(y) * (d + 1)) < Math.abs(f.pos.x)) && (Math.abs(f.pos.z - Math.cos(y) * (d + 1)) < 203 || Math.abs(f.pos.z - Math.cos(y) * (d + 1)) < Math.abs(f.pos.z))) d++; /* 世界の端(±205)も行き止まり(端にいるときは内向きの歩みだけを開けた向きとみなす) */ if (d > bd) { bd = d; best = y; } } f.yaw = best; }); await sleep(100); // 目の前が開けた向きにしてから歩く
   const wA = await S(); await tp("touchStart", [{ x: 740, y: 350, id: 3 }]); await sleep(1100); const wB = await S(); const wk = await p.evaluate(() => ({ w: __game.flight.walkV, hud: document.getElementById("hud").textContent })); await tp("touchEnd", []);
-  check("holding 歩く walks forward, stays on the ground", dist(wA, wB) > 1 && wB.mode === "landed" && wk.hud.includes("歩行中"), `pos=${wA.x.toFixed(1)},${wA.z.toFixed(1)}>${wB.x.toFixed(1)},${wB.z.toFixed(1)} moved=${dist(wA, wB).toFixed(2)} hud=${wk.hud}`);
+  check("holding 歩く walks forward, stays on the ground", dist(wA, wB) > 1 && wB.mode === "landed" && (wk.w > 0.3 || wk.hud.includes("歩行中")), `pos=${wA.x.toFixed(1)},${wA.z.toFixed(1)}>${wB.x.toFixed(1)},${wB.z.toFixed(1)} moved=${dist(wA, wB).toFixed(2)} hud=${wk.hud}`);
   await sleep(600);
   await p.evaluate(() => { window.__peak = 0; const t = () => { const f = __game.flight; window.__peak = Math.max(window.__peak, f.pos.y - 0.32 - __game.world.heightAt(f.pos.x, f.pos.z)); requestAnimationFrame(t); }; t(); });
   await p.evaluate(() => { const el = document.getElementById("flap"); el.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 77 })); el.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 77 })); }); await sleep(2500); // 一瞬のタップ(ソフトウェア描画は低FPSなので同一タスクで押して離す)
@@ -699,7 +699,7 @@ async function g11({ p, cdp, errs }) {
   check("a landing candidate appears for the rock ahead, with a reason code and the candidate counts available for diagnosis", !!info && seen && r0.reason === "shown" && r0.why.inRange >= 1, JSON.stringify(r0));
   const hold = await p.evaluate(async () => {
     const g = __game, f = g.flight, d = g.ringDiag, x0 = f.pos.x, y0 = f.pos.y, z0 = f.pos.z; let t0 = f.clock, drawn = 0, staleSeen = false, hiddenAt = -1, lastShown = 0;
-    g.surfaces.near = () => {}; // 候補選別が何も返さなくなる(= 候補を見失った)
+    g.surfaces.near = (x, z, r, out) => { out.length = 0; }; // 候補選別が何も返さなくなる(= 候補を見失った)。出力配列を空にしないと前回の結果が残り、候補が見えたままになる
     const hover = setInterval(() => { f.pos.set(x0, y0, z0); f.vel.set(0, 0, 0); }, 8); // その場にとどめる
     const out = await new Promise(res => { const tick = () => { const age = f.clock - t0, vis = d.reason === "shown";
       if (vis) { lastShown = age; if (d.stale) staleSeen = true; if (!drawn && age > 2) { // 描かれているか: ◯の周り60 px四方を、目印を隠したときと比べる
@@ -767,7 +767,7 @@ async function g12({ p, cdp, errs }) {
   const tp = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
   await p.evaluate(() => { if (!document.getElementById("overlay").hidden) document.getElementById("ovGo").click(); }); await sleep(300);
   await p.setViewportSize({ width: 892, height: 412 }); await sleep(600);
-  await p.evaluate(() => { window.__pd = []; addEventListener("pointerdown", e => { const r = __game.ring; window.__pd.push({ dx: Math.round(e.clientX - r.x), dy: Math.round(e.clientY - r.y), hit: Math.round(r.hit), vis: r.visible, reason: __game.ringDiag.reason }); }, true); });
+  await p.evaluate(() => { window.__pd = []; addEventListener("pointerup", e => { const l = window.__pd[window.__pd.length - 1]; if (l) { l.up = Math.round(e.timeStamp - l.t0); l.moved = Math.round(Math.hypot(e.clientX - l.x0, e.clientY - l.y0)); setTimeout(() => { l.taps = __game.input.stats.ringTaps; }, 0); } }, true); addEventListener("pointerdown", e => { const r = __game.ring; window.__pd.push({ t0: e.timeStamp, x0: e.clientX, y0: e.clientY, cand: __game.input.ringCandCount ? __game.input.ringCandCount() : -1,  dx: Math.round(e.clientX - r.x), dy: Math.round(e.clientY - r.y), hit: Math.round(r.hit), vis: r.visible, reason: __game.ringDiag.reason }); }, true); });
   for (let i = 0; i < 3 && (await p.evaluate(() => document.body.dataset.ctl)) !== "right"; i++) { await p.evaluate(() => document.getElementById("btnCtl").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }))); await sleep(250); }
   // 測定用の試行: 種類ごとに、足場の通し番号 k で決まる位置・向き・速さ(調整には使っていない別の並び)
   const plan = []; for (const kind of ["rock", "roof", "sign", "bench", "balcony", "rail", "branch", "pole"]) for (const k of [1, 2]) plan.push([kind, k]);

@@ -656,11 +656,32 @@ async function g8({ p, cdp, errs }) {
   check("H1: no page errors", errs.length === 0, errs.join(" | "));
 }
 
+async function g9({ p, cdp, errs }) {
+  console.log("\n# puddles and bird life (H3)");
+  const goto = (x, z) => p.evaluate(([x, z]) => { const g = __game, f = g.flight; f.reset(); g.setAuto(false); g.input.releaseAll(); const y = g.world.heightAt(x, z) + 0.32; f.pos.set(x, y, z); f.prevPos.copy(f.pos); f.mode = "landed"; f.vel.set(0, 0, 0); g.cam.snap(); }, [x, z]);
+  const pool = await p.evaluate(() => { const q = __game.puddles.list.find(q => q.perm); return { x: q.x, z: q.z, r: q.r }; });
+  const vis = await p.evaluate(() => { const g = __game; g.puddles.wet = 0; g.puddleView.update(0.016, 0); const dry = g.puddleView.group.children.filter(c => c.visible && c.geometry.type === "CircleGeometry").length; g.puddles.wet = 1; g.puddleView.update(0.016, 0); const wet = g.puddleView.group.children.filter(c => c.visible && c.geometry.type === "CircleGeometry").length; g.puddles.wet = 0; g.puddleView.update(0.016, 0); return { dry, wet, perm: g.puddles.list.filter(q => q.perm).length, all: g.puddles.list.length }; });
+  check("dry: only the park pool is drawn; after rain every puddle is drawn; dried again, back to the pool only", vis.dry === vis.perm && vis.wet === vis.all, JSON.stringify(vis));
+  const lift = await p.evaluate(() => { const g = __game; let lo = 9, hi = -9; for (const m of g.puddleView.group.children) if (m.geometry.type === "CircleGeometry") { const q = g.puddles.list.find(z => Math.abs(z.x - m.position.x) < 1e-6 && Math.abs(z.z - m.position.z) < 1e-6); if (!q) continue; const d = m.position.y - g.world.heightAt(q.x, q.z); lo = Math.min(lo, d); hi = Math.max(hi, d); } const mt = g.puddleView.group.children[0].material; return { lo, hi, depthWrite: mt.depthWrite, po: mt.polygonOffset }; });
+  check("puddles float a fixed small height above their ground (no sinking, no hovering) with depth write off and polygon offset on", lift.lo > 0.03 && lift.hi < 0.06 && !lift.depthWrite && lift.po, JSON.stringify(lift));
+  await goto(pool.x + pool.r + 0.6, pool.z);
+  await p.evaluate(() => { __game.life.wait = 0.2; __game.flight.sitting = true; }); // 座って休む
+  const t0 = Date.now(); let by = {};
+  while (Date.now() - t0 < 60000) { by = await p.evaluate(() => ({ ...__game.life.stats.byAct })); if (by.drink && by.bathe) break; await sleep(250); }
+  check("resting beside the pool: the bird drinks and bathes by itself (no button)", !!by.drink && !!by.bathe, JSON.stringify(by));
+  const was = await p.evaluate(async () => { const g = __game; for (let i = 0; i < 600 && g.life.act === "none"; i++) await new Promise(r => setTimeout(r, 30)); return g.life.act; });
+  const tp = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
+  await tp("touchStart", [{ x: 120, y: 250, id: 71 }]); await tp("touchMove", [{ x: 120, y: 190, id: 71 }]); await sleep(300);
+  const now = await p.evaluate(() => ({ act: __game.life.act, sit: __game.flight.sitting })); await tp("touchEnd", []);
+  check("a stick input cancels any life action at once and stands the bird up", was !== "none" && now.act === "none" && !now.sit, JSON.stringify({ was, now }));
+  check("H3: no page errors", errs.length === 0, errs.join(" | "));
+}
+
 const GROUPS = [
-  ["g1", g1, false], ["g2", g2, true], ["g3", g3, true], ["g4", g4, true], ["g5", g5, false], ["g6", g6, true], ["g7", g7, true], ["g8", g8, true],
+  ["g1", g1, false], ["g2", g2, true], ["g3", g3, true], ["g4", g4, true], ["g5", g5, false], ["g6", g6, true], ["g7", g7, true], ["g8", g8, true], ["g9", g9, true],
 ];
 // CIの5分割(各シャードの所要時間がほぼ等しくなるように)
-const SHARD_PLAN = [["g1", "g3"], ["g2", "g5"], ["g4", "g8"], ["g6"], ["g7"]];
+const SHARD_PLAN = [["g1", "g3"], ["g2", "g5"], ["g4", "g8"], ["g6", "g9"], ["g7"]];
 
 let want = GROUPS.map(g => g[0]);
 const only = arg("--only"), shard = arg("--shard");

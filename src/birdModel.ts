@@ -63,7 +63,8 @@ export class BirdModel {
   attach(scene: THREE.Scene) { scene.add(this.group, this.shadow); }
   setVisible(v: boolean) { this.group.visible = v; }
 
-  update(dt: number, f: Flight, pos: THREE.Vector3, groundY: number, peck = 0) {
+  update(dt: number, f: Flight, pos: THREE.Vector3, groundY: number, peck = 0, life?: { headYaw: number; headDip: number; wingSpread: number; fluff: number; shake: number; tilt: number }) {
+    if (life && life.headDip > 0) peck = Math.max(peck, Math.min(1, life.headDip));
     this.group.position.copy(pos);
     this.group.rotation.set(f.pitch, f.yaw, f.roll, "YXZ");
     const air = f.mode === "air"; this.t += dt;
@@ -97,6 +98,15 @@ export class BirdModel {
       this.beak.position.set(0, 0.16 + dy - 0.03 * peck, -0.69 + this.head.position.z + 0.52); this.beak.rotation.x = -Math.PI / 2 - 0.9 * peck;
       for (let i = 0; i < 2; i++) this.eyes[i].position.set(i ? 0.085 : -0.085, 0.2 + dy, -0.58 + dz);
     }
+    // 生活動作(H3): 首をかしげる・羽を広げる・ふくらむ・ぶるぶる。地上のときだけ値が入る
+    const lp = !air && life ? life : null;
+    if (lp) {
+      const sx = Math.sin(lp.headYaw) * 0.14;
+      this.head.position.x = sx; this.neck.position.x = sx * 0.5; this.beak.position.x = sx; this.beak.rotation.z = -lp.headYaw * 0.5;
+      this.eyes[0].position.x = -0.085 + sx; this.eyes[1].position.x = 0.085 + sx;
+      for (const w of this.wings) { w.shoulder.rotation.z += w.s * lp.wingSpread * 0.9; w.shoulder.rotation.y += w.s * lp.wingSpread * 0.3 * 0; }
+      this.root.scale.setScalar(1 + lp.fluff * 0.12); this.root.rotation.z = Math.sin(this.t * 55) * lp.shake * 0.18 + lp.tilt;
+    } else { this.head.position.x = 0; this.neck.position.x = 0; this.beak.position.x = 0; this.beak.rotation.z = 0; this.root.scale.setScalar(1); this.root.rotation.z = 0; }
     this.peckPrev = peck;
     // 尾: ブレーキで下げる
     this.tailPitch += ((f.braking ? 0.5 : 0) - this.tailPitch) * (1 - Math.exp(-10 * dt));

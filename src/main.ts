@@ -1,3 +1,6 @@
+import { Puddles, buildPuddles, PUDDLE } from "./puddles";
+import { PuddleView } from "./puddleView";
+import { Life } from "./life";
 import { ProxLand } from "./proxland";
 import * as THREE from "three";
 import { Flight } from "./flight";
@@ -40,6 +43,9 @@ const world = buildWorld(); scene.add(world.group);
 const flight = new Flight(world);
 const wind = new Wind(world.colliders); flight.wind = wind;
 const rain = new Rain(); scene.add(rain.mesh);
+const puddles = new Puddles(buildPuddles(world)), puddleView = new PuddleView(puddles, world.heightAt); scene.add(puddleView.group);
+const life = new Life();
+let splashT = 0;
 const quality = new Quality();
 const npc = new NpcWorld(world, 11); const npcView = new NpcView(); scene.add(npcView.group);
 const streaks = new Streaks(); scene.add(streaks.mesh);
@@ -270,7 +276,14 @@ function frame(now: number) {
   if (!running && game.state === "paused") bp.copy(flight.pos);
   const gh = world.heightAt(bp.x, bp.z);
   const vdt = running ? dt : 0;
-  bird.update(vdt, flight, bp, gh, forage.head);
+  { // H3: 水たまり・生活動作
+    const wd2 = weatherAtLevel(wxLevel);
+    puddles.update(vdt, wd2.rain, wd2.sun); puddleView.update(vdt, wd2.rain);
+    const wn = puddles.nearest(flight.pos.x, flight.pos.z), st = input.state;
+    const pose = life.update(vdt, { landed: flight.mode === "landed" && !autoLand.active && !flight.hopping, moving: flight.walkV > 0.05, input: !autopilot.enabled && (Math.abs(st.x) > 0.15 || Math.abs(st.y) > 0.15 || st.flapHeld || st.flapTap || st.brake), sitting: flight.sitting, water: !!wn && wn.d <= PUDDLE.drinkRange, onWaterEdge: !!wn && wn.d === 0 });
+    if (life.act === "bathe" && vdt > 0) { splashT -= vdt; if (splashT <= 0) { splashT = 0.45; puddleView.splash(flight.pos.x, flight.pos.z); } }
+    bird.update(vdt, flight, bp, gh, forage.head, pose);
+  }
   // 速度演出: 高速時のみ。強度は急に変えず滑らかに追従
   const fxTarget = flight.mode === "air" ? speedIntensity(flight.speed) * fxLevel : 0;
   fxSmooth += (fxTarget - fxSmooth) * (1 - Math.exp(-6 * vdt));
@@ -320,4 +333,4 @@ function updateHud(dt: number, now: number) {
 }
 renderer.setAnimationLoop(frame);
 // テスト・デバッグ用
-(window as unknown as Record<string, unknown>).__game = { game, flight, world, input, cam, camera, renderer, scene, frame, env: () => envAt(hour), stats, npc, lines, streaks, speedIntensity, setHour: (h: number) => { hour = h; targetHour = null; applyEnv(); }, settings, applySettings, assist, prefs, autopilot, setAuto, season, applySeasonLook, saveSeason, forage, perchAssist, perchMarker, autoLand, proxLand, ring, surfaces, cruiseGuard, npcView, npcUpdate: () => npcView.update(npc, camera.position, 220, world.lightsLevel()), hour: () => hour, director, drift, uiHider, wxLevel: () => wxLevel, wind, rain, quality };
+(window as unknown as Record<string, unknown>).__game = { game, flight, world, input, cam, camera, renderer, scene, frame, env: () => envAt(hour), stats, npc, lines, streaks, speedIntensity, setHour: (h: number) => { hour = h; targetHour = null; applyEnv(); }, settings, applySettings, assist, prefs, autopilot, setAuto, season, applySeasonLook, saveSeason, forage, perchAssist, perchMarker, autoLand, proxLand, puddles, puddleView, life, ring, surfaces, cruiseGuard, npcView, npcUpdate: () => npcView.update(npc, camera.position, 220, world.lightsLevel()), hour: () => hour, director, drift, uiHider, wxLevel: () => wxLevel, wind, rain, quality };

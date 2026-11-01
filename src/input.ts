@@ -13,6 +13,8 @@ export class Input {
   ringHit: (x: number, y: number) => boolean = () => false; onRingTap = () => {};
   /** テスト用の計数: ◯タップになった回数 / 片手操作のタップ(=羽ばたき)になった回数 */
   stats = { ringTaps: 0, gestureTaps: 0 };
+  /** 診断用: 押している最中の◯候補の数(テストの記録に使う) */
+  ringCandCount() { return this.ringCand.size; }
   /** H1: 近接◎(画面の下側)。片手操作のときだけ。触れた場所が近接◎の領域なら近接、そうでなければ今までの巡航(スライド=スティック、タップ=羽ばたき、長押し=減速) */
   readonly prox = new ProxPad(); proxVisual = { x: 0, y: 0, on: false };
   /** 触れ始めの進行方向(世界のyaw)。main が設定する */
@@ -39,7 +41,8 @@ export class Input {
     document.addEventListener("pointermove", e => { const c = this.ringCand.get(e.pointerId); if (c && Math.hypot(e.clientX - c.x, e.clientY - c.y) > RING_SLOP_PX) this.ringCand.delete(e.pointerId); }, true);
     document.addEventListener("pointerup", e => {
       const c = this.ringCand.get(e.pointerId); this.ringCand.delete(e.pointerId);
-      if (c && e.timeStamp - c.t < RING_TAP_MS && Math.hypot(e.clientX - c.x, e.clientY - c.y) <= RING_SLOP_PX && this.ringHit(e.clientX, e.clientY)) { this.ringFired.add(e.pointerId); this.stats.ringTaps++; this.onRingTap(); }
+      if (c && e.timeStamp - c.t < RING_TAP_MS && Math.hypot(e.clientX - c.x, e.clientY - c.y) <= RING_SLOP_PX) { // 押した時点で◯の当たり判定の中だったことは確かめ済み(◯は飛びながら動く・消えることがあるので、離した時点では確かめ直さない)
+         this.ringFired.add(e.pointerId); this.stats.ringTaps++; this.onRingTap(); }
     }, true);
     document.addEventListener("pointercancel", e => { this.ringCand.delete(e.pointerId); this.ringFired.delete(e.pointerId); }, true);
     zone.addEventListener("pointerdown", e => {

@@ -17,6 +17,8 @@ export const AUTOLAND = {
   hSlope: 0.176, hFinal: 0.426,                // 目標の高さ = 足場の上 hFinal + (d-2.5)*hSlope
   downFast: -0.165, downSlow: -0.564, upMax: 0.134, // 降下の勾配の下限(速すぎるとき/ふつう)と上限
   vBig: 6.6,                                   // 広い面(12 m²超)の手前での最低の目標速度
+  railForBalcony: true, // 外からベランダへ来たときは手すりの上へ降りる
+  trackGain: 2, // 軌跡のずれを機首の向きの指示へ足す割合(0で無効)
   yGain: 0.235, flapSpeed: 6.82, flapSink: 1.9,
 };
 export type AutoLandEnd = "success" | "user" | "danger" | "lost" | "timeout" | "crash" | "fail";
@@ -36,6 +38,7 @@ export class AutoLand {
   lastRefusal = "";
   stats = { starts: 0, refused: 0, success: 0, ended: { user: 0, danger: 0, lost: 0, timeout: 0, crash: 0, fail: 0 } as Record<string, number>, time: 0 };
   dbg = ""; private d0 = 0; private c0 = 0; private danger = 0; private lastFlap = -9; private under: Surface[] = [];
+  private get all() { return this.idx.all; }
   constructor(private idx: SurfaceIndex, private pa: PerchAssist, private heightAt: (x: number, z: number) => number) {}
 
   private dist(f: Flight, s: Surface) { return Math.hypot(f.pos.x - clamp(f.pos.x, s.minX, s.maxX), f.pos.z - clamp(f.pos.z, s.minZ, s.maxZ)); }
@@ -68,8 +71,20 @@ export class AutoLand {
     return false;
   }
 
-  start(f: Flight, s: Surface): boolean {
-    const c = this.check(f, s);
+  /** ベランダは、手すりと建物の壁のあいだの約1 mの床。手すり(床から1 m上)を越えて、止まり切れないまま壁に近づくより、外から来たなら手すりの上に降りるほうが確実。
+   *  手すり(と床)は一つの構造物なので、成功は手すりでも床でも数える(下の same)。外から来ていない(横から)ときは床のまま */
+  private retarget(f: Flight, s: Surface): Surface {
+    if (s.kind !== "balcony") return s;
+    const cz = (s.minZ + s.maxZ) / 2;
+    for (const r of this.all) {
+      if (r.kind !== "rail" || r.top <= s.top || r.maxX <= s.minX || r.minX >= s.maxX || Math.abs((r.minZ + r.maxZ) / 2 - cz) > 0.9) continue;
+      if (Math.sign(f.pos.z - cz) === Math.sign((r.minZ + r.maxZ) / 2 - cz) && Math.abs(f.pos.z - cz) > 1.0) return r;
+    }
+    return s;
+  }
+
+  start(f: Flight, s0: Surface): boolean {
+    const s = AUTOLAND.railForBalcony ? this.retarget(f, s0) : s0, c = this.check(f, s);
     if (!c.ok) { this.stats.refused++; this.end = ""; this.lastRefusal = c.why; return false; }
     this.active = true; this.target = s; this.t = 0; this.end = ""; this.d0 = this.dist(f, s); this.c0 = f.crashes; this.danger = 0; this.lastFlap = f.clock - 9;
     this.pa.forced = s; this.stats.starts++; return true;
@@ -107,7 +122,9 @@ export class AutoLand {
     // 目標点: 着地補助が立てた計画(細長い面は端から長手方向に入る点)があればそれ、なければ足場の内側でいちばん近い点
     const pl = this.pa.plan, usePlan = !!pl && f.clock - pl.t < 0.15 && d < 14;
     const ax = usePlan ? pl!.tx : clamp(px, s.minX + 0.2, s.maxX - 0.2), az = usePlan ? pl!.tz : clamp(pz, s.minZ + 0.2, s.maxZ - 0.2), da = Math.hypot(ax - px, az - pz);
-    const e = da > 0.3 ? wrap(Math.atan2(-(ax - px), -(az - pz)) - f.yaw) : 0;
+    // 横風: 機首を目標へ向けても、風で流されて軌跡(対地速度の向き)がずれ、細い足場を外す。軌跡の向きと目標の向きの差を機首の向きの指示へ足す(風上へ少し機首を向けて進む)。風のない条件では軌跡=機首なので変化しない
+    let e = da > 0.3 ? wrap(Math.atan2(-(ax - px), -(az - pz)) - f.yaw) : 0;
+    if (da > 1.2 && hs > 2.5) e += AUTOLAND.trackGain * clamp(wrap(Math.atan2(-(ax - px), -(az - pz)) - Math.atan2(-f.vel.x, -f.vel.z)), -0.6, 0.6);
     raw.x = -clamp(e * 1.8, -1, 1) * (Math.abs(e) < 0.03 ? 0 : 1);
     const big = (s.maxX - s.minX) * (s.maxZ - s.minZ) > 12;
     const hDes = usePlan ? Math.max(pl!.h, s.top + 0.25) + Math.max(0, da - 2.5) * AUTOLAND.hSlope * 0.5 : s.top + AUTOLAND.hFinal + Math.max(0, d - 2.5) * AUTOLAND.hSlope, vT0 = clamp(AUTOLAND.vBase + da * AUTOLAND.vK, AUTOLAND.vMin, AUTOLAND.vMax), vT = big ? Math.max(vT0, AUTOLAND.vBig) : vT0; // 屋根のような広い面は、縁を越えるまで失速速度に近づけない(縁の手前で沈むため)。減速は面の上で着地補助が行う

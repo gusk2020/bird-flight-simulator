@@ -1,3 +1,5 @@
+import { h2LandTests, h2RingTests } from "./h2land";
+import { h2WalkTests } from "./h2walk";
 import { finish } from "./harness";
 import { physicsTests } from "./physics";
 import { cameraTests } from "./camera";
@@ -24,4 +26,7 @@ import { g1LandTests } from "./g1land";
 import { h1ProxTests } from "./h1prox";
 import { f34Tests } from "./f34";
 physicsTests(); cameraTests(); gameTests(); envTests(); stageBTests(); speedFxTests(); walkTests(); perchTests(); npcTests(); oneHandTests(); autopilotTests(); autoViewTests(); cameraStableTests(); perchAssistTests(); structureTests(); forageTests(); seasonTests(); f1WalkTests(); f2LandingTests(); f34Tests(); g1LightsTests(); g1WallTests(); g1LandTests(); h1ProxTests();
+h2LandTests();
+h2RingTests();
+h2WalkTests();
 finish();

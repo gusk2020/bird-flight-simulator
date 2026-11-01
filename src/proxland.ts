@@ -18,6 +18,7 @@ export class ProxLand {
   /** 毎物理ステップ。条件が連続したら自動着地を開始し true を返す */
   update(f: Flight, dt: number, proxHeld: boolean): boolean {
     const s = this.pa.marker;
+    if (s && this.pa.target !== s) { this.t = 0; return false; } // 保持中だけの古い候補では、近接からの自動着地を始めない(いまの候補選別で選ばれているときだけ)
     if (!proxHeld || !s || this.al.active || f.mode !== "air" || f.hopping || f.stun > 0) { this.t = 0; return false; }
     const hs = Math.hypot(f.vel.x, f.vel.z);
     const cx = Math.min(Math.max(f.pos.x, s.minX), s.maxX), cz = Math.min(Math.max(f.pos.z, s.minZ), s.maxZ), d = Math.hypot(cx - f.pos.x, cz - f.pos.z);

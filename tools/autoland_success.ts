@@ -7,18 +7,20 @@ import { PerchAssist } from "../src/perchassist";
 import { AutoLand } from "../src/autoland";
 import { PHYS as P } from "../src/params";
 import { perchClass } from "../src/perchclass";
+import { Wind } from "../src/wind";
 
 const L = generateLayout();
 const world = { colliders: L.colliders, heightAt: L.heightAt, perchAt: L.perchAt, perchPoint: L.perchPoint, wireDir: L.wireDir, waterAt: L.waterAt };
 const idx = buildSurfaces(L);
 const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 let seed = 3; const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
-export interface Result { kind: string; refused: boolean; why: string; ok: boolean; crash: boolean; secs: number; walked: boolean; on?: string; v0?: number; use?: string }
+export interface Result { kind: string; refused: boolean; why: string; ok: boolean; crash: boolean; secs: number; walked: boolean; on?: string; v0?: number; use?: string; tail?: number }
 
 /** 人が「このあたりの足場へ降りたい」と思って飛んでいる状況: 距離6〜16m・面の上0.8〜5m・速さ6〜11m/s・足場の方向から±45度ずれた向き */
 export function trial(s: Surface, i: number, trace?: Record<string, number | string>[]): Result {
   seed = 500 + i * 7 + s.id;
   const f = new Flight(world), pa = new PerchAssist(idx), al = new AutoLand(idx, pa, L.heightAt);
+  if (process.env.APPWIND) { const w = new Wind(); w.set(270, 3, 0.3); f.wind = w; } // アプリの既定の風(西から3 m/s、突風0.3)
   const apt = (s.kind === "balcony" || s.kind === "rail") ? L.apts.find(a => Math.abs((s.minX + s.maxX) / 2 - a.x) < a.w / 2 + 0.1 && Math.abs((s.minZ + s.maxZ) / 2 - a.z) < a.d / 2 + 1.5) : undefined;
   const cx = (s.minX + s.maxX) / 2, cz = (s.minZ + s.maxZ) / 2;
   const ang = apt ? ((s.minZ + s.maxZ) / 2 > apt.z ? Math.PI / 2 : -Math.PI / 2) + (rnd() - 0.5) * 1.6 : rnd() * Math.PI * 2;
@@ -28,7 +30,8 @@ export function trial(s: Surface, i: number, trace?: Record<string, number | str
   f.pos.set(cx + dxs * (tExit + dist), h0, cz + dzs * (tExit + dist)); f.prevPos.copy(f.pos);
   const toward = Math.atan2(-(cx - f.pos.x), -(cz - f.pos.z)); f.yaw = toward + (rnd() - 0.5) * 1.57; const v0 = 6 + rnd() * 5;
   f.vel.set(-Math.sin(f.yaw) * v0, -0.5, -Math.cos(f.yaw) * v0);
-  const out: Result = { v0, kind: s.kind, refused: false, why: "", ok: false, crash: false, secs: 0, walked: false };
+  let tail = 0; if (f.wind) { const wv = new (f.windVec.constructor as any)(); f.wind.at(f.pos.x, f.pos.y, f.pos.z, 0, wv); const hv = Math.hypot(f.vel.x, f.vel.z) || 1; tail = (wv.x * f.vel.x + wv.z * f.vel.z) / hv; }
+  const out: Result = { tail, v0, kind: s.kind, refused: false, why: "", ok: false, crash: false, secs: 0, walked: false };
   if (!al.start(f, s)) { out.refused = true; out.why = al.lastRefusal || "refused"; return out; }
   const c0 = f.crashes; let i2 = 0;
   for (; i2 < 60 * 16 && al.active; i2++) {
@@ -62,11 +65,11 @@ export function trial(s: Surface, i: number, trace?: Record<string, number | str
 const open = (s: Surface) => !L.colliders.some(c => c.maxX - c.minX > 3 && c.maxZ - c.minZ > 3 && c.top > s.top + 0.3 && c.maxX > s.minX - 7 && c.minX < s.maxX + 7 && c.maxZ > s.minZ - 7 && c.minZ < s.maxZ + 7);
 export function run(n: number, offset = 0) {
   const kinds = ["bench", "wall", "fence", "rail", "balcony", "sign", "branch", "pole", "rock", "roof"] as const;
-  const res: Record<string, { n: number; refused: number; ok: number; crash: number; secs: number; walked: number; walkable: number; ends: Record<string, number>; on: Record<string, number>; byV: Record<string, [number, number]> }> = {};
+  const res: Record<string, { n: number; refused: number; ok: number; crash: number; secs: number; walked: number; walkable: number; ends: Record<string, number>; on: Record<string, number>; byV: Record<string, [number, number]>; byW: Record<string, [number, number]> }> = {};
   for (const kind of kinds) {
     const ss = idx.all.filter(s => s.kind === kind && (kind === "balcony" || kind === "rail" || open(s)) && (kind !== "roof" || s.top < 12)); if (!ss.length) continue;
-    const r = { n, refused: 0, ok: 0, crash: 0, secs: 0, walked: 0, walkable: 0, ends: {} as Record<string, number>, on: {} as Record<string, number>, byV: {} as Record<string, [number, number]> };
-    for (let i = 0; i < n; i++) { const t = trial(ss[(i + offset) % ss.length], i + offset); if (t.refused) { r.refused++; continue; } { const b = t.v0! < 8 ? "6-8" : t.v0! < 9.5 ? "8-9.5" : "9.5-11"; (r.byV[b] ||= [0, 0])[1]++; if (t.ok) r.byV[b][0]++; } if (t.ok) { r.ok++; r.on[t.on || "?"] = (r.on[t.on || "?"] || 0) + 1; r.secs += t.secs; if (t.use === "walk") { r.walkable++; if (t.walked) r.walked++; } } if (t.crash) r.crash++; r.ends[t.why] = (r.ends[t.why] || 0) + 1; }
+    const r = { n, refused: 0, ok: 0, crash: 0, secs: 0, walked: 0, walkable: 0, ends: {} as Record<string, number>, on: {} as Record<string, number>, byV: {} as Record<string, [number, number]>, byW: {} as Record<string, [number, number]> };
+    for (let i = 0; i < n; i++) { const t = trial(ss[(i + offset) % ss.length], i + offset); if (t.refused) { r.refused++; continue; } { const b = t.v0! < 8 ? "6-8" : t.v0! < 9.5 ? "8-9.5" : "9.5-11"; (r.byV[b] ||= [0, 0])[1]++; if (t.ok) r.byV[b][0]++; const wb = t.tail! > 1.5 ? "追い風" : t.tail! < -1.5 ? "向かい風" : "横/無風"; (r.byW[wb] ||= [0, 0])[1]++; if (t.ok) r.byW[wb][0]++; } if (t.ok) { r.ok++; r.on[t.on || "?"] = (r.on[t.on || "?"] || 0) + 1; r.secs += t.secs; if (t.use === "walk") { r.walkable++; if (t.walked) r.walked++; } } if (t.crash) r.crash++; r.ends[t.why] = (r.ends[t.why] || 0) + 1; }
     res[kind] = r;
   }
   return res;

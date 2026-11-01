@@ -472,7 +472,7 @@ async function g7({ p, cdp, errs }) {
   const tapAtXY = (dx, dy, id) => p.evaluate(([dx, dy, id]) => { const r = __game.ring, x = r.x + dx, y = r.y + dy, el = document.elementFromPoint(x, y) || document.body, o = { bubbles: true, pointerId: id, clientX: x, clientY: y, pointerType: "touch" }; el.dispatchEvent(new PointerEvent("pointerdown", o)); el.dispatchEvent(new PointerEvent("pointerup", o)); return { x, y }; }, [dx, dy, id]);
   /** 足場 kind を選び、その縁の東側 dist m・面の上 up m から、速さ v で西へ向かって飛び出す。side>0 なら足場が画面の右寄りに見える位置から(片手のスティック領域に◯が入る) */
   const setup = (kind, dist = 11, up = 2.6, v = 8, side = 0) => p.evaluate(([kind, dist, up, v, side]) => {
-    const g = __game, f = g.flight, w = g.world; f.reset(); g.setAuto(false); g.settings.weather = "clear"; g.input.releaseAll();
+    const g = __game, f = g.flight, w = g.world; f.reset(); g.setAuto(false); g.settings.weather = "clear"; if (g.settings.wind !== 0) { g.settings.wind = 0; g.applySettings(); } /* 着地の幾何(狭い足場の上に立つ等)を決まった条件で確かめるため風なし。風ありの成功率は g12(統計)で見る */ g.input.releaseAll();
     const open = s => !w.colliders.some(c => c.maxX - c.minX > 3 && c.maxZ - c.minZ > 3 && c.top > s.top + 0.3 && c.maxX > s.minX - 16 && c.minX < s.maxX + 16 && c.maxZ > s.minZ - 16 && c.minZ < s.maxZ + 16);
     const cand = g.surfaces.all.filter(s => s.kind === kind && open(s) && (kind !== "roof" || (s.maxX - s.minX) * (s.maxZ - s.minZ) > 40 && s.top < 12));
     const t = cand[0]; if (!t) return null; window.__target = t;

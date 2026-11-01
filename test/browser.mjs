@@ -746,7 +746,7 @@ async function g12({ p, cdp, errs }) {
   const tp = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
   await p.evaluate(() => { if (!document.getElementById("overlay").hidden) document.getElementById("ovGo").click(); }); await sleep(300);
   await p.setViewportSize({ width: 892, height: 412 }); await sleep(600);
-  await p.evaluate(() => { window.__pd = []; addEventListener("pointerdown", e => { const r = __game.ring; window.__pd.push({ dx: Math.round(e.clientX - r.x), dy: Math.round(e.clientY - r.y), hit: Math.round(r.hit), vis: r.visible, reason: __game.ringDiag.reason }); }, true); });
+  await p.evaluate(() => { window.__pd = []; addEventListener("pointerup", e => { const l = window.__pd[window.__pd.length - 1]; if (l) { l.up = Math.round(e.timeStamp - l.t0); l.moved = Math.round(Math.hypot(e.clientX - l.x0, e.clientY - l.y0)); setTimeout(() => { l.taps = __game.input.stats.ringTaps; }, 0); } }, true); addEventListener("pointerdown", e => { const r = __game.ring; window.__pd.push({ t0: e.timeStamp, x0: e.clientX, y0: e.clientY, cand: __game.input.ringCandCount ? __game.input.ringCandCount() : -1,  dx: Math.round(e.clientX - r.x), dy: Math.round(e.clientY - r.y), hit: Math.round(r.hit), vis: r.visible, reason: __game.ringDiag.reason }); }, true); });
   for (let i = 0; i < 3 && (await p.evaluate(() => document.body.dataset.ctl)) !== "right"; i++) { await p.evaluate(() => document.getElementById("btnCtl").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }))); await sleep(250); }
   // 測定用の試行: 種類ごとに、足場の通し番号 k で決まる位置・向き・速さ(調整には使っていない別の並び)
   const plan = []; for (const kind of ["rock", "roof", "sign", "bench", "balcony", "rail", "branch", "pole"]) for (const k of [1, 2]) plan.push([kind, k]);

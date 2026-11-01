@@ -13,6 +13,8 @@ export class Input {
   ringHit: (x: number, y: number) => boolean = () => false; onRingTap = () => {};
   /** テスト用の計数: ◯タップになった回数 / 片手操作のタップ(=羽ばたき)になった回数 */
   stats = { ringTaps: 0, gestureTaps: 0 };
+  /** 診断用: 押している最中の◯候補の数(テストの記録に使う) */
+  ringCandCount() { return this.ringCand.size; }
   /** H1: 近接◎(画面の下側)。片手操作のときだけ。触れた場所が近接◎の領域なら近接、そうでなければ今までの巡航(スライド=スティック、タップ=羽ばたき、長押し=減速) */
   readonly prox = new ProxPad(); proxVisual = { x: 0, y: 0, on: false };
   /** 触れ始めの進行方向(世界のyaw)。main が設定する */

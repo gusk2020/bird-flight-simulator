@@ -190,6 +190,7 @@ input.onCamera = () => {
 
 // --- 開始 / 一時停止 ---
 const autopilot = new Autopilot(world, (Date.now() & 0xffff) + 1); autopilot.setPolicy(prefs.autoPolicy);
+autopilot.water = (x, z) => { const n = puddles.nearest(x, z); if (!n) return null; const dx = x - n.p.x, dz = z - n.p.z, h = Math.hypot(dx, dz) || 1, r = puddles.radius(n.p); return { x: n.p.x + dx / h * (r - 0.3), z: n.p.z + dz / h * (r - 0.3), d: n.d }; };
 const director = new CameraDirector((Date.now() >>> 3) + 7), drift = new WeatherDrift(0, (Date.now() >>> 5) + 3), uiHider = new UiHider();
 const TS_NAMES: Record<TimeSpeed, string> = { slow: "ゆったり", normal: "標準", fast: "高速" }, TS_ORDER: TimeSpeed[] = ["slow", "normal", "fast"];
 document.getElementById("btnSeason")!.addEventListener("pointerdown", e => { e.preventDefault(); e.stopPropagation(); settings.ss = SEASON_ORDER[(SEASON_ORDER.indexOf(season.speed) + 1) % 3]; applySettings(); toast("季節の速さ: " + SEASON_SPEED_NAME[season.speed]); });
@@ -198,7 +199,7 @@ const autoIn = { x: 0, y: 0, flapHeld: false, flapTap: false, brake: false };
 const POL_NAMES: Record<AutoPolicy, string> = { life: "自然生活", scenic: "景色観賞", adventure: "冒険探索", random: "おまかせ" };
 // オート中は手動入力を読まない(スティックやタップは無視)。解除しても飛行状態はそのまま続く
 const readInput = () => {
-  if (autopilot.enabled) { autoIn.flapTap = false; autoIn.flapHeld = false; autoIn.brake = false; autopilot.busy = forage.active; return forage.apply(autopilot.drive(flight, autoIn, 1 / 60), flight, false); }
+  if (autopilot.enabled) { autoIn.flapTap = false; autoIn.flapHeld = false; autoIn.brake = false; autopilot.busy = forage.active; const ao = autopilot.drive(flight, autoIn, 1 / 60); if (autopilot.state === "cruise" && flight.mode === "air" && !flight.hopping && flight.stun <= 0) cruiseGuard.apply(world, flight, ao); /* H4: 巡航中だけ、手動と同じ衝突予測の減速・引き起こしを共有(着陸進入・離陸は自分の目標を優先) */ return forage.apply(ao, flight, false); }
   const raw = input.read();
   if (!autoLand.active && proxLand.update(flight, 1 / 60, !!raw.prox)) toast("自動着地");
   if (autoLand.active) raw.prox = undefined; // 自動着地中は近接機動の指示を使わない

@@ -1,4 +1,5 @@
 import { h2LandTests, h2RingTests } from "./h2land";
+import { h3LifeTests } from "./h3life";
 import { h2WalkTests } from "./h2walk";
 import { finish } from "./harness";
 import { physicsTests } from "./physics";
@@ -29,4 +30,5 @@ physicsTests(); cameraTests(); gameTests(); envTests(); stageBTests(); speedFxTe
 h2LandTests();
 h2RingTests();
 h2WalkTests();
+h3LifeTests();
 finish();

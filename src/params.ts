@@ -67,7 +67,7 @@ export const PHYS = {
   escapeTurn: 7,        // 逃げる向きへ機首を向ける速さ rad/s
   escapeSpeedMin: 5, escapeSpeedMax: 8.5, // 壁から離れて飛び直す速さ(失速速度より上。G1の6.5〜12から弱めた: 跳ね返りすぎない)
   escapeAway: 1.4,      // 壁から離れる向きの速さ成分(G1は2.5)
-  wallBounce: 1.05,     // 壁に当たったときの法線方向の反発(G1までは1.2)
+  stepOffSpeed: 3.4, stepOffUp: 0.6, wallBounce: 1.05,     // 壁に当たったときの法線方向の反発(G1までは1.2)
   escapeClimb: 0.8,     // 衝突直後の上向き速度の下限
   escapeGuard: 0.8,     // 復帰開始から、この秒数の間は壁への再衝突を墜落にしない(連続衝突の防止。壁の押し戻しは有効)
   bound: 205,

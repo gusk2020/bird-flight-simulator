@@ -17,6 +17,7 @@ export const AUTOLAND = {
   hSlope: 0.176, hFinal: 0.426,                // 目標の高さ = 足場の上 hFinal + (d-2.5)*hSlope
   downFast: -0.165, downSlow: -0.564, upMax: 0.134, // 降下の勾配の下限(速すぎるとき/ふつう)と上限
   vBig: 6.6,                                   // 広い面(12 m²超)の手前での最低の目標速度
+  railForBalcony: true, // 外からベランダへ来たときは手すりの上へ降りる
   yGain: 0.235, flapSpeed: 6.82, flapSink: 1.9,
 };
 export type AutoLandEnd = "success" | "user" | "danger" | "lost" | "timeout" | "crash" | "fail";
@@ -36,6 +37,7 @@ export class AutoLand {
   lastRefusal = "";
   stats = { starts: 0, refused: 0, success: 0, ended: { user: 0, danger: 0, lost: 0, timeout: 0, crash: 0, fail: 0 } as Record<string, number>, time: 0 };
   dbg = ""; private d0 = 0; private c0 = 0; private danger = 0; private lastFlap = -9; private under: Surface[] = [];
+  private get all() { return this.idx.all; }
   constructor(private idx: SurfaceIndex, private pa: PerchAssist, private heightAt: (x: number, z: number) => number) {}
 
   private dist(f: Flight, s: Surface) { return Math.hypot(f.pos.x - clamp(f.pos.x, s.minX, s.maxX), f.pos.z - clamp(f.pos.z, s.minZ, s.maxZ)); }
@@ -68,8 +70,20 @@ export class AutoLand {
     return false;
   }
 
-  start(f: Flight, s: Surface): boolean {
-    const c = this.check(f, s);
+  /** ベランダは、手すりと建物の壁のあいだの約1 mの床。手すり(床から1 m上)を越えて、止まり切れないまま壁に近づくより、外から来たなら手すりの上に降りるほうが確実。
+   *  手すり(と床)は一つの構造物なので、成功は手すりでも床でも数える(下の same)。外から来ていない(横から)ときは床のまま */
+  private retarget(f: Flight, s: Surface): Surface {
+    if (s.kind !== "balcony") return s;
+    const cz = (s.minZ + s.maxZ) / 2;
+    for (const r of this.all) {
+      if (r.kind !== "rail" || r.top <= s.top || r.maxX <= s.minX || r.minX >= s.maxX || Math.abs((r.minZ + r.maxZ) / 2 - cz) > 0.9) continue;
+      if (Math.sign(f.pos.z - cz) === Math.sign((r.minZ + r.maxZ) / 2 - cz) && Math.abs(f.pos.z - cz) > 1.0) return r;
+    }
+    return s;
+  }
+
+  start(f: Flight, s0: Surface): boolean {
+    const s = AUTOLAND.railForBalcony ? this.retarget(f, s0) : s0, c = this.check(f, s);
     if (!c.ok) { this.stats.refused++; this.end = ""; this.lastRefusal = c.why; return false; }
     this.active = true; this.target = s; this.t = 0; this.end = ""; this.d0 = this.dist(f, s); this.c0 = f.crashes; this.danger = 0; this.lastFlap = f.clock - 9;
     this.pa.forced = s; this.stats.starts++; return true;

@@ -31,7 +31,7 @@ export class Flight {
   wind: WindSource | null = null; windVec = new THREE.Vector3(); liftScale = 1; dragScale = 1; clock = 0; airspeed = 0;
   /** 着地補助が小ジャンプの初速を一時的に上書きする(次の1回のジャンプでだけ使い、毎ステップ末尾で消す) */
   hopHint: { up: number; fwd: number; yaw?: number } | null = null;
-  groundHold = 0; perchId = -1; perchT = 0; perchCool = 0; perchBlend = 0; walkV = 0; hopping = false;
+  stepOffs = 0; groundHold = 0; perchId = -1; perchT = 0; perchCool = 0; perchBlend = 0; walkV = 0; hopping = false;
   /** 旋回の横滑りを機首方向へ向け直すときに残す割合(手動操作=PHYS.turnKeep。0=従来どおり捨てる: オート周遊はこちらで調整済み) */
   turnKeep: number = P.turnKeep; hopT = -1; walkPhase = 0;
   alpha = 0; speed = 0; agl = 0; braking = false; crashes = 0; resets = 0;
@@ -262,7 +262,10 @@ export class Flight {
     this.roll += (0 - this.roll) * (1 - Math.exp(-8 * dt));
     const gh = this.world.heightAt(this.pos.x, this.pos.z);
     this.agl = this.pos.y - P.feetOffset - gh;
-    if (this.agl > P.stepDown) { this.mode = "air"; this.walkV = 0; } // 屋根の縁・高い段から外へ出た
+    if (this.agl > P.stepDown) { // 屋根の縁・高い段から外へ出た
+      if (this.mode === "landed" && hs > 0.3) { this.vel.copy(_f).multiplyScalar(Math.max(hs, P.stepOffSpeed)); this.vel.y = P.stepOffUp; this.stepOffs++; } // 縁から降りる: 小さく前へ跳ね出し、壁の外へ出てから落ちる(その場で真下へ落ちて壁に擦らない)
+      this.mode = "air"; this.walkV = 0;
+    }
     else this.pos.y = gh + P.feetOffset;                                 // 小さな段差は歩いて昇降(接地を維持)
   }
 

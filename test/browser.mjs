@@ -751,7 +751,7 @@ async function g12({ p, cdp, errs }) {
   // 測定用の試行: 種類ごとに、足場の通し番号 k で決まる位置・向き・速さ(調整には使っていない別の並び)
   const plan = []; for (const kind of ["rock", "roof", "sign", "bench", "balcony", "rail", "branch", "pole"]) for (const k of [1, 2]) plan.push([kind, k]);
   const rows = [];
-  for (const [kind, k] of plan) {
+  for (const [kind, k] of plan) { if (process.env.G12_ONLY && process.env.G12_ONLY !== kind + ":" + k) continue;
     const info = await p.evaluate(([kind, k]) => {
       const g = __game, f = g.flight, w = g.world; f.reset(); g.setAuto(false); g.settings.weather = "clear"; g.input.releaseAll(); g.autoLand.cancel("user"); g.autoLand.lastRefusal = "";
       const open = s => !w.colliders.some(c => c.maxX - c.minX > 3 && c.maxZ - c.minZ > 3 && c.top > s.top + 0.3 && c.maxX > s.minX - 16 && c.minX < s.maxX + 16 && c.maxZ > s.minZ - 16 && c.minZ < s.maxZ + 16);
@@ -777,7 +777,7 @@ async function g12({ p, cdp, errs }) {
     if (st.starts === b.starts && st.refused === b.refused && (await p.evaluate(() => __game.ring.visible))) { row.retap = 1; const r2 = await p.evaluate(() => ({ x: __game.ring.x, y: __game.ring.y })); await realTap(Math.round(r2.x), Math.round(r2.y)); await sleep(200); } // タップが入らなかった: 1回だけ押し直し、回数を記録する
     const a = await p.evaluate(() => ({ starts: __game.autoLand.stats.starts, refused: __game.autoLand.stats.refused, why: __game.autoLand.lastRefusal }));
     if (a.refused > b.refused) { row.result = "refused:" + a.why; rows.push(row); continue; }
-    if (a.starts === b.starts) { row.result = "tap-not-recognised"; row.pd = await p.evaluate(() => window.__pd.slice(-2)); rows.push(row); continue; }
+    if (a.starts === b.starts) { row.result = "tap-not-recognised"; row.dbg = await p.evaluate(() => ({ ringTaps: __game.input.stats.ringTaps, tapMarker: !!window.__tm, refused: __game.autoLand.stats.refused, why: __game.autoLand.lastRefusal, active: __game.autoLand.active, ring: [Math.round(__game.ring.x), Math.round(__game.ring.y), __game.ring.visible], mk: !!__game.perchAssist.marker })); row.pd = await p.evaluate(() => window.__pd.slice(-2)); const last = row.pd.find(q => Math.abs(q.dx) + Math.abs(q.dy) > 0 && q.vis) || row.pd[0]; if (last && Math.hypot(last.dx, last.dy) > last.hit) row.result = "ring-moved-before-tap"; /* 指が届く前に◯が画面の別の場所へ移っていた(飛び去る足場)。認識の失敗ではないので別に数える */ rows.push(row); continue; }
     await p.waitForFunction(() => !__game.autoLand.active, null, { timeout: 25000 }).catch(() => {});
     const e = await p.evaluate(([bo]) => ({ end: __game.autoLand.end, crashes: __game.flight.crashes, ok: __game.autoLand.stats.success, mode: __game.flight.mode }), [b.ok]);
     row.end = e.end; row.crash = e.crashes - b.crashes > 0;
@@ -800,7 +800,7 @@ async function g12({ p, cdp, errs }) {
   const ends = {}; for (const r of rows) if (r.end !== undefined && r.result !== "success") ends[r.end || "?"] = (ends[r.end || "?"] || 0) + 1;
   const crashes = rows.filter(r => r.crash).length;
   for (const r of rows) console.log("    ", JSON.stringify(r));
-  console.log(`   SUMMARY real-tap landings: trials ${n} | no ring/no surface ${noRing} | ring too fast to tap (unstable) ${unstable} | tap not recognised ${notRec} | refused at start ${refused} | started ${started} | success ${succ.length} (held 1.5 s ${held.length}; on the landed surface: ${JSON.stringify(held.reduce((m, r) => (m[r.on] = (m[r.on] || 0) + 1, m), {}))}) | other ends ${JSON.stringify(ends)} | crashes ${crashes} | walk-class held ${walkable.length}, really walked ${walked.length} | re-taps ${rows.reduce((m, r) => m + (r.retap || 0), 0)} (tap not recognised the first time) | whole-trial retries 0`);
+  console.log(`   SUMMARY real-tap landings: trials ${n} | no ring/no surface ${noRing} | ring too fast to tap (unstable) ${unstable} | ring moved away before the finger landed ${rows.filter(r => r.result === "ring-moved-before-tap").length} | tap not recognised although the finger landed on the ring ${notRec} | refused at start ${refused} | started ${started} | success ${succ.length} (held 1.5 s ${held.length}; on the landed surface: ${JSON.stringify(held.reduce((m, r) => (m[r.on] = (m[r.on] || 0) + 1, m), {}))}) | other ends ${JSON.stringify(ends)} | crashes ${crashes} | walk-class held ${walkable.length}, really walked ${walked.length} | re-taps ${rows.reduce((m, r) => m + (r.retap || 0), 0)} (tap not recognised the first time) | whole-trial retries 0`);
   check("the real-tap landing sample is big enough and the ring was available in most trials", n >= 14 && noRing <= Math.ceil(n * 0.25), `${noRing}/${n} without a ring`);
   check("a tap on a shown ring is recognised (after at most one reported re-tap); none is lost for good", notRec === 0, `${notRec}`);
   check("of the started landings, at least 40% succeed and are still on the structure after 1.5 s with no touch (default wind on; the same approach distribution gives about 50-65% in the unit measurement)", started >= 8 && held.length / started >= 0.4, `${held.length}/${started} (success ${succ.length})`);

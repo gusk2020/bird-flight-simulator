@@ -18,7 +18,7 @@ import { loadPrefs, savePrefs, ControlMode } from "./settings";
 import { FlapAssist } from "./assist";
 import { PHYS } from "./params";
 import { Autopilot } from "./autopilot";
-import { buildSurfaces } from "./perches";
+import { buildSurfaces, type Surface } from "./perches";
 import { Forage } from "./forage";
 import { SeasonClock, seasonBias, seasonLook, type SeasonSpeed } from "./season";
 import { PerchAssist, PERCH } from "./perchassist";
@@ -103,9 +103,11 @@ const ring = { visible: false, x: 0, y: 0, hit: 48 }; let ringSpeed = 0, ringT =
 const ringDiag = new RingDiag(), RINGLOG = /[?&]ringlog\b/.test(location.search) || (() => { try { return localStorage.getItem("ringlog") === "1"; } catch { return false; } })(); let ringLogN = 0;
 const proxLand = new ProxLand(perchAssist, autoLand);
 const autolandBar = document.getElementById("autoland")!;
-input.ringHit = (x, y) => ring.visible && !autoLand.active && Math.hypot(x - ring.x, y - ring.y) <= ring.hit;
+let tapMarker: Surface | null = null; // 押した瞬間の候補(押している間に候補が入れ替わる・期限切れになっても、押した足場を対象にする。開始の可否は start() があらためて検査する)
+input.ringHit = (x, y) => { const hit = ring.visible && !autoLand.active && Math.hypot(x - ring.x, y - ring.y) <= ring.hit; if (hit) tapMarker = perchAssist.marker; return hit; };
 input.onRingTap = () => {
-  const m = perchAssist.marker; if (autopilot.enabled || !m) return;
+  const m = tapMarker ?? perchAssist.marker; tapMarker = null; if (autopilot.enabled) return;
+  if (!m) { autoLand.stats.refused++; autoLand.lastRefusal = "no candidate"; toast("着地できる場所が見つかりません"); return; } // 押したあとで候補が消えた: 無言にせず、拒否として数える
   if (autoLand.start(flight, m)) { toast("自動着地"); return; }
   const why: Record<string, string> = { "too far": "遠すぎます", "too high": "高すぎます", "dangerous path": "途中に建物があります", "unreachable (below)": "足場より低い位置です" }; // 開始を断った理由を短く知らせる
   toast("ここへは安全に降りられません" + (why[autoLand.lastRefusal] ? "(" + why[autoLand.lastRefusal] + ")" : ""));

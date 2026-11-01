@@ -62,17 +62,19 @@ function inst(geo: THREE.BufferGeometry, mat: THREE.Material | THREE.Material[],
 }
 const lam = (color: number, extra: THREE.MeshLambertMaterialParameters = {}) => new THREE.MeshLambertMaterial({ color, ...extra });
 
+export const GRASS_Y = -0.4;
 export function buildWorld(): World {
   const L = generateLayout(7);
   const group = new THREE.Group();
   const EXT = 2 * 4 * PITCH; // 市街の全幅
   // 地面(草地) と道路
-  const grassMat = lam(0xffffff, { map: speckle(3000 / 8, 3000 / 8, "#7c9a5e", 40) }), grass = new THREE.Mesh(new THREE.PlaneGeometry(3000, 3000), grassMat); grass.rotation.x = -Math.PI / 2; grass.position.y = -0.04; group.add(grass);
+  /** 草地の面の高さ。道路(y=0)との差が小さいと、遠くで深度の精度が足りず草が道路に点々と透ける(z-fighting)。24bit深度・近面0.1では300m先の分解能が約5cmなので、それより十分離す */
+  const grassMat = lam(0xffffff, { map: speckle(3000 / 8, 3000 / 8, "#7c9a5e", 40) }), grass = new THREE.Mesh(new THREE.PlaneGeometry(3000, 3000), grassMat); grass.rotation.x = -Math.PI / 2; grass.position.y = GRASS_Y; group.add(grass);
   const asphaltTex = speckle(1, (EXT / 2 + 20) / 6, "#4a4d52", 30); asphaltTex.repeat.set(ROAD / 6, (EXT / 2 + 20) / 6);
-  const asphalt = lam(0xffffff, { map: asphaltTex });
+  const asphalt = lam(0xffffff, { map: asphaltTex }), asphaltCross = lam(0xffffff, { map: asphaltTex, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }); // 交差点: 2枚の道路面が同じ高さで重なるので、横の道路を常に手前に勝たせる
   for (const rd of L.roads) {
     for (const rot of [0, 1]) {
-      const p = new THREE.Mesh(new THREE.PlaneGeometry(ROAD, EXT / 2 + 20), asphalt);
+      const p = new THREE.Mesh(new THREE.PlaneGeometry(ROAD, EXT / 2 + 20), rot ? asphaltCross : asphalt);
       p.rotation.x = -Math.PI / 2; if (rot) p.rotation.z = Math.PI / 2;
       p.position.set(rot ? 0 : rd, 0, rot ? rd : 0); group.add(p);
     }

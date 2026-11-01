@@ -1,6 +1,7 @@
 import { Puddles, buildPuddles, PUDDLE } from "./puddles";
 import { PuddleView } from "./puddleView";
 import { Life } from "./life";
+import { RingDiag, ringVisible, edgePosition } from "./ringdiag";
 import { ProxLand } from "./proxland";
 import * as THREE from "three";
 import { Flight } from "./flight";
@@ -20,7 +21,7 @@ import { loadPrefs, savePrefs, ControlMode } from "./settings";
 import { FlapAssist } from "./assist";
 import { PHYS } from "./params";
 import { Autopilot } from "./autopilot";
-import { buildSurfaces } from "./perches";
+import { buildSurfaces, type Surface } from "./perches";
 import { Forage } from "./forage";
 import { SeasonClock, seasonBias, seasonLook, type SeasonSpeed } from "./season";
 import { PerchAssist, PERCH } from "./perchassist";
@@ -103,12 +104,16 @@ const perchMarker = new THREE.Mesh(new THREE.RingGeometry(0.42, 0.55, 24).rotate
 perchMarker.visible = false; perchMarker.renderOrder = 2; scene.add(perchMarker);
 const markerPt = { x: 0, z: 0, top: 0, d: 0, on(pa: PerchAssist, f: Flight) { return pa.markerPoint(f, markerPt); } }; const markerV = new THREE.Vector3();
 /** ◯の画面上の位置(CSS px)。タップの当たり判定に使う: 見た目より広く(指で押しやすい約48dp相当の半径) */
-const ring = { visible: false, x: 0, y: 0, hit: 48 };
+const RING_HIT = { base: 48, extra: 72, perSpeed: 0.2 }; // ◯の当たり判定の半径(px): 止まっているとき48、動いているほど広げる(速さ px/秒 × 0.2、最大 +72)
+const ring = { visible: false, x: 0, y: 0, hit: 48 }; let ringSpeed = 0, ringT = 0, edgeShown = false; const edgeP = { x: 0, y: 0 };
+const ringDiag = new RingDiag(), RINGLOG = /[?&]ringlog\b/.test(location.search) || (() => { try { return localStorage.getItem("ringlog") === "1"; } catch { return false; } })(); let ringLogN = 0;
 const proxLand = new ProxLand(perchAssist, autoLand);
 const autolandBar = document.getElementById("autoland")!;
-input.ringHit = (x, y) => ring.visible && !autoLand.active && Math.hypot(x - ring.x, y - ring.y) <= ring.hit;
+let tapMarker: Surface | null = null; // 押した瞬間の候補(押している間に候補が入れ替わる・期限切れになっても、押した足場を対象にする。開始の可否は start() があらためて検査する)
+input.ringHit = (x, y) => { const hit = ring.visible && !autoLand.active && Math.hypot(x - ring.x, y - ring.y) <= ring.hit; if (hit) tapMarker = perchAssist.marker; return hit; };
 input.onRingTap = () => {
-  const m = perchAssist.marker; if (autopilot.enabled || !m) return;
+  const m = tapMarker ?? perchAssist.marker; tapMarker = null; if (autopilot.enabled) return;
+  if (!m) { autoLand.stats.refused++; autoLand.lastRefusal = "no candidate"; toast("着地できる場所が見つかりません"); return; } // 押したあとで候補が消えた: 無言にせず、拒否として数える
   if (autoLand.start(flight, m)) { toast("自動着地"); return; }
   const why: Record<string, string> = { "too far": "遠すぎます", "too high": "高すぎます", "dangerous path": "途中に建物があります", "unreachable (below)": "足場より低い位置です" }; // 開始を断った理由を短く知らせる
   toast("ここへは安全に降りられません" + (why[autoLand.lastRefusal] ? "(" + why[autoLand.lastRefusal] + ")" : ""));
@@ -296,19 +301,26 @@ function frame(now: number) {
   cam.update(vdt, flight, bp, fxc);
   { const d = document.getElementById("padDot")!, v = input.proxVisual, on = v.on && input.mode !== "both" && !autopilot.enabled; if (on) { d.style.display = "block"; d.style.left = v.x + "px"; d.style.top = v.y + "px"; } else if (d.style.display !== "none") d.style.display = "none"; } // 近接◎の指の位置(目印)
   { // 着地候補の目印(◯): 手動・空中のときだけ。候補が一瞬見えなくなっても数秒は保つ(PerchAssist.marker)。◯をタップすると自動着地
-    const mk = perchAssist.marker, manual = !autopilot.enabled && flight.mode === "air" && !flight.hopping && flight.stun <= 0;
-    let show = false;
-    if (mk && manual && markerPt.on(perchAssist, flight) && markerPt.d < PERCH.showRange * 1.6) {
-      markerV.set(markerPt.x, markerPt.top + 0.05, markerPt.z).project(camera);
-      show = markerV.z < 1 && Math.abs(markerV.x) < 1.15 && Math.abs(markerV.y) < 1.15;  // 画面の外・後ろなら解除
-      if (!show && !autoLand.active) perchAssist.clearMarker();
-    }
-    if (show !== perchMarker.visible) { perchMarker.visible = show; dirty = true; }
-    ring.visible = show; if (show) { ring.x = (markerV.x * 0.5 + 0.5) * innerWidth; ring.y = (-markerV.y * 0.5 + 0.5) * innerHeight; }
+    const mk = perchAssist.marker, hasPt = !!mk && markerPt.on(perchAssist, flight);
+    if (hasPt) markerV.set(markerPt.x, markerPt.top + 0.05, markerPt.z).project(camera);
+    const rv = ringVisible({ auto: autopilot.enabled, mode: flight.mode, hopping: flight.hopping, stun: flight.stun, hasMarker: hasPt, d: markerPt.d, maxD: PERCH.showRange * 1.6, sx: markerV.x, sy: markerV.y, sz: markerV.z, autoLand: autoLand.active });
+    const show = rv.show, stale = !!mk && perchAssist.target !== mk && !autoLand.active; // 保持中だけで、いまの候補選別では選ばれていない(古い)目印は薄く表示。タップしても着地の開始は毎回あらためて検査する
+    ringDiag.update(flight.clock, rv.reason, mk ? mk.kind : "", markerPt.d, perchAssist.markerAge(flight.clock), stale);
+    if (RINGLOG && ringDiag.log.length !== ringLogN) { ringLogN = ringDiag.log.length; console.log("[ring]", JSON.stringify(ringDiag.log[ringDiag.log.length - 1]), JSON.stringify(perchAssist.pickWhy)); }
+    const edge = rv.reason === "edge", edgeEl = document.getElementById("ringEdge")!;
+    if (edge) { const ep = edgePosition(markerV.x, markerV.y, markerV.z, innerWidth, innerHeight), kk = edgeShown ? 1 - Math.exp(-Math.min(0.1, dt) / 0.12) : 1; /* 縁の◯は、向きが急に変わっても飛び回らないよう滑らかに動かす */ edgeP.x += (ep.x - edgeP.x) * kk; edgeP.y += (ep.y - edgeP.y) * kk; edgeShown = true; edgeEl.style.display = "block"; edgeEl.style.left = edgeP.x + "px"; edgeEl.style.top = edgeP.y + "px"; edgeEl.style.opacity = stale ? "0.45" : "0.85"; } else { edgeShown = false; if (edgeEl.style.display !== "none") edgeEl.style.display = "none"; }
+    if ((show && !edge) !== perchMarker.visible) { perchMarker.visible = show && !edge; dirty = true; }
+    if (show) { // ◯の画面位置と動く速さ。動いている◯は、見てから指が届くまでの間(約0.1〜0.2秒)に動くので、当たり判定を速さに応じて広げる(止まっていれば半径48 px のまま)
+      const ep2 = edge ? edgeP : null, nx = ep2 ? ep2.x : (markerV.x * 0.5 + 0.5) * innerWidth, ny = ep2 ? ep2.y : (-markerV.y * 0.5 + 0.5) * innerHeight, dtr = Math.max(1e-3, now / 1000 - ringT);
+      if (ring.visible && ringT > 0 && dtr < 0.25) ringSpeed += (Math.hypot(nx - ring.x, ny - ring.y) / dtr - ringSpeed) * 0.3; else ringSpeed = 0;
+      ring.x = nx; ring.y = ny; ringT = now / 1000; ring.hit = RING_HIT.base + Math.min(RING_HIT.extra, RING_HIT.perSpeed * ringSpeed);
+    } else { ringSpeed = 0; ringT = 0; ring.hit = RING_HIT.base; }
+    ring.visible = show;
     if (show) {
       const k = 1 + 0.12 * Math.sin(now * 0.006), sz = Math.min(1.6, Math.max(0.8, Math.min(mk!.maxX - mk!.minX, mk!.maxZ - mk!.minZ) + 0.6));
       perchMarker.position.set(markerPt.x, markerPt.top + 0.05, markerPt.z); perchMarker.scale.setScalar(k * sz);
       (perchMarker.material as THREE.MeshBasicMaterial).color.setHex(autoLand.active ? 0x9be8b0 : 0xfff1b0); // 自動着地中は緑
+      (perchMarker.material as THREE.MeshBasicMaterial).opacity = stale ? 0.2 : 0.4;
     }
     const lbl = autoLand.active ? "自動着地中(操作でやめる)" : "", el = autolandBar; if (el.textContent !== lbl) { el.textContent = lbl; el.style.opacity = lbl ? "0.8" : "0"; }
   }
@@ -333,4 +345,4 @@ function updateHud(dt: number, now: number) {
 }
 renderer.setAnimationLoop(frame);
 // テスト・デバッグ用
-(window as unknown as Record<string, unknown>).__game = { game, flight, world, input, cam, camera, renderer, scene, frame, env: () => envAt(hour), stats, npc, lines, streaks, speedIntensity, setHour: (h: number) => { hour = h; targetHour = null; applyEnv(); }, settings, applySettings, assist, prefs, autopilot, setAuto, season, applySeasonLook, saveSeason, forage, perchAssist, perchMarker, autoLand, proxLand, puddles, puddleView, life, ring, surfaces, cruiseGuard, npcView, npcUpdate: () => npcView.update(npc, camera.position, 220, world.lightsLevel()), hour: () => hour, director, drift, uiHider, wxLevel: () => wxLevel, wind, rain, quality };
+(window as unknown as Record<string, unknown>).__game = { game, flight, world, input, cam, camera, renderer, scene, frame, env: () => envAt(hour), stats, npc, lines, streaks, speedIntensity, setHour: (h: number) => { hour = h; targetHour = null; applyEnv(); }, settings, applySettings, assist, prefs, autopilot, setAuto, season, applySeasonLook, saveSeason, forage, perchAssist, perchMarker, autoLand, proxLand, ringDiag, puddles, puddleView, life, ring, surfaces, cruiseGuard, npcView, npcUpdate: () => npcView.update(npc, camera.position, 220, world.lightsLevel()), hour: () => hour, director, drift, uiHider, wxLevel: () => wxLevel, wind, rain, quality };

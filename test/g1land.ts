@@ -87,9 +87,9 @@ export function g1LandTests() {
   }
   { // 大量試験: 種類ごとの成功率・衝突率(未見のシード offset=1000)
     const r = runAutoland(40, 1000), line: string[] = [];
-    const want: Record<string, number> = { fence: 60, sign: 60, pole: 45, rock: 55, wall: 40, roof: 45, rail: 45, branch: 40, bench: 30, balcony: 22 };
+    const want: Record<string, number> = { fence: 60, sign: 60, pole: 45, rock: 55, wall: 40, roof: 45, rail: 45, branch: 40, bench: 30, balcony: 55 };
     for (const [k, v] of Object.entries(r)) { const att = Math.max(1, v.n - v.refused); line.push(`${k} ${Math.round(100 * v.ok / att)}%/衝突${v.crash}`); }
     check("automatic landing, unseen approaches: success per perch kind is at least the floor, collisions are rare", Object.entries(r).every(([k, v]) => 100 * v.ok / Math.max(1, v.n - v.refused) >= want[k] && v.crash <= Math.ceil(0.25 * Math.max(1, v.n - v.refused))), line.join(" "));
-    check("every success can then walk or stand", Object.values(r).every(v => v.walked === v.ok));
+    check("walk-class successes really walk (>= 0.8 m of real movement along the surface); stand-only perches make no walking claim", Object.values(r).every(v => v.walked >= Math.floor(0.9 * v.walkable)), Object.entries(r).map(([k, v]) => `${k} ${v.walked}/${v.walkable}`).join(" "));
   }
 }

@@ -39,7 +39,8 @@ export class Input {
     document.addEventListener("pointermove", e => { const c = this.ringCand.get(e.pointerId); if (c && Math.hypot(e.clientX - c.x, e.clientY - c.y) > RING_SLOP_PX) this.ringCand.delete(e.pointerId); }, true);
     document.addEventListener("pointerup", e => {
       const c = this.ringCand.get(e.pointerId); this.ringCand.delete(e.pointerId);
-      if (c && e.timeStamp - c.t < RING_TAP_MS && Math.hypot(e.clientX - c.x, e.clientY - c.y) <= RING_SLOP_PX && this.ringHit(e.clientX, e.clientY)) { this.ringFired.add(e.pointerId); this.stats.ringTaps++; this.onRingTap(); }
+      if (c && e.timeStamp - c.t < RING_TAP_MS && Math.hypot(e.clientX - c.x, e.clientY - c.y) <= RING_SLOP_PX) { // 押した時点で◯の当たり判定の中だったことは確かめ済み(◯は飛びながら動く・消えることがあるので、離した時点では確かめ直さない)
+         this.ringFired.add(e.pointerId); this.stats.ringTaps++; this.onRingTap(); }
     }, true);
     document.addEventListener("pointercancel", e => { this.ringCand.delete(e.pointerId); this.ringFired.delete(e.pointerId); }, true);
     zone.addEventListener("pointerdown", e => {

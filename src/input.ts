@@ -1,5 +1,6 @@
 import type { FlightInput } from "./flight";
 import { GESTURE, OneHandGesture } from "./gesture";
+import { ProxPad, padLayout, inProxRegion, type PadLayout } from "./proxpad";
 import type { ControlMode } from "./settings";
 
 /** 片手操作のスティックのなめらかさ(秒) */
@@ -12,6 +13,12 @@ export class Input {
   ringHit: (x: number, y: number) => boolean = () => false; onRingTap = () => {};
   /** テスト用の計数: ◯タップになった回数 / 片手操作のタップ(=羽ばたき)になった回数 */
   stats = { ringTaps: 0, gestureTaps: 0 };
+  /** H1: 近接◎(画面の下側)。片手操作のときだけ。触れた場所が近接◎の領域なら近接、そうでなければ今までの巡航(スライド=スティック、タップ=羽ばたき、長押し=減速) */
+  readonly prox = new ProxPad(); proxVisual = { x: 0, y: 0, on: false };
+  /** 触れ始めの進行方向(世界のyaw)。main が設定する */
+  getHeading: () => number = () => 0;
+  /** 近接◎の配置(片手操作のとき)。画面の大きさと左右から決まる */
+  layout(): PadLayout | null { return this.mode === "both" ? null : padLayout(innerWidth, innerHeight, this.mode); }
   private ringCand = new Map<number, { x: number; y: number; t: number }>(); private ringFired = new Set<number>();
   private out: FlightInput = { x: 0, y: 0, flapHeld: false, flapTap: false, brake: false };
   mode: ControlMode = "both"; readonly gesture = new OneHandGesture();
@@ -36,7 +43,18 @@ export class Input {
     }, true);
     document.addEventListener("pointercancel", e => { this.ringCand.delete(e.pointerId); this.ringFired.delete(e.pointerId); }, true);
     zone.addEventListener("pointerdown", e => {
-      if (this.mode !== "both") { // 片手操作: スライド=スティック、短いタップ=羽ばたき、長押し=減速(地上では歩く)
+      if (this.mode !== "both") {
+        const L = this.layout()!;
+        if (inProxRegion(L, e.clientX, e.clientY)) { // 近接◎: 中心を基準に、触れた向きと距離で方向を決める。◯のタップ候補なら、タップかどうか決まるまで(約0.3秒)指示を出さない
+          if (!this.prox.active && !this.gesture.active) {
+            this.prox.down(e.pointerId, e.clientX, e.clientY, L.prox, this.getHeading(), this.ringCand.has(e.pointerId) ? 0.3 : 0);
+            try { zone.setPointerCapture(e.pointerId); } catch { /* 合成イベントなど */ }
+            this.proxVisual.on = true; this.proxVisual.x = e.clientX; this.proxVisual.y = e.clientY;
+          }
+          return;
+        }
+        // 巡航◎(従来): スライド=スティック、短いタップ=羽ばたき、長押し=減速(地上では歩く)
+        if (this.prox.active) return;
         if (this.gesture.down(e.pointerId, e.clientX, e.clientY, e.timeStamp, GESTURE.radiusPx(innerWidth, innerHeight))) {
           try { zone.setPointerCapture(e.pointerId); } catch { /* 合成イベントなど */ }
           this.ox = e.clientX; this.oy = e.clientY; this.R = this.gesture.R; this.showStick(true); this.syncKnob();
@@ -49,11 +67,15 @@ export class Input {
       this.ox = e.clientX; this.oy = e.clientY; this.move(e.clientX, e.clientY); this.showStick(true);
     });
     zone.addEventListener("pointermove", e => {
+      if (e.pointerId === this.prox.id) { this.prox.move(e.clientX, e.clientY); this.proxVisual.x = e.clientX; this.proxVisual.y = e.clientY; return; }
       if (this.mode !== "both") { if (e.pointerId === this.gesture.id) { this.gesture.move(e.pointerId, e.clientX, e.clientY); this.syncKnob(); } return; }
       if (e.pointerId === this.stickId) this.move(e.clientX, e.clientY);
     });
     // 描画が重くても、タップ/長押しは指が触れた実際の時刻(e.timeStamp)で判定する
     const end = (e: PointerEvent) => {
+      if (e.pointerId === this.prox.id) { // 近接◎から指を離した(◯タップになった指も含む): 近接の指示をやめる
+        this.ringFired.delete(e.pointerId); this.prox.up(); this.proxVisual.on = false; return;
+      }
       if (e.type === "pointerup" && this.ringFired.delete(e.pointerId)) { // ◯タップ: 羽ばたきにも歩行にもしない
         if (this.mode !== "both") { if (e.pointerId === this.gesture.id) { this.gesture.cancel(); this.showStick(false); } } else if (e.pointerId === this.stickId) this.endStick();
         return;
@@ -104,7 +126,7 @@ export class Input {
   private syncKnob() { const g = this.gesture; this.knob.style.left = this.ox + g.x * this.R + "px"; this.knob.style.top = this.oy - g.y * this.R + "px"; }
   private endStick() { this.stickId = -1; this.state.x = this.state.y = 0; this.showStick(false); }
   releaseAll() {
-    this.endStick(); this.gesture.cancel(); this.gesture.clearTaps(); this.releasers.forEach(r => r()); this.keys.clear();
+    this.prox.up(); this.proxVisual.on = false; this.endStick(); this.gesture.cancel(); this.gesture.clearTaps(); this.releasers.forEach(r => r()); this.keys.clear();
     this.state.flapHeld = this.state.flapTap = this.state.brake = false;
   }
   /** 毎物理ステップ前に呼ぶ: キーボード分を合成した入力を返す */
@@ -118,7 +140,8 @@ export class Input {
     }
     const kx = (k.has("ArrowRight") || k.has("KeyD") ? 1 : 0) - (k.has("ArrowLeft") || k.has("KeyA") ? 1 : 0);
     const ky = (k.has("ArrowUp") || k.has("KeyW") ? 1 : 0) - (k.has("ArrowDown") || k.has("KeyS") ? 1 : 0);
-    const o = this.out; o.x = s.x || kx; o.y = s.y || ky; o.flapHeld = s.flapHeld; o.flapTap = s.flapTap; o.brake = s.brake || k.has("ShiftLeft");
+    this.prox.tick(1 / 60);
+    const o = this.out; o.prox = this.mode === "both" ? null : this.prox.cmd(); o.x = s.x || kx; o.y = s.y || ky; o.flapHeld = s.flapHeld; o.flapTap = s.flapTap; o.brake = s.brake || k.has("ShiftLeft");
     return o; // 物理ステップごとに新しいオブジェクトを作らない(呼び出し側は読むだけ)
   }
 }

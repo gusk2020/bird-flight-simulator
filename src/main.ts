@@ -1,3 +1,4 @@
+import { ProxLand } from "./proxland";
 import * as THREE from "three";
 import { Flight } from "./flight";
 import { buildWorld } from "./world";
@@ -97,6 +98,7 @@ perchMarker.visible = false; perchMarker.renderOrder = 2; scene.add(perchMarker)
 const markerPt = { x: 0, z: 0, top: 0, d: 0, on(pa: PerchAssist, f: Flight) { return pa.markerPoint(f, markerPt); } }; const markerV = new THREE.Vector3();
 /** ◯の画面上の位置(CSS px)。タップの当たり判定に使う: 見た目より広く(指で押しやすい約48dp相当の半径) */
 const ring = { visible: false, x: 0, y: 0, hit: 48 };
+const proxLand = new ProxLand(perchAssist, autoLand);
 const autolandBar = document.getElementById("autoland")!;
 input.ringHit = (x, y) => ring.visible && !autoLand.active && Math.hypot(x - ring.x, y - ring.y) <= ring.hit;
 input.onRingTap = () => {
@@ -179,6 +181,8 @@ const POL_NAMES: Record<AutoPolicy, string> = { life: "自然生活", scenic: "�
 const readInput = () => {
   if (autopilot.enabled) { autoIn.flapTap = false; autoIn.flapHeld = false; autoIn.brake = false; autopilot.busy = forage.active; return forage.apply(autopilot.drive(flight, autoIn, 1 / 60), flight, false); }
   const raw = input.read();
+  if (!autoLand.active && proxLand.update(flight, 1 / 60, !!raw.prox)) toast("自動着地");
+  if (autoLand.active) raw.prox = undefined; // 自動着地中は近接機動の指示を使わない
   if (flight.mode === "air" && !flight.prox.on && !flight.hopping && flight.stun <= 0 && !autoLand.active) cruiseGuard.apply(world, flight, raw);
   autoLand.drive(flight, raw); // 自動着地中だけ、手動入力を進入の入力に置き換える(大きなスティック・羽ばたきがあれば手動へ戻る)
   return forage.apply(assist.apply(perchAssist.apply(raw, flight), flight, autoLand.active || (!!perchAssist.target && perchAssist.aimD < 5)), flight, true);
@@ -316,4 +320,4 @@ function updateHud(dt: number, now: number) {
 }
 renderer.setAnimationLoop(frame);
 // テスト・デバッグ用
-(window as unknown as Record<string, unknown>).__game = { game, flight, world, input, cam, camera, renderer, scene, frame, env: () => envAt(hour), stats, npc, lines, streaks, speedIntensity, setHour: (h: number) => { hour = h; targetHour = null; applyEnv(); }, settings, applySettings, assist, prefs, autopilot, setAuto, season, applySeasonLook, saveSeason, forage, perchAssist, perchMarker, autoLand, ring, surfaces, cruiseGuard, npcView, npcUpdate: () => npcView.update(npc, camera.position, 220, world.lightsLevel()), hour: () => hour, director, drift, uiHider, wxLevel: () => wxLevel, wind, rain, quality };
+(window as unknown as Record<string, unknown>).__game = { game, flight, world, input, cam, camera, renderer, scene, frame, env: () => envAt(hour), stats, npc, lines, streaks, speedIntensity, setHour: (h: number) => { hour = h; targetHour = null; applyEnv(); }, settings, applySettings, assist, prefs, autopilot, setAuto, season, applySeasonLook, saveSeason, forage, perchAssist, perchMarker, autoLand, proxLand, ring, surfaces, cruiseGuard, npcView, npcUpdate: () => npcView.update(npc, camera.position, 220, world.lightsLevel()), hour: () => hour, director, drift, uiHider, wxLevel: () => wxLevel, wind, rain, quality };

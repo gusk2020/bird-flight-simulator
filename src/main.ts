@@ -21,6 +21,7 @@ import { Forage } from "./forage";
 import { SeasonClock, seasonBias, seasonLook, type SeasonSpeed } from "./season";
 import { PerchAssist, PERCH } from "./perchassist";
 import { AutoLand } from "./autoland";
+import { CruiseGuard } from "./avoid";
 import type { AutoPolicy } from "./settings";
 import { SpeedLines, Streaks, speedIntensity } from "./speedfx";
 import { NpcWorld } from "./npc";
@@ -86,6 +87,8 @@ const surfaces = buildSurfaces(world);
 const perchAssist = new PerchAssist(surfaces);
 // G1-5: ◯をタップしたときの自動着地(手動飛行の一部。オート周遊とは別)
 const autoLand = new AutoLand(surfaces, perchAssist, world.heightAt);
+// H1: 巡航中の自動制動(壁・地面へ止まり切れない速さで向かっているとき、ブレーキ・機首上げ・羽ばたき・舵を足す。回避が間に合わない条件の衝突は残る)
+const cruiseGuard = new CruiseGuard();
 // 自動ついばみ(草地・土・あぜ道で、数歩ごとに止まって頭を下げる)。手動もオートも同じ仕組みで、強い入力(羽ばたき・大きなスティック)があれば中断する
 const forage = new Forage(world.groundAt, (Date.now() & 0xffff) + 11);
 // 着地できそうな場所を示す、控えめな半透明の目印(最も狙っている候補だけ)
@@ -103,10 +106,17 @@ input.onRingTap = () => {
   toast("ここへは安全に降りられません" + (why[autoLand.lastRefusal] ? "(" + why[autoLand.lastRefusal] + ")" : ""));
 };
 const CTL_NAMES: Record<ControlMode, string> = { both: "両手", right: "右手", left: "左手" };
+/** 片手操作の巡航◎・近接◎の位置と大きさを画面に合わせる(両手操作では非表示) */
+function layoutPads() {
+  const L = input.layout(); if (!L) return;
+  for (const [id, r] of [["padCruise", L.cruise], ["padProx", L.prox]] as const) { const el = document.getElementById(id)!; el.style.left = r.cx - r.r + "px"; el.style.top = r.cy - r.r + "px"; el.style.width = el.style.height = r.r * 2 + "px"; }
+  dirty = true;
+}
+input.getHeading = () => (flight.vel.length() > 2 ? Math.atan2(-flight.vel.x, -flight.vel.z) : flight.yaw); // 触れ始めの進行方向(近接◎の基準)
 function applyControl() {
   const m = settings.ctl as ControlMode;
   input.setMode(m); assist.enabled = m !== "both"; assist.reset();
-  document.body.dataset.ctl = m; document.getElementById("btnCtl")!.textContent = CTL_NAMES[m];
+  document.body.dataset.ctl = m; document.getElementById("btnCtl")!.textContent = CTL_NAMES[m]; layoutPads();
   if (prefs.control !== m) { prefs.control = m; savePrefs(prefs); }
   const p = settings.apol as AutoPolicy;
   if (p !== autopilot.policy) autopilot.setPolicy(p);
@@ -169,6 +179,7 @@ const POL_NAMES: Record<AutoPolicy, string> = { life: "自然生活", scenic: "�
 const readInput = () => {
   if (autopilot.enabled) { autoIn.flapTap = false; autoIn.flapHeld = false; autoIn.brake = false; autopilot.busy = forage.active; return forage.apply(autopilot.drive(flight, autoIn, 1 / 60), flight, false); }
   const raw = input.read();
+  if (flight.mode === "air" && !flight.prox.on && !flight.hopping && flight.stun <= 0 && !autoLand.active) cruiseGuard.apply(world, flight, raw);
   autoLand.drive(flight, raw); // 自動着地中だけ、手動入力を進入の入力に置き換える(大きなスティック・羽ばたきがあれば手動へ戻る)
   return forage.apply(assist.apply(perchAssist.apply(raw, flight), flight, autoLand.active || (!!perchAssist.target && perchAssist.aimD < 5)), flight, true);
 };
@@ -222,7 +233,7 @@ addEventListener("pagehide", away); addEventListener("blur", away);
 showOverlay(); applySettings();
 
 function resize() { dirty = true; renderer.setSize(innerWidth, innerHeight, false); lines.resize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
-addEventListener("resize", resize); addEventListener("orientationchange", resize); resize();
+addEventListener("resize", () => { resize(); layoutPads(); }); addEventListener("orientationchange", () => { resize(); layoutPads(); }); resize();
 
 const hud = document.getElementById("hud")!, msg = document.getElementById("msg")!;
 const brakeBtn = document.getElementById("brake")!; let brakeLabel = "減速";
@@ -266,6 +277,7 @@ function frame(now: number) {
     const sh = director.update(vdt, flight); cam.setShot(sh.yaw, sh.dist, sh.h); bird.setVisible(cam.shotDist >= FIRST_PERSON_BELOW);
   }
   cam.update(vdt, flight, bp, fxc);
+  { const d = document.getElementById("padDot")!, v = input.proxVisual, on = v.on && input.mode !== "both" && !autopilot.enabled; if (on) { d.style.display = "block"; d.style.left = v.x + "px"; d.style.top = v.y + "px"; } else if (d.style.display !== "none") d.style.display = "none"; } // 近接◎の指の位置(目印)
   { // 着地候補の目印(◯): 手動・空中のときだけ。候補が一瞬見えなくなっても数秒は保つ(PerchAssist.marker)。◯をタップすると自動着地
     const mk = perchAssist.marker, manual = !autopilot.enabled && flight.mode === "air" && !flight.hopping && flight.stun <= 0;
     let show = false;
@@ -296,7 +308,7 @@ function updateHud(dt: number, now: number) {
   const lab = flight.mode === "air" ? "減速" : "歩く"; if (lab !== brakeLabel) { brakeLabel = lab; brakeBtn.textContent = lab; }
   if (hudT > 0.1) {
     hudT = 0;
-    const st = flight.stun > 0 ? "衝突!" : flight.mode === "perch" ? "電線に止まり中" : flight.hopping ? "ジャンプ" : flight.walking ? "歩行中" : flight.mode === "landed" ? "着地中" : flight.mode === "rollout" ? "滑走中" :
+    const st = flight.stun > 0 ? "衝突!" : flight.prox.on && flight.mode === "air" ? "近接機動" : flight.sitting ? "座っている" : flight.mode === "perch" ? "電線に止まり中" : flight.hopping ? "ジャンプ" : flight.walking ? "歩行中" : flight.mode === "landed" ? "着地中" : flight.mode === "rollout" ? "滑走中" :
       flight.stall ? "失速!" : flight.braking ? "減速" : flight.strokeT >= 0 ? "羽ばたき" : "滑空";
     hud.textContent = `${st}　速度 ${flight.speed.toFixed(0)} m/s　高度 ${Math.max(0, flight.agl).toFixed(0)} m　${flight.windVec.length() > 0.1 ? `　風 ${bearingName(wind.bearing)} ${flight.windVec.length().toFixed(0)}m/s${flight.windVec.y > 1 ? " 上昇気流!" : ""}` : ""}　${fps.toFixed(0)}fps Q${quality.level}`;
     msg.style.opacity = game.state === "running" && game.gameTime < 9 ? "1" : "0";
@@ -304,4 +316,4 @@ function updateHud(dt: number, now: number) {
 }
 renderer.setAnimationLoop(frame);
 // テスト・デバッグ用
-(window as unknown as Record<string, unknown>).__game = { game, flight, world, input, cam, camera, renderer, scene, frame, env: () => envAt(hour), stats, npc, lines, streaks, speedIntensity, setHour: (h: number) => { hour = h; targetHour = null; applyEnv(); }, settings, applySettings, assist, prefs, autopilot, setAuto, season, applySeasonLook, saveSeason, forage, perchAssist, perchMarker, autoLand, ring, surfaces, npcView, npcUpdate: () => npcView.update(npc, camera.position, 220, world.lightsLevel()), hour: () => hour, director, drift, uiHider, wxLevel: () => wxLevel, wind, rain, quality };
+(window as unknown as Record<string, unknown>).__game = { game, flight, world, input, cam, camera, renderer, scene, frame, env: () => envAt(hour), stats, npc, lines, streaks, speedIntensity, setHour: (h: number) => { hour = h; targetHour = null; applyEnv(); }, settings, applySettings, assist, prefs, autopilot, setAuto, season, applySeasonLook, saveSeason, forage, perchAssist, perchMarker, autoLand, ring, surfaces, cruiseGuard, npcView, npcUpdate: () => npcView.update(npc, camera.position, 220, world.lightsLevel()), hour: () => hour, director, drift, uiHider, wxLevel: () => wxLevel, wind, rain, quality };

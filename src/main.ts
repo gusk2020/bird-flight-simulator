@@ -104,6 +104,14 @@ const perchMarker = new THREE.Mesh(new THREE.RingGeometry(0.42, 0.55, 24).rotate
 perchMarker.visible = false; perchMarker.renderOrder = 2; scene.add(perchMarker);
 const markerPt = { x: 0, z: 0, top: 0, d: 0, on(pa: PerchAssist, f: Flight) { return pa.markerPoint(f, markerPt); } }; const markerV = new THREE.Vector3();
 /** ◯の画面上の位置(CSS px)。タップの当たり判定に使う: 見た目より広く(指で押しやすい約48dp相当の半径) */
+/** 縁の◯の置き場所が、ボタンなどのUIの上になるときは、横(次に上)へずらして空いている所へ置く。UIの上では◯を押しても、ボタンのほうが反応してしまう */
+const isUiAt = (x: number, y: number) => { const el = document.elementFromPoint(x, y); return !!(el && el.closest && el.closest("button,.btn,#overlay")); };
+function freeEdgeSpot(p: { x: number; y: number }) {
+  if (!isUiAt(p.x, p.y)) return p;
+  for (const d of [60, -60, 120, -120, 180, -180, 240, -240, 320, -320]) { const x = Math.min(innerWidth - 36, Math.max(36, p.x + d)); if (!isUiAt(x, p.y)) return { x, y: p.y }; }
+  for (const dy of [-60, -120]) if (!isUiAt(p.x, p.y + dy)) return { x: p.x, y: p.y + dy };
+  return p;
+}
 const RING_HIT = { base: 48, extra: 72, perSpeed: 0.2 }; // ◯の当たり判定の半径(px): 止まっているとき48、動いているほど広げる(速さ px/秒 × 0.2、最大 +72)
 const ring = { visible: false, x: 0, y: 0, hit: 48 }; let ringSpeed = 0, ringT = 0, edgeShown = false; const edgeP = { x: 0, y: 0 };
 const ringDiag = new RingDiag(), RINGLOG = /[?&]ringlog\b/.test(location.search) || (() => { try { return localStorage.getItem("ringlog") === "1"; } catch { return false; } })(); let ringLogN = 0;
@@ -308,7 +316,7 @@ function frame(now: number) {
     ringDiag.update(flight.clock, rv.reason, mk ? mk.kind : "", markerPt.d, perchAssist.markerAge(flight.clock), stale);
     if (RINGLOG && ringDiag.log.length !== ringLogN) { ringLogN = ringDiag.log.length; console.log("[ring]", JSON.stringify(ringDiag.log[ringDiag.log.length - 1]), JSON.stringify(perchAssist.pickWhy)); }
     const edge = rv.reason === "edge", edgeEl = document.getElementById("ringEdge")!;
-    if (edge) { const ep = edgePosition(markerV.x, markerV.y, markerV.z, innerWidth, innerHeight), kk = edgeShown ? 1 - Math.exp(-Math.min(0.1, dt) / 0.12) : 1; /* 縁の◯は、向きが急に変わっても飛び回らないよう滑らかに動かす */ edgeP.x += (ep.x - edgeP.x) * kk; edgeP.y += (ep.y - edgeP.y) * kk; edgeShown = true; edgeEl.style.display = "block"; edgeEl.style.left = edgeP.x + "px"; edgeEl.style.top = edgeP.y + "px"; edgeEl.style.opacity = stale ? "0.45" : "0.85"; } else { edgeShown = false; if (edgeEl.style.display !== "none") edgeEl.style.display = "none"; }
+    if (edge) { const ep = freeEdgeSpot(edgePosition(markerV.x, markerV.y, markerV.z, innerWidth, innerHeight)), kk = edgeShown ? 1 - Math.exp(-Math.min(0.1, dt) / 0.12) : 1; /* 縁の◯は、向きが急に変わっても飛び回らないよう滑らかに動かす */ edgeP.x += (ep.x - edgeP.x) * kk; edgeP.y += (ep.y - edgeP.y) * kk; edgeShown = true; edgeEl.style.display = "block"; edgeEl.style.left = edgeP.x + "px"; edgeEl.style.top = edgeP.y + "px"; edgeEl.style.opacity = stale ? "0.45" : "0.85"; } else { edgeShown = false; if (edgeEl.style.display !== "none") edgeEl.style.display = "none"; }
     if ((show && !edge) !== perchMarker.visible) { perchMarker.visible = show && !edge; dirty = true; }
     if (show) { // ◯の画面位置と動く速さ。動いている◯は、見てから指が届くまでの間(約0.1〜0.2秒)に動くので、当たり判定を速さに応じて広げる(止まっていれば半径48 px のまま)
       const ep2 = edge ? edgeP : null, nx = ep2 ? ep2.x : (markerV.x * 0.5 + 0.5) * innerWidth, ny = ep2 ? ep2.y : (-markerV.y * 0.5 + 0.5) * innerHeight, dtr = Math.max(1e-3, now / 1000 - ringT);

@@ -9,9 +9,9 @@ import { PHYS as P } from "../src/params";
 import { perchClass } from "../src/perchclass";
 import { Wind } from "../src/wind";
 
-const L = generateLayout();
+export const L = generateLayout();
 const world = { colliders: L.colliders, heightAt: L.heightAt, perchAt: L.perchAt, perchPoint: L.perchPoint, wireDir: L.wireDir, waterAt: L.waterAt };
-const idx = buildSurfaces(L);
+export const idx = buildSurfaces(L);
 const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 let seed = 3; const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
 export interface Result { kind: string; refused: boolean; why: string; ok: boolean; crash: boolean; secs: number; walked: boolean; on?: string; v0?: number; use?: string; tail?: number }
@@ -62,7 +62,7 @@ export function trial(s: Surface, i: number, trace?: Record<string, number | str
   return out;
 }
 
-const open = (s: Surface) => !L.colliders.some(c => c.maxX - c.minX > 3 && c.maxZ - c.minZ > 3 && c.top > s.top + 0.3 && c.maxX > s.minX - 7 && c.minX < s.maxX + 7 && c.maxZ > s.minZ - 7 && c.minZ < s.maxZ + 7);
+export const open = (s: Surface) => !L.colliders.some(c => c.maxX - c.minX > 3 && c.maxZ - c.minZ > 3 && c.top > s.top + 0.3 && c.maxX > s.minX - 7 && c.minX < s.maxX + 7 && c.maxZ > s.minZ - 7 && c.minZ < s.maxZ + 7);
 export function run(n: number, offset = 0) {
   const kinds = ["bench", "wall", "fence", "rail", "balcony", "sign", "branch", "pole", "rock", "roof"] as const;
   const res: Record<string, { n: number; refused: number; ok: number; crash: number; secs: number; walked: number; walkable: number; ends: Record<string, number>; on: Record<string, number>; byV: Record<string, [number, number]>; byW: Record<string, [number, number]> }> = {};

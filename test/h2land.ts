@@ -34,3 +34,21 @@ export function h2RingTests() {
   const d = new RingDiag(); d.update(0, "no-marker", "", 0, 0, false); d.update(1, "shown", "roof", 9, 0.1, false); d.update(2, "shown", "roof", 8, 0.2, false); d.update(5.5, "out-of-range", "roof", 8, 4.5, true);
   check("the log records transitions only, and how long the ring was shown", d.log.length === 2 && Math.abs(d.lastShownFor - 4.5) < 1e-9 && d.log[1].reason === "out-of-range" && d.log[1].stale, JSON.stringify(d.log));
 }
+
+import { PerchAssist } from "../src/perchassist";
+import { AutoLand } from "../src/autoland";
+import { buildSurfaces } from "../src/perches";
+import { L as LAY } from "./common";
+import { Wind } from "../src/wind";
+export function h5WindTests() {
+  suite("H5: wind - upwind approach for small free-standing perches");
+  const idx = buildSurfaces(LAY), sign = idx.all.find(s => s.kind === "sign" && !LAY.colliders.some(c => c.maxX - c.minX > 3 && c.maxZ - c.minZ > 3 && c.top > s.top + 0.3 && c.maxX > s.minX - 12 && c.minX < s.maxX + 12 && c.maxZ > s.minZ - 12 && c.minZ < s.maxZ + 12))!;
+  const mk = (windDir: number) => { // 風は西から 3 m/s(bearing 270)。足場の風上側(西)から東へ向かう = 向かい風、風下側(東)から西へ向かう = 追い風
+    const f = new Flight(world); const w = new Wind(); w.set(270, 3, 0); f.wind = w;
+    const cx = (sign.minX + sign.maxX) / 2, cz = (sign.minZ + sign.maxZ) / 2; f.pos.set(cx + windDir * 12, sign.top + 2.4, cz); f.prevPos.copy(f.pos); f.yaw = windDir > 0 ? Math.PI / 2 : -Math.PI / 2; f.vel.set(-windDir * 7, -0.3, 0);
+    const pa = new PerchAssist(idx), al = new AutoLand(idx, pa, LAY.heightAt); return { f, al, ok: al.start(f, sign) };
+  };
+  const tail = mk(-1), head = mk(1);
+  check("with a tailwind the approach to a small free-standing perch goes around to the downwind side first (waypoint set), with a headwind it goes straight", tail.ok && !!tail.al.wp && head.ok && !head.al.wp, `tail wp=${!!tail.al.wp} head wp=${!!head.al.wp}`);
+  check("the waypoint lies on the downwind (east) side of the perch and the detour does not start toward a building", !!tail.al.wp && tail.al.wp.x > sign.maxX + 3);
+}

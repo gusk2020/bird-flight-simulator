@@ -106,7 +106,8 @@ function freeEdgeSpot(p: { x: number; y: number }) {
   for (const dy of [-60, -120]) if (!isUiAt(p.x, p.y + dy)) return { x: p.x, y: p.y + dy };
   return p;
 }
-const RING_HIT = { base: 48, extra: 72, perSpeed: 0.2 }; // ◯の当たり判定の半径(px): 止まっているとき48、動いているほど広げる(速さ px/秒 × 0.2、最大 +72)
+const RING_HIT = { base: 48, extra: 72, perSpeed: 0.2, fresh: 110, freshSec: 0.6 }; // 出た直後(0.6秒)の◯は、速さがまだ測れず、画面を速く動くので、最初から広く(半径110 px)取る
+let ringBorn = 0; // ◯の当たり判定の半径(px): 止まっているとき48、動いているほど広げる(速さ px/秒 × 0.2、最大 +72)
 const ring = { visible: false, x: 0, y: 0, hit: 48 }; let ringSpeed = 0, ringT = 0, edgeShown = false; const edgeP = { x: 0, y: 0 };
 const ringDiag = new RingDiag(), RINGLOG = /[?&]ringlog\b/.test(location.search) || (() => { try { return localStorage.getItem("ringlog") === "1"; } catch { return false; } })(); let ringLogN = 0;
 const proxLand = new ProxLand(perchAssist, autoLand);
@@ -308,7 +309,7 @@ function frame(now: number) {
     if (show) { // ◯の画面位置と動く速さ。動いている◯は、見てから指が届くまでの間(約0.1〜0.2秒)に動くので、当たり判定を速さに応じて広げる(止まっていれば半径48 px のまま)
       const ep2 = edge ? edgeP : null, nx = ep2 ? ep2.x : (markerV.x * 0.5 + 0.5) * innerWidth, ny = ep2 ? ep2.y : (-markerV.y * 0.5 + 0.5) * innerHeight, dtr = Math.max(1e-3, now / 1000 - ringT);
       if (ring.visible && ringT > 0 && dtr < 0.25) ringSpeed += (Math.hypot(nx - ring.x, ny - ring.y) / dtr - ringSpeed) * 0.3; else ringSpeed = 0;
-      ring.x = nx; ring.y = ny; ringT = now / 1000; ring.hit = RING_HIT.base + Math.min(RING_HIT.extra, RING_HIT.perSpeed * ringSpeed);
+      ring.x = nx; ring.y = ny; ringT = now / 1000; if (!ring.visible) ringBorn = now / 1000; ring.hit = Math.max(RING_HIT.base + Math.min(RING_HIT.extra, RING_HIT.perSpeed * ringSpeed), now / 1000 - ringBorn < RING_HIT.freshSec ? RING_HIT.fresh : 0);
     } else { ringSpeed = 0; ringT = 0; ring.hit = RING_HIT.base; }
     ring.visible = show;
     if (show) {

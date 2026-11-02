@@ -705,13 +705,13 @@ async function g11({ p, cdp, errs }) {
       if (vis) { lastShown = age; if (d.stale) staleSeen = true; if (!drawn && age > 2) { // 描かれているか: ◯の周り60 px四方を、目印を隠したときと比べる
         const r = g.ring, c = document.createElement("canvas"), cx = c.getContext("2d"), W = g.renderer.domElement.width, H = g.renderer.domElement.height; c.width = W; c.height = H;
         const grab = () => { g.renderer.render(g.scene, g.camera); cx.clearRect(0, 0, W, H); cx.drawImage(g.renderer.domElement, 0, 0); const k = W / innerWidth; return cx.getImageData(Math.max(0, Math.round((r.x - 30) * k)), Math.max(0, Math.round((r.y - 30) * k)), Math.round(60 * k), Math.round(60 * k)).data; };
-        const a = grab(); g.perchMarker.visible = false; const b = grab(); g.perchMarker.visible = true; let n = 0; for (let i = 0; i < a.length; i += 4) if (Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]) > 24) n++; drawn = n; } }
+        const a = grab(), a2 = grab(); g.perchMarker.visible = false; const b = grab(); g.perchMarker.visible = true; const cnt = (u, v) => { let n = 0; for (let i = 0; i < u.length; i += 4) if (Math.abs(u[i] - v[i]) + Math.abs(u[i + 1] - v[i + 1]) + Math.abs(u[i + 2] - v[i + 2]) > 24) n++; return n; }; drawn = cnt(a, b) - cnt(a, a2); /* 隠したときの差から、何も変えない2回の描画の差(対照)を引く。保持中は薄く(不透明度0.2)描くので、差は十数画素になる */ } }
       if (!vis && hiddenAt < 0 && age > 0.3) hiddenAt = age; if (hiddenAt >= 0 || age > 9) res({ hiddenAt, lastShown, drawn, staleSeen, reason: d.reason }); else requestAnimationFrame(tick); }; tick(); });
     clearInterval(hover); return out;
   });
   console.log("   hold:", JSON.stringify(hold));
   check("the ring stays on screen about 5 s (game time) after the candidate is lost, and is drawn dimmed while it is only being held", hold.lastShown >= 4.3 && hold.lastShown <= 6.0 && hold.staleSeen, JSON.stringify(hold));
-  check("it is really drawn: hiding the marker changes the pixels around the ring (not only an internal timer)", hold.drawn > 20, `${hold.drawn} px differ`);
+  check("it is really drawn: hiding the marker changes the pixels around the ring more than a repeated identical render does (not only an internal timer)", hold.drawn >= 8, `${hold.drawn} px differ`);
   check("after the hold the ring is gone with the reason recorded (no-marker / expired), not left on screen", hold.hiddenAt >= 4.3 && ["no-marker", "off-screen", "out-of-range"].includes(hold.reason), JSON.stringify(hold));
   await p.evaluate(() => { delete __game.surfaces.near; }); // 元の探索へ戻す
 

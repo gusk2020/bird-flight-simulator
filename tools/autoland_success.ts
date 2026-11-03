@@ -20,7 +20,7 @@ export interface Result { kind: string; refused: boolean; why: string; ok: boole
 export function trial(s: Surface, i: number, trace?: Record<string, number | string>[]): Result {
   seed = 500 + i * 7 + s.id;
   const f = new Flight(world), pa = new PerchAssist(idx), al = new AutoLand(idx, pa, L.heightAt);
-  if (process.env.APPWIND) { const w = new Wind(); w.set(270, 3, 0.3); f.wind = w; } // アプリの既定の風(西から3 m/s、突風0.3)
+  if (process.env.APPWIND) { const w = new Wind(); w.set(Number(process.env.WINDDIR ?? 270), Number(process.env.WINDSPD ?? 3), Number(process.env.WINDGUST ?? 0.3)); f.wind = w; } // アプリの既定の風(西から3 m/s、突風0.3)
   const apt = (s.kind === "balcony" || s.kind === "rail") ? L.apts.find(a => Math.abs((s.minX + s.maxX) / 2 - a.x) < a.w / 2 + 0.1 && Math.abs((s.minZ + s.maxZ) / 2 - a.z) < a.d / 2 + 1.5) : undefined;
   const cx = (s.minX + s.maxX) / 2, cz = (s.minZ + s.maxZ) / 2;
   const ang = apt ? ((s.minZ + s.maxZ) / 2 > apt.z ? Math.PI / 2 : -Math.PI / 2) + (rnd() - 0.5) * 1.6 : rnd() * Math.PI * 2;

@@ -20,7 +20,8 @@ export const AUTOLAND = {
   railForBalcony: true, // 外からベランダへ来たときは手すりの上へ降りる
   windLead: 0, windLeadMax: 2.5, // 風の先読み: 流される分(風×着くまでの時間)の割合 / 時間の上限 s
   trackGain: 6, // 軌跡のずれを機首の向きの指示へ足す割合(0で無効)
-  goAroundClear: 6, goArounds: 1, goAroundKinds: ["sign", "pole"] as string[], // 外したときのやり直しの回数と、対象の足場の種類
+  dangerGoAround: true, // 前方に建物などが近づいて中止するはずの場面でも、回り込む余地が確かめられれば、中止せずに上がって回り込む
+  goAroundClear: 6, goArounds: 2, goAroundKinds: ["sign", "pole", "branch", "rock", "fence", "wall"] as string[], // 外したときのやり直しの回数と、対象の足場の種類
   upwindApproach: true, upwindKinds: ["sign", "pole", "branch", "rock"] as string[], // 回り込みを使う足場(単独で立つ小さなもの。壁際のベンチなどは、回り込みで悪化した)
   tailMin: 1.5, smallWidth: 3, wpDist: 9, wpAbove: 3, wpReach: 3, wpMax: 6, wpTurnRoom: 10, wpClear: 12, // 追い風の小さな足場: 風下の中継点を回って風上から入る
   yGain: 0.235, flapSpeed: 6.82, flapSink: 1.9,
@@ -112,8 +113,8 @@ export class AutoLand {
     return false;
   }
   /** 外した(面より低くなった・遠ざかった)ときの「やり直し」: 一度だけ、上がって回り込み、風上(風がなければ来た側)から入り直す。できなければ false(今までどおり中止) */
-  private goAround(f: Flight, s: Surface, d: number): boolean {
-    if (this.tries >= AUTOLAND.goArounds || !AUTOLAND.goAroundKinds.includes(s.kind)) return false;
+  private goAround(f: Flight, s: Surface, d: number, anyKind = false): boolean {
+    if (d > AUTOLAND.maxRange || this.tries >= AUTOLAND.goArounds || (!anyKind && !AUTOLAND.goAroundKinds.includes(s.kind))) return false;
     let dx: number, dz: number; const wm = Math.hypot(f.windVec.x, f.windVec.z);
     if (wm >= 1.5) { dx = f.windVec.x / wm; dz = f.windVec.z / wm; } else { dx = f.pos.x - (s.minX + s.maxX) / 2; dz = f.pos.z - (s.minZ + s.maxZ) / 2; const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l; }
     if (!this.planWaypoint(f, s, dx, dz, AUTOLAND.goAroundClear)) { return false; }
@@ -146,7 +147,7 @@ export class AutoLand {
     if (!this.wp && d > this.d0 + AUTOLAND.loseMargin) { if (this.goAround(f, s, d)) return; this.dbg = `far d=${d.toFixed(1)} d0=${this.d0.toFixed(1)}`; this.cancel("lost"); return; }
     if (feet - s.top < (this.wp ? -1.5 : -0.6)) { if (!this.wp && this.goAround(f, s, d)) return; this.dbg = `low ${(feet - s.top).toFixed(1)} d=${d.toFixed(1)}`; this.cancel("lost"); return; } // 面より低くなった(降りられない)
     this.danger += dt;
-    if (this.danger >= AUTOLAND.dangerEvery) { this.danger = 0; if (!this.wp && d > 2.5 && this.pathDanger(f, s)) { this.cancel("danger"); return; } }
+    if (this.danger >= AUTOLAND.dangerEvery) { this.danger = 0; if (!this.wp && d > 2.5 && this.pathDanger(f, s)) { if (AUTOLAND.dangerGoAround && this.goAround(f, s, d)) return; this.cancel("danger"); return; } }
 
     if (this.wp) { // 風上から入るための回り込み: 中継点へ向かい、着いたら(または時間切れで)通常の進入へ
       const dx = this.wp.x - px, dz = this.wp.z - pz, dw = Math.hypot(dx, dz);

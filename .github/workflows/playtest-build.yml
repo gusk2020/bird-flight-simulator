@@ -1,0 +1,29 @@
+# 試遊用ビルド(手動実行のみ)。選んだブランチをビルドして artifact にするだけで、公開・デプロイ・main への書き込みは一切しない。
+name: playtest-build
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: ビルドするブランチ(例 claude/h4-auto)
+        required: true
+        default: claude/h4-auto
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vind-ving-playtest-${{ github.run_id }}
+          path: dist
+          retention-days: 7

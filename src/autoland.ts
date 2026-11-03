@@ -17,6 +17,11 @@ export const AUTOLAND = {
   hSlope: 0.176, hFinal: 0.426,                // 目標の高さ = 足場の上 hFinal + (d-2.5)*hSlope
   downFast: -0.165, downSlow: -0.564, upMax: 0.134, // 降下の勾配の下限(速すぎるとき/ふつう)と上限
   vBig: 6.6,                                   // 広い面(12 m²超)の手前での最低の目標速度
+  railForBalcony: true, // 外からベランダへ来たときは手すりの上へ降りる
+  windLead: 0, windLeadMax: 2.5, // 風の先読み: 流される分(風×着くまでの時間)の割合 / 時間の上限 s
+  trackGain: 6, // 軌跡のずれを機首の向きの指示へ足す割合(0で無効)
+  upwindApproach: true, upwindKinds: ["sign", "pole", "branch", "rock"] as string[], // 回り込みを使う足場(単独で立つ小さなもの。壁際のベンチなどは、回り込みで悪化した)
+  tailMin: 1.5, smallWidth: 3, wpDist: 9, wpAbove: 3, wpReach: 3, wpMax: 6, wpTurnRoom: 10, wpClear: 12, // 追い風の小さな足場: 風下の中継点を回って風上から入る
   yGain: 0.235, flapSpeed: 6.82, flapSink: 1.9,
 };
 export type AutoLandEnd = "success" | "user" | "danger" | "lost" | "timeout" | "crash" | "fail";
@@ -35,7 +40,8 @@ export class AutoLand {
   /** 直近に開始を断った理由(表示・診断用) */
   lastRefusal = "";
   stats = { starts: 0, refused: 0, success: 0, ended: { user: 0, danger: 0, lost: 0, timeout: 0, crash: 0, fail: 0 } as Record<string, number>, time: 0 };
-  dbg = ""; private d0 = 0; private c0 = 0; private danger = 0; private lastFlap = -9; private under: Surface[] = [];
+  dbg = ""; /** 風上から進入するための中継点(追い風で小さな足場へ来たときだけ) */ wp: { x: number; z: number } | null = null; private wpT = 0; private d0 = 0; private c0 = 0; private danger = 0; private lastFlap = -9; private under: Surface[] = [];
+  private get all() { return this.idx.all; }
   constructor(private idx: SurfaceIndex, private pa: PerchAssist, private heightAt: (x: number, z: number) => number) {}
 
   private dist(f: Flight, s: Surface) { return Math.hypot(f.pos.x - clamp(f.pos.x, s.minX, s.maxX), f.pos.z - clamp(f.pos.z, s.minZ, s.maxZ)); }
@@ -53,8 +59,8 @@ export class AutoLand {
   }
 
   /** 現在位置から足場の手前までの直線(降下しながら)の上に、その高さより高い建物がないか。足場の真上と縁の周り0.9 m は除く */
-  private pathDanger(f: Flight, s: Surface): boolean {
-    const px = f.pos.x, pz = f.pos.z, feet = f.pos.y - P.feetOffset;
+  private pathDanger(f: Flight, s: Surface, from?: { x: number; z: number; feet: number }): boolean {
+    const px = from ? from.x : f.pos.x, pz = from ? from.z : f.pos.z, feet = from ? from.feet : f.pos.y - P.feetOffset;
     const ax = clamp(px, s.minX + 0.2, s.maxX - 0.2), az = clamp(pz, s.minZ + 0.2, s.maxZ - 0.2), d = Math.hypot(ax - px, az - pz);
     const n = Math.max(4, Math.ceil(d / 1.5));
     for (let i = 1; i < n; i++) {
@@ -68,11 +74,37 @@ export class AutoLand {
     return false;
   }
 
-  start(f: Flight, s: Surface): boolean {
-    const c = this.check(f, s);
+  /** ベランダは、手すりと建物の壁のあいだの約1 mの床。手すり(床から1 m上)を越えて、止まり切れないまま壁に近づくより、外から来たなら手すりの上に降りるほうが確実。
+   *  手すり(と床)は一つの構造物なので、成功は手すりでも床でも数える(下の same)。外から来ていない(横から)ときは床のまま */
+  private retarget(f: Flight, s: Surface): Surface {
+    if (s.kind !== "balcony") return s;
+    const cz = (s.minZ + s.maxZ) / 2;
+    for (const r of this.all) {
+      if (r.kind !== "rail" || r.top <= s.top || r.maxX <= s.minX || r.minX >= s.maxX || Math.abs((r.minZ + r.maxZ) / 2 - cz) > 0.9) continue;
+      if (Math.sign(f.pos.z - cz) === Math.sign((r.minZ + r.maxZ) / 2 - cz) && Math.abs(f.pos.z - cz) > 1.0) return r;
+    }
+    return s;
+  }
+
+  start(f: Flight, s0: Surface): boolean {
+    const s = AUTOLAND.railForBalcony ? this.retarget(f, s0) : s0, c = this.check(f, s);
     if (!c.ok) { this.stats.refused++; this.end = ""; this.lastRefusal = c.why; return false; }
     this.active = true; this.target = s; this.t = 0; this.end = ""; this.d0 = this.dist(f, s); this.c0 = f.crashes; this.danger = 0; this.lastFlap = f.clock - 9;
-    this.pa.forced = s; this.stats.starts++; return true;
+    this.pa.forced = s; this.stats.starts++; this.wp = null; this.wpT = 0;
+    // 追い風で小さな足場へ向かうとき: 追い風のままでは、失速しない対気速度を保つと対地速度が高すぎて止まれない。足場の風下側の点を回ってから、風上(向かい風)へ向けて進入する。回り込む道に建物があるときはやらない
+    if (f.wind) f.wind.at(f.pos.x, f.pos.y, f.pos.z, f.clock, f.windVec);
+    const wvx = f.windVec.x, wvz = f.windVec.z, wm = Math.hypot(wvx, wvz), hs0 = Math.hypot(f.vel.x, f.vel.z) || 1, tail = (wvx * f.vel.x + wvz * f.vel.z) / hs0;
+    if (AUTOLAND.upwindApproach && AUTOLAND.upwindKinds.includes(s.kind) && wm >= 1.5 && tail >= AUTOLAND.tailMin && Math.min(s.maxX - s.minX, s.maxZ - s.minZ) < AUTOLAND.smallWidth) {
+      const wx = (s.minX + s.maxX) / 2 + wvx / wm * AUTOLAND.wpDist, wz = (s.minZ + s.maxZ) / 2 + wvz / wm * AUTOLAND.wpDist, hw = s.top + AUTOLAND.wpAbove; let free = true;
+      const n = Math.ceil(Math.hypot(wx - f.pos.x, wz - f.pos.z) / 1.5);
+      for (let i = 1; i <= n && free; i++) { const u = i / n; for (const o of [-0.8, 0, 0.8]) if (this.heightAt(f.pos.x + (wx - f.pos.x) * u + o, f.pos.z + (wz - f.pos.z) * u) > hw - 0.8) { free = false; break; } }
+      // 折り返しに使う広がり(中継点の周り wpClear m)にも、高い建物がないこと
+      for (let k = 0; k < 8 && free; k++) for (const r of [AUTOLAND.wpClear * 0.5, AUTOLAND.wpClear]) if (this.heightAt(wx + Math.cos(k * Math.PI / 4) * r, wz + Math.sin(k * Math.PI / 4) * r) > hw - 0.8) { free = false; break; }
+      // 中継点から足場までの最後の進入路にも、(通常の進入と同じ検査で)建物がないこと
+      if (free && this.pathDanger(f, s, { x: wx, z: wz, feet: hw })) free = false;
+      if (free && this.heightAt(wx, wz) < hw - 0.8) { this.wp = { x: wx, z: wz }; this.pa.forced = null; }
+    }
+    return true;
   }
 
   cancel(why: AutoLandEnd) {
@@ -98,16 +130,31 @@ export class AutoLand {
     if (f.hopping) { this.cancel("lost"); return; }
     if (this.t > AUTOLAND.maxTime) { this.cancel("timeout"); return; }
     const px = f.pos.x, pz = f.pos.z, feet = f.pos.y - P.feetOffset, d = this.dist(f, s), hs = Math.hypot(f.vel.x, f.vel.z);
-    if (d > this.d0 + AUTOLAND.loseMargin) { this.dbg = `far d=${d.toFixed(1)} d0=${this.d0.toFixed(1)}`; this.cancel("lost"); return; }
-    if (feet - s.top < -0.6) { this.dbg = `low ${(feet - s.top).toFixed(1)} d=${d.toFixed(1)}`; this.cancel("lost"); return; } // 面より低くなった(降りられない)
+    if (!this.wp && d > this.d0 + AUTOLAND.loseMargin) { this.dbg = `far d=${d.toFixed(1)} d0=${this.d0.toFixed(1)}`; this.cancel("lost"); return; }
+    if (feet - s.top < (this.wp ? -1.5 : -0.6)) { this.dbg = `low ${(feet - s.top).toFixed(1)} d=${d.toFixed(1)}`; this.cancel("lost"); return; } // 面より低くなった(降りられない)
     this.danger += dt;
-    if (this.danger >= AUTOLAND.dangerEvery) { this.danger = 0; if (d > 2.5 && this.pathDanger(f, s)) { this.cancel("danger"); return; } }
+    if (this.danger >= AUTOLAND.dangerEvery) { this.danger = 0; if (!this.wp && d > 2.5 && this.pathDanger(f, s)) { this.cancel("danger"); return; } }
 
+    if (this.wp) { // 風上から入るための回り込み: 中継点へ向かい、着いたら(または時間切れで)通常の進入へ
+      const dx = this.wp.x - px, dz = this.wp.z - pz, dw = Math.hypot(dx, dz);
+      if (dw < AUTOLAND.wpReach || this.wpT > AUTOLAND.wpMax) { this.wp = null; this.pa.forced = s; this.d0 = d + AUTOLAND.wpTurnRoom; }
+      else {
+        this.wpT += dt; raw.x = -clamp(wrap(Math.atan2(-dx, -dz) - f.yaw) * 1.8, -1, 1);
+        const hw = s.top + AUTOLAND.wpAbove, vyW = clamp((hw - feet) / Math.max(dw, 3), -0.15, 0.2) * Math.max(hs, 5);
+        raw.y = clamp((vyW - f.vel.y) * AUTOLAND.yGain, -0.6, 0.5); raw.brake = false; raw.flapTap = false;
+        if ((hs < AUTOLAND.flapSpeed + 1 || f.vel.y < vyW - AUTOLAND.flapSink) && f.vel.y < 0.5 && f.clock - this.lastFlap > 0.7 && f.strokeT < 0) { raw.flapTap = true; this.lastFlap = f.clock; }
+        return;
+      }
+    }
     // --- 進入: 足場の内側の点へ向き、降下角を保ち、速さを落とす
     // 目標点: 着地補助が立てた計画(細長い面は端から長手方向に入る点)があればそれ、なければ足場の内側でいちばん近い点
     const pl = this.pa.plan, usePlan = !!pl && f.clock - pl.t < 0.15 && d < 14;
     const ax = usePlan ? pl!.tx : clamp(px, s.minX + 0.2, s.maxX - 0.2), az = usePlan ? pl!.tz : clamp(pz, s.minZ + 0.2, s.maxZ - 0.2), da = Math.hypot(ax - px, az - pz);
-    const e = da > 0.3 ? wrap(Math.atan2(-(ax - px), -(az - pz)) - f.yaw) : 0;
+    // 横風: 機首を目標へ向けても、風で流されて軌跡(対地速度の向き)がずれ、細い足場を外す。軌跡の向きと目標の向きの差を機首の向きの指示へ足す(風上へ少し機首を向けて進む)。風のない条件では軌跡=機首なので変化しない
+    // 風の先読み: 着くまでの時間(ttg)のあいだに風で流される分だけ、風上へずらした点を狙う。流されてから直すより、最初から風上へ向けて進む
+    const ttg = clamp(da / Math.max(hs, 3), 0, AUTOLAND.windLeadMax), wx = ax - f.windVec.x * AUTOLAND.windLead * ttg, wz = az - f.windVec.z * AUTOLAND.windLead * ttg;
+    let e = da > 0.3 ? wrap(Math.atan2(-(wx - px), -(wz - pz)) - f.yaw) : 0;
+    if (da > 1.2 && hs > 2.5) e += AUTOLAND.trackGain * clamp(wrap(Math.atan2(-(ax - px), -(az - pz)) - Math.atan2(-f.vel.x, -f.vel.z)), -0.6, 0.6);
     raw.x = -clamp(e * 1.8, -1, 1) * (Math.abs(e) < 0.03 ? 0 : 1);
     const big = (s.maxX - s.minX) * (s.maxZ - s.minZ) > 12;
     const hDes = usePlan ? Math.max(pl!.h, s.top + 0.25) + Math.max(0, da - 2.5) * AUTOLAND.hSlope * 0.5 : s.top + AUTOLAND.hFinal + Math.max(0, d - 2.5) * AUTOLAND.hSlope, vT0 = clamp(AUTOLAND.vBase + da * AUTOLAND.vK, AUTOLAND.vMin, AUTOLAND.vMax), vT = big ? Math.max(vT0, AUTOLAND.vBig) : vT0; // 屋根のような広い面は、縁を越えるまで失速速度に近づけない(縁の手前で沈むため)。減速は面の上で着地補助が行う

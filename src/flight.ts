@@ -262,7 +262,7 @@ export class Flight {
     this.roll += (0 - this.roll) * (1 - Math.exp(-8 * dt));
     const gh = this.world.heightAt(this.pos.x, this.pos.z);
     this.agl = this.pos.y - P.feetOffset - gh;
-    if (this.agl > P.stepDown) { this.mode = "air"; this.walkV = 0; } // 屋根の縁・高い段から外へ出た
+    if (this.agl > P.stepDown) { this.mode = "air"; this.walkV = 0; } // 屋根の縁・高い段から外へ出た(縁から降りるときの跳ね出しは試して外した: 実測で衝突を減らさず、オートの歩行から降りる動きを変えてしまった)
     else this.pos.y = gh + P.feetOffset;                                 // 小さな段差は歩いて昇降(接地を維持)
   }
 

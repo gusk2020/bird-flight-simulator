@@ -42,6 +42,10 @@ export class PerchAssist {
   stats = { snaps: 0, settles: 0, guided: 0, hopAssists: 0, edgeStops: 0, edgeAligns: 0, captures: 0, maxStep: 0, rolloutStops: 0, brakeHolds: 0 };
   /** G1-4: 目印の足場。候補選別(8Hz)が一瞬ほかを選んだり見失っても、markerHold 秒は保つ。着地・遠ざかり・到達不能・時間切れで解除 */
   marker: Surface | null = null; private markerUntil = 0;
+  /** 診断用(開発ログ): 直近の候補選別で、範囲内の足場がなぜ候補にならなかったかの数 */
+  pickWhy = { inRange: 0, tooHigh: 0, tooLow: 0, outOfCone: 0 };
+  /** 目印を最後に確認してからの秒数(保持の経過)。目印がなければ 0 */
+  markerAge(clock: number) { return this.marker ? Math.max(0, PERCH.markerHold - (this.markerUntil - clock)) : 0; }
   /** G1-5: 自動着地が指定した足場。あるとき pick() は進行方向の円錐に関係なくこの足場を選び、空中の誘導は減速/羽ばたきの意図がなくても働く */
   forced: Surface | null = null;
   /** 直近の空中誘導が立てた着地計画(目標点・その高さ・長手方向に沿って入るか)。自動着地が進入の目標に使う */
@@ -60,14 +64,14 @@ export class PerchAssist {
       if (this.target) { this.setAim(this.target, px, pz); this.marker = this.target; this.markerUntil = f.clock + PERCH.markerHold; }
       return;
     }
-    this.idx.near(px, pz, PERCH.range, this.near);
+    this.idx.near(px, pz, PERCH.range, this.near); const why = this.pickWhy; why.inRange = why.tooHigh = why.tooLow = why.outOfCone = 0;
     for (const s of this.near) {
       const cx = clamp(px, s.minX, s.maxX), cz = clamp(pz, s.minZ, s.maxZ), dx = cx - px, dz = cz - pz, d = Math.hypot(dx, dz);
       if (d > PERCH.range) continue;
       const above = feet - s.top; // 面より上にいる高さ
-      if (above < -0.4 || above > 2.5 + d * 0.5) continue;      // 面より低い/高すぎる(降りられない)候補は除く
+      why.inRange++; if (above < -0.4) { why.tooLow++; continue; } if (above > 2.5 + d * 0.5) { why.tooHigh++; continue; }      // 面より低い/高すぎる(降りられない)候補は除く
       let bearing = 0; if (d > 0.4) bearing = Math.acos(clamp((dx * hx + dz * hz) / d, -1, 1));
-      if (bearing > PERCH.cone) continue;
+      if (bearing > PERCH.cone) { why.outOfCone++; continue; }
       const score = d + bearing * 4 + (s.kind === "planter" ? 3 : 0) + (s.edge ? 0.5 : 0);
       if (score < bs) { bs = score; best = s; }
     }

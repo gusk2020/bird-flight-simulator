@@ -13,6 +13,10 @@ export class Input {
   ringHit: (x: number, y: number) => boolean = () => false; onRingTap = () => {};
   /** テスト用の計数: ◯タップになった回数 / 片手操作のタップ(=羽ばたき)になった回数 */
   stats = { ringTaps: 0, gestureTaps: 0 };
+  /** 診断: ◯タップの判定の内訳(押した→離した→数えた)。取りこぼしの原因を、どの段階で落ちたかで見分ける */
+  ringDiag = { down: 0, downHit: 0, up: 0, upNoCand: 0, upSlow: 0, upFar: 0, upOk: 0, cancel: 0, moveDrop: 0, last: "" };
+  /** 診断用: 押している最中の◯候補の数(テストの記録に使う) */
+  ringCandCount() { return this.ringCand.size; }
   /** H1: 近接◎(画面の下側)。片手操作のときだけ。触れた場所が近接◎の領域なら近接、そうでなければ今までの巡航(スライド=スティック、タップ=羽ばたき、長押し=減速) */
   readonly prox = new ProxPad(); proxVisual = { x: 0, y: 0, on: false };
   /** 触れ始めの進行方向(世界のyaw)。main が設定する */
@@ -33,15 +37,18 @@ export class Input {
     const RING_TAP_MS = 300, RING_SLOP_PX = 14;
     document.addEventListener("pointerdown", e => {
       this.ringFired.delete(e.pointerId); // 前に使った指番号の取り残しを消す
+      this.ringDiag.down++;
       const el = e.target as Element | null; if (el && el.closest && el.closest("button,.btn,#overlay")) return;
-      if (this.ringHit(e.clientX, e.clientY)) this.ringCand.set(e.pointerId, { x: e.clientX, y: e.clientY, t: e.timeStamp });
+      if (this.ringHit(e.clientX, e.clientY)) { this.ringCand.set(e.pointerId, { x: e.clientX, y: e.clientY, t: e.timeStamp }); this.ringDiag.downHit++; this.ringDiag.last = `down#${e.pointerId}@${Math.round(e.timeStamp)}`; }
     }, true);
-    document.addEventListener("pointermove", e => { const c = this.ringCand.get(e.pointerId); if (c && Math.hypot(e.clientX - c.x, e.clientY - c.y) > RING_SLOP_PX) this.ringCand.delete(e.pointerId); }, true);
+    document.addEventListener("pointermove", e => { const c = this.ringCand.get(e.pointerId); if (c && Math.hypot(e.clientX - c.x, e.clientY - c.y) > RING_SLOP_PX) { this.ringCand.delete(e.pointerId); this.ringDiag.moveDrop++; } }, true);
     document.addEventListener("pointerup", e => {
-      const c = this.ringCand.get(e.pointerId); this.ringCand.delete(e.pointerId);
-      if (c && e.timeStamp - c.t < RING_TAP_MS && Math.hypot(e.clientX - c.x, e.clientY - c.y) <= RING_SLOP_PX && this.ringHit(e.clientX, e.clientY)) { this.ringFired.add(e.pointerId); this.stats.ringTaps++; this.onRingTap(); }
+      const c = this.ringCand.get(e.pointerId); this.ringCand.delete(e.pointerId); const D = this.ringDiag; D.up++;
+      if (!c) D.upNoCand++; else if (!(e.timeStamp - c.t < RING_TAP_MS)) { D.upSlow++; D.last += ` slow dt=${Math.round(e.timeStamp - c.t)}`; } else if (!(Math.hypot(e.clientX - c.x, e.clientY - c.y) <= RING_SLOP_PX)) { D.upFar++; D.last += ` far`; } else D.upOk++;
+      if (c && e.timeStamp - c.t < RING_TAP_MS && Math.hypot(e.clientX - c.x, e.clientY - c.y) <= RING_SLOP_PX) { // 押した時点で◯の当たり判定の中だったことは確かめ済み(◯は飛びながら動く・消えることがあるので、離した時点では確かめ直さない)
+         this.ringFired.add(e.pointerId); this.stats.ringTaps++; this.onRingTap(); }
     }, true);
-    document.addEventListener("pointercancel", e => { this.ringCand.delete(e.pointerId); this.ringFired.delete(e.pointerId); }, true);
+    document.addEventListener("pointercancel", e => { this.ringDiag.cancel++; this.ringCand.delete(e.pointerId); this.ringFired.delete(e.pointerId); }, true);
     zone.addEventListener("pointerdown", e => {
       if (this.mode !== "both") {
         const L = this.layout()!;

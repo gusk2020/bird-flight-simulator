@@ -2,9 +2,9 @@
 // 調整用(tune)と測定用(measure)の試行番号を分ける: tune=0..59, measure=1000..1199 (進入の乱数は試行番号から決まる)
 // npx esbuild tools/autoland_diag.ts --bundle --platform=node --outfile=dist-test/autoland_diag.cjs && node dist-test/autoland_diag.cjs [measure|tune] [kind,kind,...]
 import { run } from "./autoland_success";
-const mode = process.argv[2] === "tune" ? "tune" : "measure";
+const mode = process.argv[2] === "tune" ? "tune" : process.argv[2] === "holdout" ? "holdout" : "measure";
 const kinds = process.argv[3]?.split(",");
-const n = mode === "tune" ? 60 : 200, offset = mode === "tune" ? 0 : 1000;
+const n = mode === "tune" ? 60 : 200, offset = mode === "tune" ? 0 : mode === "holdout" ? 5000 : 1000; // holdout: 調整にも H6 との比較にも使っていない試行番号(進入位置・向き・速さが別)
 const r = run(n, offset);
 console.log(`[${mode}] 試行番号 ${offset}..${offset + n - 1}`);
 for (const [k, v] of Object.entries(r)) {

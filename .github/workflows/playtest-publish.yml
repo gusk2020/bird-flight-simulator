@@ -1,0 +1,42 @@
+# 試遊用の公開(手動実行のみ・事前にユーザーの承認と設定が必要)。
+# 選んだブランチをビルドし、「試遊専用の別リポジトリ」の gh-pages ブランチへ送る。このリポジトリの main・Pages・セーブには触れない。
+# 動くための前提(ユーザーが Android のブラウザ(GitHub)で行う。docs/H6_PLAYTEST.md): 試遊専用リポジトリの作成、Secrets に PLAYTEST_TOKEN の登録、変数 PLAYTEST_REPO の登録。
+# どれかが未設定なら、何も送らずに止まる。
+name: playtest-publish
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: ビルドするブランチ(例 claude/h6-tap)
+        required: true
+        default: claude/h6-tap
+permissions:
+  contents: read
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      TARGET: ${{ vars.PLAYTEST_REPO }}
+      TOKEN: ${{ secrets.PLAYTEST_TOKEN }}
+    steps:
+      - name: 前提を確かめる(未設定・このリポジトリ宛て・main 宛ては止める)
+        run: |
+          if [ -z "$TARGET" ] || [ -z "$TOKEN" ]; then echo "PLAYTEST_REPO(変数)と PLAYTEST_TOKEN(Secret)が未設定です。何も送りません。"; exit 1; fi
+          if [ "$TARGET" = "${{ github.repository }}" ]; then echo "送り先がこのリポジトリです。止めます。"; exit 1; fi
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: 試遊専用リポジトリの gh-pages へ送る(履歴は毎回作り直す。送り先の gh-pages だけを置き換える)
+        run: |
+          cd dist
+          git init -q -b gh-pages
+          git config user.name "playtest-bot"; git config user.email "playtest-bot@users.noreply.github.com"
+          echo "built from ${{ github.repository }}@${{ github.sha }} ref=${{ inputs.ref }}" > build-info.txt
+          git add -A; git commit -qm "playtest build ${{ inputs.ref }} ${{ github.sha }}"
+          git push -f "https://x-access-token:${TOKEN}@github.com/${TARGET}.git" gh-pages

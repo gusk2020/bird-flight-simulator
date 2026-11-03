@@ -20,6 +20,7 @@ export const AUTOLAND = {
   railForBalcony: true, // 外からベランダへ来たときは手すりの上へ降りる
   windLead: 0, windLeadMax: 2.5, // 風の先読み: 流される分(風×着くまでの時間)の割合 / 時間の上限 s
   trackGain: 6, // 軌跡のずれを機首の向きの指示へ足す割合(0で無効)
+  goAroundClear: 6, goArounds: 1, goAroundKinds: ["sign", "pole"] as string[], // 外したときのやり直しの回数と、対象の足場の種類
   upwindApproach: true, upwindKinds: ["sign", "pole", "branch", "rock"] as string[], // 回り込みを使う足場(単独で立つ小さなもの。壁際のベンチなどは、回り込みで悪化した)
   tailMin: 1.5, smallWidth: 3, wpDist: 9, wpAbove: 3, wpReach: 3, wpMax: 6, wpTurnRoom: 10, wpClear: 12, // 追い風の小さな足場: 風下の中継点を回って風上から入る
   yGain: 0.235, flapSpeed: 6.82, flapSink: 1.9,
@@ -40,7 +41,7 @@ export class AutoLand {
   /** 直近に開始を断った理由(表示・診断用) */
   lastRefusal = "";
   stats = { starts: 0, refused: 0, success: 0, ended: { user: 0, danger: 0, lost: 0, timeout: 0, crash: 0, fail: 0 } as Record<string, number>, time: 0 };
-  dbg = ""; /** 風上から進入するための中継点(追い風で小さな足場へ来たときだけ) */ wp: { x: number; z: number } | null = null; private wpT = 0; private d0 = 0; private c0 = 0; private danger = 0; private lastFlap = -9; private under: Surface[] = [];
+  dbg = ""; /** 風上から進入するための中継点(追い風で小さな足場へ来たときだけ) */ wp: { x: number; z: number } | null = null; private wpT = 0; private tries = 0; private d0 = 0; private c0 = 0; private danger = 0; private lastFlap = -9; private under: Surface[] = [];
   private get all() { return this.idx.all; }
   constructor(private idx: SurfaceIndex, private pa: PerchAssist, private heightAt: (x: number, z: number) => number) {}
 
@@ -90,21 +91,33 @@ export class AutoLand {
     const s = AUTOLAND.railForBalcony ? this.retarget(f, s0) : s0, c = this.check(f, s);
     if (!c.ok) { this.stats.refused++; this.end = ""; this.lastRefusal = c.why; return false; }
     this.active = true; this.target = s; this.t = 0; this.end = ""; this.d0 = this.dist(f, s); this.c0 = f.crashes; this.danger = 0; this.lastFlap = f.clock - 9;
-    this.pa.forced = s; this.stats.starts++; this.wp = null; this.wpT = 0;
+    this.pa.forced = s; this.stats.starts++; this.wp = null; this.wpT = 0; this.tries = 0;
     // 追い風で小さな足場へ向かうとき: 追い風のままでは、失速しない対気速度を保つと対地速度が高すぎて止まれない。足場の風下側の点を回ってから、風上(向かい風)へ向けて進入する。回り込む道に建物があるときはやらない
     if (f.wind) f.wind.at(f.pos.x, f.pos.y, f.pos.z, f.clock, f.windVec);
     const wvx = f.windVec.x, wvz = f.windVec.z, wm = Math.hypot(wvx, wvz), hs0 = Math.hypot(f.vel.x, f.vel.z) || 1, tail = (wvx * f.vel.x + wvz * f.vel.z) / hs0;
-    if (AUTOLAND.upwindApproach && AUTOLAND.upwindKinds.includes(s.kind) && wm >= 1.5 && tail >= AUTOLAND.tailMin && Math.min(s.maxX - s.minX, s.maxZ - s.minZ) < AUTOLAND.smallWidth) {
-      const wx = (s.minX + s.maxX) / 2 + wvx / wm * AUTOLAND.wpDist, wz = (s.minZ + s.maxZ) / 2 + wvz / wm * AUTOLAND.wpDist, hw = s.top + AUTOLAND.wpAbove; let free = true;
-      const n = Math.ceil(Math.hypot(wx - f.pos.x, wz - f.pos.z) / 1.5);
-      for (let i = 1; i <= n && free; i++) { const u = i / n; for (const o of [-0.8, 0, 0.8]) if (this.heightAt(f.pos.x + (wx - f.pos.x) * u + o, f.pos.z + (wz - f.pos.z) * u) > hw - 0.8) { free = false; break; } }
-      // 折り返しに使う広がり(中継点の周り wpClear m)にも、高い建物がないこと
-      for (let k = 0; k < 8 && free; k++) for (const r of [AUTOLAND.wpClear * 0.5, AUTOLAND.wpClear]) if (this.heightAt(wx + Math.cos(k * Math.PI / 4) * r, wz + Math.sin(k * Math.PI / 4) * r) > hw - 0.8) { free = false; break; }
-      // 中継点から足場までの最後の進入路にも、(通常の進入と同じ検査で)建物がないこと
-      if (free && this.pathDanger(f, s, { x: wx, z: wz, feet: hw })) free = false;
-      if (free && this.heightAt(wx, wz) < hw - 0.8) { this.wp = { x: wx, z: wz }; this.pa.forced = null; }
-    }
+    if (AUTOLAND.upwindApproach && AUTOLAND.upwindKinds.includes(s.kind) && wm >= 1.5 && tail >= AUTOLAND.tailMin && Math.min(s.maxX - s.minX, s.maxZ - s.minZ) < AUTOLAND.smallWidth) this.planWaypoint(f, s, wvx / wm, wvz / wm);
     return true;
+  }
+
+  /** 足場の (dirx,dirz) 側 wpDist m の点を中継点にできるか調べ、できれば立てる(経路・折り返しの広がり・最後の進入路が空いているとき)。立てたら true */
+  private planWaypoint(f: Flight, s: Surface, dirx: number, dirz: number, clear = AUTOLAND.wpClear): boolean {
+    const wx = (s.minX + s.maxX) / 2 + dirx * AUTOLAND.wpDist, wz = (s.minZ + s.maxZ) / 2 + dirz * AUTOLAND.wpDist, hw = s.top + AUTOLAND.wpAbove; let free = true;
+    const n = Math.ceil(Math.hypot(wx - f.pos.x, wz - f.pos.z) / 1.5);
+    for (let i = 1; i <= n && free; i++) { const u = i / n; for (const o of [-0.8, 0, 0.8]) if (this.heightAt(f.pos.x + (wx - f.pos.x) * u + o, f.pos.z + (wz - f.pos.z) * u) > hw - 0.8) { free = false; break; } }
+    // 折り返しに使う広がり(中継点の周り wpClear m)にも、高い建物がないこと
+    for (let k = 0; k < 8 && free; k++) for (const r of [clear * 0.5, clear]) if (this.heightAt(wx + Math.cos(k * Math.PI / 4) * r, wz + Math.sin(k * Math.PI / 4) * r) > hw - 0.8) { free = false; break; }
+    // 中継点から足場までの最後の進入路にも、(通常の進入と同じ検査で)建物がないこと
+    if (free && this.pathDanger(f, s, { x: wx, z: wz, feet: hw })) free = false;
+    if (free && this.heightAt(wx, wz) < hw - 0.8) { this.wp = { x: wx, z: wz }; this.wpT = 0; this.pa.forced = null; return true; }
+    return false;
+  }
+  /** 外した(面より低くなった・遠ざかった)ときの「やり直し」: 一度だけ、上がって回り込み、風上(風がなければ来た側)から入り直す。できなければ false(今までどおり中止) */
+  private goAround(f: Flight, s: Surface, d: number): boolean {
+    if (this.tries >= AUTOLAND.goArounds || !AUTOLAND.goAroundKinds.includes(s.kind)) return false;
+    let dx: number, dz: number; const wm = Math.hypot(f.windVec.x, f.windVec.z);
+    if (wm >= 1.5) { dx = f.windVec.x / wm; dz = f.windVec.z / wm; } else { dx = f.pos.x - (s.minX + s.maxX) / 2; dz = f.pos.z - (s.minZ + s.maxZ) / 2; const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l; }
+    if (!this.planWaypoint(f, s, dx, dz, AUTOLAND.goAroundClear)) { return false; }
+    this.tries++; this.d0 = d + AUTOLAND.wpTurnRoom + AUTOLAND.wpDist; this.dbg = "go-around"; return true;
   }
 
   cancel(why: AutoLandEnd) {
@@ -130,8 +143,8 @@ export class AutoLand {
     if (f.hopping) { this.cancel("lost"); return; }
     if (this.t > AUTOLAND.maxTime) { this.cancel("timeout"); return; }
     const px = f.pos.x, pz = f.pos.z, feet = f.pos.y - P.feetOffset, d = this.dist(f, s), hs = Math.hypot(f.vel.x, f.vel.z);
-    if (!this.wp && d > this.d0 + AUTOLAND.loseMargin) { this.dbg = `far d=${d.toFixed(1)} d0=${this.d0.toFixed(1)}`; this.cancel("lost"); return; }
-    if (feet - s.top < (this.wp ? -1.5 : -0.6)) { this.dbg = `low ${(feet - s.top).toFixed(1)} d=${d.toFixed(1)}`; this.cancel("lost"); return; } // 面より低くなった(降りられない)
+    if (!this.wp && d > this.d0 + AUTOLAND.loseMargin) { if (this.goAround(f, s, d)) return; this.dbg = `far d=${d.toFixed(1)} d0=${this.d0.toFixed(1)}`; this.cancel("lost"); return; }
+    if (feet - s.top < (this.wp ? -1.5 : -0.6)) { if (!this.wp && this.goAround(f, s, d)) return; this.dbg = `low ${(feet - s.top).toFixed(1)} d=${d.toFixed(1)}`; this.cancel("lost"); return; } // 面より低くなった(降りられない)
     this.danger += dt;
     if (this.danger >= AUTOLAND.dangerEvery) { this.danger = 0; if (!this.wp && d > 2.5 && this.pathDanger(f, s)) { this.cancel("danger"); return; } }
 

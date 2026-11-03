@@ -112,14 +112,16 @@ function freeEdgeSpot(p: { x: number; y: number }) {
   for (const dy of [-60, -120]) if (!isUiAt(p.x, p.y + dy)) return { x: p.x, y: p.y + dy };
   return p;
 }
-const RING_HIT = { base: 48, extra: 72, perSpeed: 0.2, fresh: 110, freshSec: 0.6 }; // 出た直後(0.6秒)の◯は、速さがまだ測れず、画面を速く動くので、最初から広く(半径110 px)取る
+const RING_HIT = { base: 48, extra: 72, perSpeed: 0.2, fresh: 110, freshSec: 0.6, seenSec: 0.25 }; // 出た直後(0.6秒)の◯は、速さがまだ測れず、画面を速く動くので、最初から広く(半径110 px)取る
 let ringBorn = 0; // ◯の当たり判定の半径(px): 止まっているとき48、動いているほど広げる(速さ px/秒 × 0.2、最大 +72)
 const ring = { visible: false, x: 0, y: 0, hit: 48 }; let ringSpeed = 0, ringT = 0, edgeShown = false; const edgeP = { x: 0, y: 0 };
 const ringDiag = new RingDiag(), RINGLOG = /[?&]ringlog\b/.test(location.search) || (() => { try { return localStorage.getItem("ringlog") === "1"; } catch { return false; } })(); let ringLogN = 0;
 const proxLand = new ProxLand(perchAssist, autoLand);
 const autolandBar = document.getElementById("autoland")!;
 let tapMarker: Surface | null = null; // 押した瞬間の候補(押している間に候補が入れ替わる・期限切れになっても、押した足場を対象にする。開始の可否は start() があらためて検査する)
-input.ringHit = (x, y) => { const hit = ring.visible && !autoLand.active && Math.hypot(x - ring.x, y - ring.y) <= ring.hit; if (hit) tapMarker = perchAssist.marker; return hit; };
+/** 指が届くまでの遅れ(見てから触れるまでと、描画が遅いときの1コマ)のあいだに◯が動いた場合に備え、直近 RING_HIT.seenSec 秒に◯があった場所も「見えていた場所」として当たりにする(半径は基本の48 px のまま。無制限には広げない) */
+const ringTrail: { t: number; x: number; y: number }[] = [];
+input.ringHit = (x, y) => { const hit = ring.visible && !autoLand.active && (Math.hypot(x - ring.x, y - ring.y) <= ring.hit || ringTrail.some(q => Math.hypot(x - q.x, y - q.y) <= RING_HIT.base)); if (hit) tapMarker = perchAssist.marker; return hit; };
 input.onRingTap = () => {
   const m = tapMarker ?? perchAssist.marker; tapMarker = null; if (autopilot.enabled) return;
   if (!m) { autoLand.stats.refused++; autoLand.lastRefusal = "no candidate"; toast("着地できる場所が見つかりません"); return; } // 押したあとで候補が消えた: 無言にせず、拒否として数える
@@ -263,9 +265,11 @@ addEventListener("resize", () => { resize(); layoutPads(); }); addEventListener(
 const hud = document.getElementById("hud")!, msg = document.getElementById("msg")!;
 const brakeBtn = document.getElementById("brake")!; let brakeLabel = "減速";
 const stats = { npcMs: 0, fxMs: 0, updateMs: 0, renderMs: 0, lines: 0 };
+const STALL_MS = 100;
 let lastGT = 0, last = performance.now(), fpsT = 0, fpsN = 0, fps = 0, hudT = 0;
 const bp = new THREE.Vector3();
 function frame(now: number) {
+  if (now - last > STALL_MS) { input.stalls.push({ s: last, e: now }); if (input.stalls.length > 8) input.stalls.shift(); } // 画面が固まった(長いフレーム)区間を覚えておく。そのあいだに入ったタップは、押してから離すまでの時間が実際より長く測られるため
   const dt = Math.min(0.1, Math.max(0, (now - last) / 1000)); last = now;
   const running = game.state === "running";
   game.update(dt);
@@ -313,7 +317,7 @@ function frame(now: number) {
   { // 着地候補の目印(◯): 手動・空中のときだけ。候補が一瞬見えなくなっても数秒は保つ(PerchAssist.marker)。◯をタップすると自動着地
     const mk = perchAssist.marker, hasPt = !!mk && markerPt.on(perchAssist, flight);
     if (hasPt) markerV.set(markerPt.x, markerPt.top + 0.05, markerPt.z).project(camera);
-    const rv = ringVisible({ auto: autopilot.enabled, mode: flight.mode, hopping: flight.hopping, stun: flight.stun, hasMarker: hasPt, d: markerPt.d, maxD: PERCH.showRange * 1.6, sx: markerV.x, sy: markerV.y, sz: markerV.z, autoLand: autoLand.active });
+    const rv = ringVisible({ auto: autopilot.enabled, mode: flight.mode, hopping: flight.hopping, stun: flight.stun, hasMarker: hasPt, d: markerPt.d, maxD: PERCH.showRange * 1.6, sx: markerV.x, sy: markerV.y, sz: markerV.z, autoLand: autoLand.active }, ringDiag.reason === "edge");
     const show = rv.show, stale = !!mk && perchAssist.target !== mk && !autoLand.active; // 保持中だけで、いまの候補選別では選ばれていない(古い)目印は薄く表示。タップしても着地の開始は毎回あらためて検査する
     ringDiag.update(flight.clock, rv.reason, mk ? mk.kind : "", markerPt.d, perchAssist.markerAge(flight.clock), stale);
     if (RINGLOG && ringDiag.log.length !== ringLogN) { ringLogN = ringDiag.log.length; console.log("[ring]", JSON.stringify(ringDiag.log[ringDiag.log.length - 1]), JSON.stringify(perchAssist.pickWhy)); }
@@ -323,8 +327,9 @@ function frame(now: number) {
     if (show) { // ◯の画面位置と動く速さ。動いている◯は、見てから指が届くまでの間(約0.1〜0.2秒)に動くので、当たり判定を速さに応じて広げる(止まっていれば半径48 px のまま)
       const ep2 = edge ? edgeP : null, nx = ep2 ? ep2.x : (markerV.x * 0.5 + 0.5) * innerWidth, ny = ep2 ? ep2.y : (-markerV.y * 0.5 + 0.5) * innerHeight, dtr = Math.max(1e-3, now / 1000 - ringT);
       if (ring.visible && ringT > 0 && dtr < 0.25) ringSpeed += (Math.hypot(nx - ring.x, ny - ring.y) / dtr - ringSpeed) * 0.3; else ringSpeed = 0;
+      ringTrail.push({ t: now / 1000, x: nx, y: ny }); while (ringTrail.length > 3 && now / 1000 - ringTrail[0].t > RING_HIT.seenSec) ringTrail.shift();
       ring.x = nx; ring.y = ny; ringT = now / 1000; if (!ring.visible) ringBorn = now / 1000; ring.hit = Math.max(RING_HIT.base + Math.min(RING_HIT.extra, RING_HIT.perSpeed * ringSpeed), now / 1000 - ringBorn < RING_HIT.freshSec ? RING_HIT.fresh : 0);
-    } else { ringSpeed = 0; ringT = 0; ring.hit = RING_HIT.base; }
+    } else { ringSpeed = 0; ringT = 0; ring.hit = RING_HIT.base; ringTrail.length = 0; }
     ring.visible = show;
     if (show) {
       const k = 1 + 0.12 * Math.sin(now * 0.006), sz = Math.min(1.6, Math.max(0.8, Math.min(mk!.maxX - mk!.minX, mk!.maxZ - mk!.minZ) + 0.6));

@@ -14,6 +14,9 @@ export class Input {
   /** テスト用の計数: ◯タップになった回数 / 片手操作のタップ(=羽ばたき)になった回数 */
   stats = { ringTaps: 0, gestureTaps: 0 };
   /** 診断: ◯タップの判定の内訳(押した→離した→数えた)。取りこぼしの原因を、どの段階で落ちたかで見分ける */
+  /** 描画が固まった区間(main が記録)。タップの長さからは、この区間と重なる分を引く */
+  stalls: { s: number; e: number }[] = [];
+  tapMs(t0: number, t1: number) { let cut = 0; for (const q of this.stalls) cut += Math.max(0, Math.min(t1, q.e) - Math.max(t0, q.s)); return Math.max(0, t1 - t0 - Math.min(cut, 4000)); } // 引くのは最大4秒まで(それより長い押下は、固まっていても長押しとして扱う)
   ringDiag = { down: 0, downHit: 0, up: 0, upNoCand: 0, upSlow: 0, upFar: 0, upOk: 0, cancel: 0, moveDrop: 0, last: "" };
   /** 診断用: 押している最中の◯候補の数(テストの記録に使う) */
   ringCandCount() { return this.ringCand.size; }
@@ -44,8 +47,9 @@ export class Input {
     document.addEventListener("pointermove", e => { const c = this.ringCand.get(e.pointerId); if (c && Math.hypot(e.clientX - c.x, e.clientY - c.y) > RING_SLOP_PX) { this.ringCand.delete(e.pointerId); this.ringDiag.moveDrop++; } }, true);
     document.addEventListener("pointerup", e => {
       const c = this.ringCand.get(e.pointerId); this.ringCand.delete(e.pointerId); const D = this.ringDiag; D.up++;
-      if (!c) D.upNoCand++; else if (!(e.timeStamp - c.t < RING_TAP_MS)) { D.upSlow++; D.last += ` slow dt=${Math.round(e.timeStamp - c.t)}`; } else if (!(Math.hypot(e.clientX - c.x, e.clientY - c.y) <= RING_SLOP_PX)) { D.upFar++; D.last += ` far`; } else D.upOk++;
-      if (c && e.timeStamp - c.t < RING_TAP_MS && Math.hypot(e.clientX - c.x, e.clientY - c.y) <= RING_SLOP_PX) { // 押した時点で◯の当たり判定の中だったことは確かめ済み(◯は飛びながら動く・消えることがあるので、離した時点では確かめ直さない)
+      const dur = c ? this.tapMs(c.t, e.timeStamp) : 0, near = c ? Math.hypot(e.clientX - c.x, e.clientY - c.y) <= RING_SLOP_PX : false;
+      if (!c) D.upNoCand++; else if (!(dur < RING_TAP_MS)) { D.upSlow++; D.last += ` slow dt=${Math.round(e.timeStamp - c.t)} eff=${Math.round(dur)}`; } else if (!near) { D.upFar++; D.last += ` far`; } else D.upOk++;
+      if (c && dur < RING_TAP_MS && near) { // 押した時点で◯の当たり判定の中だったことは確かめ済み(◯は飛びながら動く・消えることがあるので、離した時点では確かめ直さない)。長さは、描画が固まっていた分を引いて測る
          this.ringFired.add(e.pointerId); this.stats.ringTaps++; this.onRingTap(); }
     }, true);
     document.addEventListener("pointercancel", e => { this.ringDiag.cancel++; this.ringCand.delete(e.pointerId); this.ringFired.delete(e.pointerId); }, true);

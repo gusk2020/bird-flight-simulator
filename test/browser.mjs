@@ -835,9 +835,10 @@ async function g12({ p, cdp, errs }) {
     let rs = null; for (let w = 0; w < 14 && !rs; w++) { const a1 = await p.evaluate(() => ({ x: __game.ring.x, y: __game.ring.y, v: __game.ring.visible })); await sleep(100); const a2 = await p.evaluate(() => ({ x: __game.ring.x, y: __game.ring.y, v: __game.ring.visible })); if (a1.v && a2.v && Math.hypot(a2.x - a1.x, a2.y - a1.y) <= 25) rs = a2; }
     if (!rs) { row.result = "unstable-ring"; rows.push(row); continue; }
     const b = await p.evaluate(() => ({ starts: __game.autoLand.stats.starts, refused: __game.autoLand.stats.refused, crashes: __game.flight.crashes, ok: __game.autoLand.stats.success }));
-    await realTap(Math.round(rs.x), Math.round(rs.y)); await sleep(200);
+    await p.evaluate(() => { window.__trk = []; const t0 = performance.now(); window.__trkI = setInterval(() => window.__trk.push([Math.round(performance.now() - t0), Math.round(__game.ring.x), Math.round(__game.ring.y), __game.ringDiag.reason]), 25); });
+    await realTap(Math.round(rs.x), Math.round(rs.y)); await sleep(200); const trk = await p.evaluate(() => { clearInterval(window.__trkI); return window.__trk; });
     let st = await p.evaluate(() => ({ starts: __game.autoLand.stats.starts, refused: __game.autoLand.stats.refused }));
-    if (st.starts === b.starts && st.refused === b.refused && (await p.evaluate(() => __game.ring.visible))) { row.retap = 1; const r2 = await p.evaluate(() => ({ x: __game.ring.x, y: __game.ring.y })); await realTap(Math.round(r2.x), Math.round(r2.y)); await sleep(200); } // タップが入らなかった: 1回だけ押し直し、回数を記録する
+    if (st.starts === b.starts && st.refused === b.refused && (await p.evaluate(() => __game.ring.visible))) { row.retap = 1; row.first = await p.evaluate(() => ({ rd: { ...__game.input.ringDiag }, pd: window.__pd.slice(-1), ort: window.__ort.slice(-1), taps: __game.input.stats.ringTaps, ringXY: [Math.round(__game.ring.x), Math.round(__game.ring.y), Math.round(__game.ring.hit)], auto: __game.autoLand.active })); { const q = row.first.pd[0]; if (q && Math.hypot(q.dx, q.dy) > q.hit) row.firstMoved = 1; else row.recogMiss = 1; } /* 押した時点で◯の当たりの中だったのに入らなかった = 本物の取りこぼし(許容しない)。外だった = 指が届く前に◯が動いた */ console.log('     FIRSTMISS', kind, k, JSON.stringify(row.first), 'tap@', rs.x, rs.y, 'TRK', JSON.stringify(trk.filter((_, i) => i % 1 === 0))); const r2 = await p.evaluate(() => ({ x: __game.ring.x, y: __game.ring.y })); await realTap(Math.round(r2.x), Math.round(r2.y)); await sleep(200); } // タップが入らなかった: 1回だけ押し直し、回数を記録する
     const a = await p.evaluate(() => ({ starts: __game.autoLand.stats.starts, refused: __game.autoLand.stats.refused, why: __game.autoLand.lastRefusal }));
     if (a.refused > b.refused) { row.result = "refused:" + a.why; rows.push(row); continue; }
     if (a.starts === b.starts) { row.result = "tap-not-recognised"; row.dbg = await p.evaluate(() => ({ ringTaps: __game.input.stats.ringTaps, tapMarker: !!window.__tm, refused: __game.autoLand.stats.refused, why: __game.autoLand.lastRefusal, active: __game.autoLand.active, ring: [Math.round(__game.ring.x), Math.round(__game.ring.y), __game.ring.visible], mk: !!__game.perchAssist.marker })); row.pd = await p.evaluate(() => window.__pd.slice(-2)); row.rh = await p.evaluate(() => window.__rh.slice(-3)); row.ort = await p.evaluate(() => window.__ort.slice(-3)); row.rd = await p.evaluate(() => ({ ...__game.input.ringDiag })); row.before = b; const last = row.pd.find(q => Math.abs(q.dx) + Math.abs(q.dy) > 0 && q.vis) || row.pd[0]; if (last && Math.hypot(last.dx, last.dy) > last.hit) row.result = "ring-moved-before-tap"; /* 指が届く前に◯が画面の別の場所へ移っていた(飛び去る足場)。認識の失敗ではないので別に数える */ rows.push(row); continue; }
@@ -865,18 +866,63 @@ async function g12({ p, cdp, errs }) {
   for (const r of rows) console.log("    ", JSON.stringify(r));
   console.log(`   SUMMARY real-tap landings: trials ${n} | no ring/no surface ${noRing} | ring too fast to tap (unstable) ${unstable} | ring moved away before the finger landed ${rows.filter(r => r.result === "ring-moved-before-tap").length} | tap not recognised although the finger landed on the ring ${notRec} | refused at start ${refused} | started ${started} | success ${succ.length} (held 1.5 s ${held.length}; on the landed surface: ${JSON.stringify(held.reduce((m, r) => (m[r.on] = (m[r.on] || 0) + 1, m), {}))}) | other ends ${JSON.stringify(ends)} | crashes ${crashes} | walk-class held ${walkable.length}, really walked ${walked.length} | re-taps ${rows.reduce((m, r) => m + (r.retap || 0), 0)} (tap not recognised the first time) | whole-trial retries 0`);
   check("the real-tap landing sample is big enough and the ring was available in most trials", n >= 14 && noRing <= Math.ceil(n * 0.25), `${noRing}/${n} without a ring`);
-  check("a tap that lands on a shown ring is recognised (at most 1 unexplained miss among the real taps is tolerated and reported; see the row detail: the press hit the ring, the release was seen, but the tap counter did not move - unresolved)", notRec <= 1, `${notRec}`);
+  const recogMiss = rows.filter(r => r.recogMiss).length + notRec, movedFirst = rows.filter(r => r.firstMoved).length;
+  console.log(`   first taps that missed because the ring had moved away before the finger landed (re-tapped once, reported, not a recognition fault): ${movedFirst}; real recognition misses (press inside the ring's hit area): ${recogMiss}`);
+  check("a tap whose press lands inside a shown ring's hit area is always recognised (no tolerance)", recogMiss === 0, `${recogMiss}`);
   check("of the started landings, at least 40% succeed and are still on the structure after 1.5 s with no touch (default wind on; the same approach distribution gives about 50-65% in the unit measurement)", started >= 8 && held.length / started >= 0.4, `${held.length}/${started} (success ${succ.length})`);
   check("collisions during started landings are not common (<= 25%)", crashes <= Math.ceil(started * 0.25), `${crashes}/${started}`);
   check("on walkable perches a real stick touch moves the bird at least 0.8 m while it stays landed (>= 80%)", walkable.length === 0 || walked.length / walkable.length >= 0.8, `${walked.length}/${walkable.length}`);
   check("G: no page errors", errs.length === 0, errs.join(" | "));
 }
 
+
+// ---- g13: ◯のタップ認識を決定的に確かめる(H6)。◯の位置と大きさを固定し、実タッチ(CDP)の入力列を何通りも流して、認識された回数が期待どおりかを見る。
+// 着地の可否(安全判定)はここでは見ない。見るのは「押した瞬間に◯の当たりの中なら必ず1回、外・長押し・動かしたときは0回」だけ。
+async function g13({ p, cdp, errs }) {
+  console.log("\n# ring tap recognition, deterministic input sequences (H6)");
+  const tp = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
+  await p.evaluate(() => { if (!document.getElementById("overlay").hidden) document.getElementById("ovGo").click(); }); await sleep(300);
+  { const r = await p.evaluate(() => { const I = __game.input, keep = I.stalls.slice(); I.stalls = [{ s: 100, e: 1000 }]; const o = { tapStalled: I.tapMs(50, 1010), none: I.tapMs(2000, 2060), cap: (I.stalls = [{ s: 0, e: 9000 }], I.tapMs(0, 8000)) }; I.stalls = keep; return o; });
+    check("a quick tap that the browser delivered across a frame stall is measured without the stall (960 ms on the clock, 60 ms of finger time)", r.tapStalled === 60 && r.none === 60, JSON.stringify(r));
+    check("a really long press stays long even when frames were stalled (the stall is only forgiven up to 4 s)", r.cap === 4000, JSON.stringify(r)); }
+  const results = [];
+  for (const vp of [[892, 412], [412, 892]]) {
+    await p.setViewportSize({ width: vp[0], height: vp[1] }); await sleep(500);
+    await p.evaluate(() => { const g = __game; g.setAuto(false); g.input.releaseAll(); window.__taps = 0; window.__ring = { x: 0, y: 0, hit: 48, on: true }; g.input.ringHit = (x, y) => window.__ring.on && Math.hypot(x - window.__ring.x, y - window.__ring.y) <= window.__ring.hit; g.input.onRingTap = () => { window.__taps++; }; });
+    const W = vp[0], H = vp[1];
+    // 位置: 中央・四隅(縁の◯が置かれる余白 36 px / 上は 72 px)・各辺の中央・操作の◎や上部ボタンの近く
+    const spots = [[W / 2, H / 2], [36, 72], [W - 36, 72], [36, H - 36], [W - 36, H - 36], [W / 2, 72], [W / 2, H - 36], [36, H / 2], [W - 36, H / 2], [W - 60, H - 90], [60, H - 90]].map(a => [Math.round(a[0]), Math.round(a[1])]);
+    const seqs = [
+      ["tap", 1, async (x, y) => { await tp("touchStart", [{ x, y, id: 1 }]); await sleep(60); await tp("touchEnd", []); }],
+      ["tap-jitter-8px", 1, async (x, y) => { await tp("touchStart", [{ x, y, id: 1 }]); await sleep(30); await tp("touchMove", [{ x: x + 8, y: y - 4, id: 1 }]); await sleep(30); await tp("touchEnd", []); }],
+      ["tap-edge-of-hit(44px)", 1, async (x, y, dir) => { await tp("touchStart", [{ x: x + 44 * dir, y, id: 1 }]); await sleep(60); await tp("touchEnd", []); }],
+      ["tap-then-second-finger-elsewhere", 1, async (x, y) => { await tp("touchStart", [{ x, y, id: 1 }]); await sleep(40); await tp("touchEnd", []); await tp("touchStart", [{ x: Math.abs(x - W / 2) < 150 ? W - 120 : W / 2, y: Math.abs(x - W / 2) < 150 ? 120 : H / 2, id: 2 }]); await sleep(40); await tp("touchEnd", []); }],
+      ["other-finger-down-first", 1, async (x, y) => { const ox = x < W / 2 ? Math.round(W * 0.7) : Math.round(W * 0.3), oy = y < H / 2 ? Math.round(H * 0.75) : Math.round(H * 0.25); await tp("touchStart", [{ x: ox, y: oy, id: 7 }]); await sleep(30); await tp("touchStart", [{ x: ox, y: oy, id: 7 }, { x, y, id: 1 }]); await sleep(60); await tp("touchEnd", [{ x: ox, y: oy, id: 7 }]); await sleep(30); await tp("touchEnd", []); }],
+      ["miss(80px away)", 0, async (x, y, dir) => { await tp("touchStart", [{ x: x + 80 * dir, y, id: 1 }]); await sleep(60); await tp("touchEnd", []); }],
+      ["long-press(6500ms)", 0, async (x, y) => { await tp("touchStart", [{ x, y, id: 1 }]); await sleep(6500); await tp("touchEnd", []); }],
+      ["drag(40px)", 0, async (x, y) => { await tp("touchStart", [{ x, y, id: 1 }]); await sleep(30); await tp("touchMove", [{ x: x + 40, y, id: 1 }]); await sleep(30); await tp("touchEnd", []); }],
+      ["cancelled", 0, async (x, y) => { await tp("touchStart", [{ x, y, id: 1 }]); await sleep(30); await tp("touchCancel", []); }],
+    ];
+    for (const [name, want, run] of seqs) {
+      let ok = 0; const bad = []; await p.evaluate(() => { if (!document.getElementById("overlay").hidden) document.getElementById("ovGo").click(); });
+      for (const [x, y] of name.startsWith("long-press") ? spots.slice(0, 3) : spots) {
+        if (await p.evaluate(([x, y]) => { const e = document.elementFromPoint(x, y); return !!(e && e.closest && e.closest("button,.btn,#overlay")); }, [x, y])) continue; // ボタンの上は◯を置かない場所(freeEdgeSpot が避ける)
+        await p.evaluate(([x, y]) => { window.__ring.x = x; window.__ring.y = y; window.__ring.hit = 48; window.__taps = 0; }, [x, y]);
+        await run(x, y, x < W / 2 ? 1 : -1);
+        await sleep(100);
+        const n = await p.evaluate(() => window.__taps); if (n === want) ok++; else bad.push(`${x},${y}->${n}`);
+      }
+      check(`${vp.join("x")} ${name}: ${want ? "recognised exactly once" : "never recognised"} at every spot not covered by a button (${ok} spots)`, ok >= 3 && bad.length === 0, bad.join(" "));
+    }
+  }
+  check("G13: no page errors", errs.length === 0, errs.join(" | "));
+}
+
 const GROUPS = [
-  ["g1", g1, false], ["g2", g2, true], ["g3", g3, true], ["g4", g4, true], ["g5", g5, false], ["g6", g6, true], ["g7", g7, true], ["g8", g8, true], ["g9", g9, true], ["g10", g10, true], ["g11", g11, true], ["g12", g12, true],
+  ["g1", g1, false], ["g2", g2, true], ["g3", g3, true], ["g4", g4, true], ["g5", g5, false], ["g6", g6, true], ["g7", g7, true], ["g8", g8, true], ["g9", g9, true], ["g10", g10, true], ["g11", g11, true], ["g12", g12, true], ["g13", g13, true],
 ];
 // CIの5分割(各シャードの所要時間がほぼ等しくなるように)
-const SHARD_PLAN = [["g1", "g3"], ["g2", "g5"], ["g4", "g8"], ["g6", "g9", "g11"], ["g7", "g10", "g12"]];
+const SHARD_PLAN = [["g1", "g3"], ["g2", "g5"], ["g4", "g8"], ["g6", "g9", "g11"], ["g7", "g10", "g12"], ["g13"]];
 
 let want = GROUPS.map(g => g[0]);
 const only = arg("--only"), shard = arg("--shard");

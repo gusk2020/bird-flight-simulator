@@ -4,7 +4,9 @@ export type RingReason = "shown" | "no-marker" | "autopilot" | "not-air" | "hopp
 export interface RingInput { auto: boolean; mode: string; hopping: boolean; stun: number; hasMarker: boolean; d: number; maxD: number; sx: number; sy: number; sz: number; autoLand: boolean }
 /** 画面の外へ出たとみなす範囲(正規化座標)。中心が画面の中にあるときだけ表示する(中心が画面の外では、押せない◯を出すことになる。縦画面の計測で実際に起きた) */
 export const RING_VIEW = { limit: 1.0 };
-export function ringVisible(c: RingInput): { show: boolean; reason: RingReason } {
+/** 画面内の◯と縁の◯の切り替えにヒステリシスを持たせる(縁の上で行き来して位置が何百px も飛ぶのを防ぐ)。縁にいる間は、画面の内側へ RING_VIEW.back 入るまで縁のまま */
+export const RING_HYST = { back: 0.12 };
+export function ringVisible(c: RingInput, wasEdge = false): { show: boolean; reason: RingReason } {
   if (c.auto) return { show: false, reason: "autopilot" };
   if (!c.hasMarker) return { show: false, reason: "no-marker" };
   if (c.mode !== "air") return { show: false, reason: "not-air" };
@@ -12,7 +14,8 @@ export function ringVisible(c: RingInput): { show: boolean; reason: RingReason }
   if (c.stun > 0) return { show: false, reason: "stunned" };
   if (!(c.d < c.maxD)) return { show: false, reason: "out-of-range" };
   // 画面の外・後ろにあるときは消さずに、画面の縁に小さな◯を出して方向を示す(押せば、その足場への着地を始める)。「すぐ消える」の主な原因だった
-  if (!(c.sz < 1) || !(Math.abs(c.sx) < RING_VIEW.limit && Math.abs(c.sy) < RING_VIEW.limit)) return { show: true, reason: "edge" };
+  const lim = wasEdge ? RING_VIEW.limit - RING_HYST.back : RING_VIEW.limit;
+  if (!(c.sz < 1) || !(Math.abs(c.sx) < lim && Math.abs(c.sy) < lim)) return { show: true, reason: "edge" };
   return { show: true, reason: c.autoLand ? "autoland-shown" : "shown" };
 }
 export interface RingEvent { t: number; reason: RingReason; kind: string; d: number; age: number; stale: boolean }

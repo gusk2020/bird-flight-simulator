@@ -17,9 +17,12 @@ export class Input {
   /** 診断: ◯タップの判定の内訳(押した→離した→数えた)。取りこぼしの原因を、どの段階で落ちたかで見分ける */
   /** 描画が固まった区間(main が記録)。タップの長さからは、この区間と重なる分を引く */
   stalls: { s: number; e: number }[] = [];
-  tapMs(t0: number, t1: number) { let cut = 0; for (const q of this.stalls) cut += Math.max(0, Math.min(t1, q.e) - Math.max(t0, q.s)); return Math.max(0, t1 - t0 - Math.min(cut, 4000)); } // 引くのは最大4秒まで(それより長い押下は、固まっていても長押しとして扱う)
+  /** 直前のフレームの開始時刻(main が設定)。いま進行中の長いフレームも「固まった区間」に数える(入力イベントは次のフレームの記録より前に届くため) */
+  frameAt = 0;
+  private pendingCut(t0: number, t1: number, minMs: number) { const now = performance.now(); return this.frameAt > 0 && now - this.frameAt >= minMs ? Math.max(0, Math.min(t1, now) - Math.max(t0, this.frameAt)) : 0; }
+  tapMs(t0: number, t1: number) { let cut = this.pendingCut(t0, t1, 100); for (const q of this.stalls) cut += Math.max(0, Math.min(t1, q.e) - Math.max(t0, q.s)); return Math.max(0, t1 - t0 - Math.min(cut, 4000)); } // 引くのは最大4秒まで(それより長い押下は、固まっていても長押しとして扱う)
   /** ブレーキ/止まっている判定用: 0.4秒以上の固まりだけを引く(ふつうに重い描画=毎フレーム0.2秒、は固まりとは見なさない) */
-  longStallMs(t0: number, t1: number) { let cut = 0; for (const q of this.stalls) if (q.e - q.s >= 400) cut += Math.max(0, Math.min(t1, q.e) - Math.max(t0, q.s)); return Math.max(0, t1 - t0 - Math.min(cut, 4000)); }
+  longStallMs(t0: number, t1: number) { let cut = this.pendingCut(t0, t1, 400); for (const q of this.stalls) if (q.e - q.s >= 400) cut += Math.max(0, Math.min(t1, q.e) - Math.max(t0, q.s)); return Math.max(0, t1 - t0 - Math.min(cut, 4000)); }
   ringDiag = { down: 0, downHit: 0, up: 0, upNoCand: 0, upSlow: 0, upFar: 0, upOk: 0, cancel: 0, moveDrop: 0, last: "" };
   /** 診断用: 押している最中の◯候補の数(テストの記録に使う) */
   ringCandCount() { return this.ringCand.size; }

@@ -281,6 +281,7 @@ const STALL_MS = 100;
 let lastGT = 0, last = performance.now(), fpsT = 0, fpsN = 0, fps = 0, hudT = 0;
 const bp = new THREE.Vector3();
 function frame(now: number) {
+  input.frameAt = now;
   if (now - last > STALL_MS) { input.stalls.push({ s: last, e: now }); if (input.stalls.length > 8) input.stalls.shift(); } // 画面が固まった(長いフレーム)区間を覚えておく。そのあいだに入ったタップは、押してから離すまでの時間が実際より長く測られるため
   const dt = Math.min(0.1, Math.max(0, (now - last) / 1000)); last = now;
   const running = game.state === "running";

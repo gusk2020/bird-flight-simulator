@@ -2,6 +2,7 @@ import type { FlightInput } from "./flight";
 import { GESTURE, OneHandGesture } from "./gesture";
 import { ProxPad, padLayout, inProxRegion, type PadLayout } from "./proxpad";
 import type { ControlMode } from "./settings";
+import { SteerPad, type SteerMode } from "./steer";
 
 /** 片手操作のスティックのなめらかさ(秒) */
 export const SMOOTH_S = 0.1;
@@ -17,6 +18,8 @@ export class Input {
   /** 描画が固まった区間(main が記録)。タップの長さからは、この区間と重なる分を引く */
   stalls: { s: number; e: number }[] = [];
   tapMs(t0: number, t1: number) { let cut = 0; for (const q of this.stalls) cut += Math.max(0, Math.min(t1, q.e) - Math.max(t0, q.s)); return Math.max(0, t1 - t0 - Math.min(cut, 4000)); } // 引くのは最大4秒まで(それより長い押下は、固まっていても長押しとして扱う)
+  /** ブレーキ/止まっている判定用: 0.4秒以上の固まりだけを引く(ふつうに重い描画=毎フレーム0.2秒、は固まりとは見なさない) */
+  longStallMs(t0: number, t1: number) { let cut = 0; for (const q of this.stalls) if (q.e - q.s >= 400) cut += Math.max(0, Math.min(t1, q.e) - Math.max(t0, q.s)); return Math.max(0, t1 - t0 - Math.min(cut, 4000)); }
   ringDiag = { down: 0, downHit: 0, up: 0, upNoCand: 0, upSlow: 0, upFar: 0, upOk: 0, cancel: 0, moveDrop: 0, last: "" };
   /** 診断用: 押している最中の◯候補の数(テストの記録に使う) */
   ringCandCount() { return this.ringCand.size; }
@@ -24,17 +27,26 @@ export class Input {
   readonly prox = new ProxPad(); proxVisual = { x: 0, y: 0, on: false };
   /** 触れ始めの進行方向(世界のyaw)。main が設定する */
   getHeading: () => number = () => 0;
+  /** H8-A: 機首の向き(世界の yaw)。単一◎の基準。横風で進行方向と機首がずれても、指の向きは機首から見た左右にする */
+  getYaw: () => number = () => 0;
   /** 近接◎の配置(片手操作のとき)。画面の大きさと左右から決まる */
   layout(): PadLayout | null { return this.mode === "both" ? null : padLayout(innerWidth, innerHeight, this.mode); }
+  private steerTapSeq = 0;
   private ringCand = new Map<number, { x: number; y: number; t: number }>(); private ringFired = new Set<number>();
   private out: FlightInput = { x: 0, y: 0, flapHeld: false, flapTap: false, brake: false };
   mode: ControlMode = "both"; readonly gesture = new OneHandGesture();
+  /** H8-A: 単一◎の操縦方式(off=従来)。片手操作のときだけ使う。入力の読み取り(steer)と、その結果の操舵(main の SteerLayer)は別 */
+  steerMode: SteerMode = "off"; readonly steer = new SteerPad();
+  get steerOn() { return this.mode !== "both" && this.steerMode !== "off"; }
+  /** 単一◎の位置と大きさ(片手操作の半面の下寄り) */
+  steerRect() { const L = padLayout(innerWidth, innerHeight, this.mode === "left" ? "left" : "right"); return { cx: L.prox.cx, cy: L.prox.cy, r: L.prox.r * 1.1 }; }
   private stickId = -1; private ox = 0; private oy = 0; private R = 60;
   private keys = new Set<string>();
   private base = document.getElementById("stickBase")!; private knob = document.getElementById("stickKnob")!;
 
   constructor() {
     const zone = document.getElementById("stick")!;
+    this.steer.stall = (a, b) => this.longStallMs(a, b); this.steer.tapStall = (a, b) => this.tapMs(a, b);
     // ◯のタップ(G1-5): スティックや羽ばたきタップより先(キャプチャ段階)に見る。◯の上で押して、ほとんど動かさず短く離したときだけ「◯タップ」。
     // 動かせばスティック、長く押せば減速/歩行として今までどおり扱う。◯タップになった指は、羽ばたきタップにも歩行にもしない
     const RING_TAP_MS = 300, RING_SLOP_PX = 14;
@@ -54,6 +66,10 @@ export class Input {
     }, true);
     document.addEventListener("pointercancel", e => { this.ringDiag.cancel++; this.ringCand.delete(e.pointerId); this.ringFired.delete(e.pointerId); }, true);
     zone.addEventListener("pointerdown", e => {
+      if (this.steerOn) { // H8-A: 単一◎。どの方式でも、触れた指を SteerPad へ渡す(◯タップになった指は、離したとき羽ばたきにしない)
+        if (this.steer.down(e.pointerId, e.clientX, e.clientY, e.timeStamp, this.steerRect(), this.getYaw(), performance.now())) { try { zone.setPointerCapture(e.pointerId); } catch { /* 合成イベントなど */ } this.proxVisual.on = true; this.proxVisual.x = e.clientX; this.proxVisual.y = e.clientY; }
+        return;
+      }
       if (this.mode !== "both") {
         const L = this.layout()!;
         if (inProxRegion(L, e.clientX, e.clientY)) { // 近接◎: 中心を基準に、触れた向きと距離で方向を決める。◯のタップ候補なら、タップかどうか決まるまで(約0.3秒)指示を出さない
@@ -78,12 +94,17 @@ export class Input {
       this.ox = e.clientX; this.oy = e.clientY; this.move(e.clientX, e.clientY); this.showStick(true);
     });
     zone.addEventListener("pointermove", e => {
+      if (e.pointerId === this.steer.id) { this.steer.move(e.pointerId, e.clientX, e.clientY, e.timeStamp, performance.now()); this.proxVisual.x = e.clientX; this.proxVisual.y = e.clientY; return; }
       if (e.pointerId === this.prox.id) { this.prox.move(e.clientX, e.clientY); this.proxVisual.x = e.clientX; this.proxVisual.y = e.clientY; return; }
       if (this.mode !== "both") { if (e.pointerId === this.gesture.id) { this.gesture.move(e.pointerId, e.clientX, e.clientY); this.syncKnob(); } return; }
       if (e.pointerId === this.stickId) this.move(e.clientX, e.clientY);
     });
     // 描画が重くても、タップ/長押しは指が触れた実際の時刻(e.timeStamp)で判定する
     const end = (e: PointerEvent) => {
+      if (e.pointerId === this.steer.id) { // H8-A: 単一◎から指を離した。◯タップになった指は、タップ(羽ばたき)にも進路の確定にもしない
+        if (this.ringFired.delete(e.pointerId) || e.type !== "pointerup") this.steer.cancel(); else this.steer.up(e.pointerId, e.timeStamp);
+        this.proxVisual.on = false; return;
+      }
       if (e.pointerId === this.prox.id) { // 近接◎から指を離した(◯タップになった指も含む): 近接の指示をやめる
         this.ringFired.delete(e.pointerId); this.prox.up(); this.proxVisual.on = false; return;
       }
@@ -136,14 +157,19 @@ export class Input {
   setMode(m: ControlMode) { if (m === this.mode) return; this.releaseAll(); this.mode = m; this.gesture.clearTaps(); }
   private syncKnob() { const g = this.gesture; this.knob.style.left = this.ox + g.x * this.R + "px"; this.knob.style.top = this.oy - g.y * this.R + "px"; }
   private endStick() { this.stickId = -1; this.state.x = this.state.y = 0; this.showStick(false); }
+  /** 操縦方式の切替(ゲーム中いつでも)。途中の指・押下・タイマーを残さない */
+  setSteer(m: SteerMode) { if (m === this.steerMode) return; this.releaseAll(); this.steerMode = m; this.steer.mode = m === "off" ? "A" : m; this.gesture.clearTaps(); }
   releaseAll() {
-    this.prox.up(); this.proxVisual.on = false; this.endStick(); this.gesture.cancel(); this.gesture.clearTaps(); this.releasers.forEach(r => r()); this.keys.clear();
+    this.steer.cancel(); this.prox.up(); this.proxVisual.on = false; this.endStick(); this.gesture.cancel(); this.gesture.clearTaps(); this.releasers.forEach(r => r()); this.keys.clear();
     this.state.flapHeld = this.state.flapTap = this.state.brake = false;
   }
   /** 毎物理ステップ前に呼ぶ: キーボード分を合成した入力を返す */
   read(): FlightInput {
     const k = this.keys, s = this.state;
-    if (this.mode !== "both") { // 片手: ジェスチャの結果を状態へ反映(長押し判定もここで進める)
+    if (this.steerOn) { // H8-A: 単一◎。ブレーキとタップだけここで反映し、進路は main の SteerLayer が作る(飛行の状態が要るため)
+      this.steer.poll(performance.now()); s.brake = this.steer.brake; s.x = s.y = 0;
+      while (this.steerTapSeq < this.steer.tapSeq) { this.steerTapSeq++; s.flapTap = true; this.stats.gestureTaps++; }
+    } else if (this.mode !== "both") { // 片手: ジェスチャの結果を状態へ反映(長押し判定もここで進める)
       const g = this.gesture; g.poll(performance.now()); s.brake = g.brake; if (g.consumeTap()) { s.flapTap = true; this.stats.gestureTaps++; }
       // 指の動きを約0.1秒でなめらかにして渡す(急な旋回・昇降を防ぐ)。指を離したら、その場で中立へ戻す
       if (g.active) { const k = 1 - Math.exp(-(1 / 60) / SMOOTH_S); s.x += (g.x - s.x) * k; s.y += (g.y - s.y) * k; }
@@ -152,7 +178,7 @@ export class Input {
     const kx = (k.has("ArrowRight") || k.has("KeyD") ? 1 : 0) - (k.has("ArrowLeft") || k.has("KeyA") ? 1 : 0);
     const ky = (k.has("ArrowUp") || k.has("KeyW") ? 1 : 0) - (k.has("ArrowDown") || k.has("KeyS") ? 1 : 0);
     this.prox.tick(1 / 60);
-    const o = this.out; o.prox = this.mode === "both" ? null : this.prox.cmd(); o.x = s.x || kx; o.y = s.y || ky; o.flapHeld = s.flapHeld; o.flapTap = s.flapTap; o.brake = s.brake || k.has("ShiftLeft");
+    const o = this.out; o.prox = this.mode === "both" || this.steerOn ? null : this.prox.cmd(); o.x = s.x || kx; o.y = s.y || ky; o.flapHeld = s.flapHeld; o.flapTap = s.flapTap; o.brake = s.brake || k.has("ShiftLeft");
     return o; // 物理ステップごとに新しいオブジェクトを作らない(呼び出し側は読むだけ)
   }
 }

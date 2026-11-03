@@ -918,11 +918,81 @@ async function g13({ p, cdp, errs }) {
   check("G13: no page errors", errs.length === 0, errs.join(" | "));
 }
 
+
+// ---- g14: H8-A 単一◎の 3 方式を実タッチで確かめる。方式の切替(再読込なし・保存)、旋回/上下/斜め/無操作、タップ、長押し、地上、マルチタッチ、低FPS、縦横・左右
+async function g14({ p, cdp, errs }) {
+  console.log("\n# H8-A single-◎ steering, real touches");
+  const tp = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
+  await p.evaluate(() => { if (!document.getElementById("overlay").hidden) document.getElementById("ovGo").click(); }); await sleep(300);
+  const setCtl = async (m) => { for (let i = 0; i < 4 && (await p.evaluate(() => document.body.dataset.ctl)) !== m; i++) { await p.evaluate(() => document.getElementById("btnCtl").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }))); await sleep(200); } };
+  const setSteer = async (m) => { for (let i = 0; i < 5 && (await p.evaluate(() => __game.input.steerMode)) !== m; i++) { await p.evaluate(() => document.getElementById("btnSteer").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }))); await sleep(150); } };
+  const fresh = () => p.evaluate(() => { const g = __game, f = g.flight; g.setAuto(false); g.input.releaseAll(); g.steerLayer.reset(); f.reset(); g.settings.weather = "clear"; f.pos.set(0, 90, 0); f.prevPos.copy(f.pos); f.yaw = 0; f.vel.set(0, 0, -10); f.mode = "air"; g.cam.snap(); return true; });
+  const pad = () => p.evaluate(() => __game.input.steerRect());
+  const st = () => p.evaluate(() => { const f = __game.flight; return { yaw: f.yaw, y: f.pos.y, v: f.speed, mode: f.mode, strokes: f.strokes, brake: __game.input.steer.brake, active: __game.input.steer.active, taps: __game.input.steer.tapSeq, id: __game.input.steer.id }; });
+  const wrap = a => Math.atan2(Math.sin(a), Math.cos(a));
+  const gs = async (sec) => { const t0 = await p.evaluate(() => __game.flight.clock); await p.waitForFunction(([t0, sec]) => __game.flight.clock - t0 >= sec, [t0, sec], { timeout: 60000 }); }; // ゲーム内の秒数で待つ(この環境の描画は遅く、実時間とゲーム時間がずれるため)
+  for (const [vw, vh, hand] of [[892, 412, "right"], [892, 412, "left"], [412, 892, "right"]]) {
+    await p.setViewportSize({ width: vw, height: vh }); await sleep(500); await setCtl(hand);
+    const tag = `${vw}x${vh} ${hand}`;
+    for (const m of ["A", "B", "C"]) {
+      await setSteer(m); const ok = await p.evaluate(m => document.body.dataset.steer === m && __game.input.steerMode === m && document.getElementById("steerTag").textContent.length > 0, m);
+      const saved = await p.evaluate(() => { try { return JSON.parse(localStorage.getItem("vindving.prefs.v1")).steer; } catch { return null; } });
+      check(`${tag} ${m}: switching is immediate (no reload), shown on screen and saved`, ok && saved === m, `saved ${saved}`);
+      const R = await pad(), P = (dx, dy) => ({ x: Math.round(R.cx + dx * R.r), y: Math.round(R.cy + dy * R.r), id: 1 });
+      // 右へ(スワイプ→離す / 動かす): 右へ旋回
+      await fresh(); await gs(0.2); const y0 = (await st()).yaw;
+      await tp("touchStart", [P(0, 0)]); for (let i = 1; i <= 5; i++) { await tp("touchMove", [P(0.18 * i, 0)]); await sleep(20); }
+      if (m !== "A") await gs(1.3); await tp("touchEnd", []); await gs(m === "A" ? 2.2 : 0.8);
+      const s1 = await st(); check(`${tag} ${m}: finger right turns the bird right (yaw ${wrap(s1.yaw - y0).toFixed(2)})`, wrap(s1.yaw - y0) < -0.25 && s1.mode === "air");
+      // 上
+      await fresh(); await gs(0.2); const a0 = (await st()).y;
+      await tp("touchStart", [P(0, 0)]); for (let i = 1; i <= 5; i++) { await tp("touchMove", [P(0, -0.18 * i)]); await sleep(20); }
+      if (m !== "A") await gs(1.3); await tp("touchEnd", []); await gs(m === "A" ? 2.2 : 0.6);
+      const s2 = await st(); const idleY = await (async () => { await fresh(); await gs(3.5); return (await st()).y; })();
+      check(`${tag} ${m}: finger up climbs relative to hands-off (${s2.y.toFixed(1)} vs ${idleY.toFixed(1)})`, s2.y > idleY + 0.8, `start ${a0.toFixed(1)}`);
+      // 無操作: 直進
+      await fresh(); await gs(3); const s3 = await st(); check(`${tag} ${m}: hands-off flies straight (yaw ${s3.yaw.toFixed(3)})`, Math.abs(wrap(s3.yaw)) < 0.05 && s3.mode === "air");
+      // タップ = 羽ばたき(スティックにも進路変更にもならない)
+      await fresh(); await sleep(150); const k0 = (await st()); await tp("touchStart", [P(0, 0)]); await sleep(60); await tp("touchEnd", []); await sleep(700);
+      const s4 = await st(); check(`${tag} ${m}: a short tap flaps and does not steer or brake`, s4.taps === k0.taps + 1 && s4.strokes > k0.strokes && Math.abs(wrap(s4.yaw - k0.yaw)) < 0.05 && !s4.brake, `taps ${k0.taps}->${s4.taps} strokes ${k0.strokes}->${s4.strokes} dyaw ${wrap(s4.yaw - k0.yaw).toFixed(3)} brake ${s4.brake}`);
+      // 長押し: A/B は動かさず押し続けてブレーキ、C は中心で。周辺の長押しは C ではブレーキしない
+      await fresh(); await sleep(150); await tp("touchStart", [P(0, 0)]); await sleep(1400); const s5 = await st(); await tp("touchEnd", []); await sleep(200);
+      check(`${tag} ${m}: a press on the centre brakes`, s5.brake, `brake ${s5.brake}`);
+      if (m === "C") { await fresh(); await sleep(150); await tp("touchStart", [P(0.85, 0)]); await sleep(1600); const s6 = await st(); await tp("touchEnd", []); await sleep(200); check(`${tag} C: holding the rim does not brake`, !s6.brake && s6.active); }
+      // マルチタッチ: 2 本目は無視。最初の指を離すと終了
+      await fresh(); await sleep(150); await tp("touchStart", [P(0, 0)]); await sleep(60); await tp("touchStart", [P(0, 0), { x: Math.round(R.cx - R.r * 2), y: Math.round(R.cy), id: 2 }]); await sleep(150);
+      const mt = await st(); await tp("touchEnd", [P(0, 0), { x: Math.round(R.cx - R.r * 2), y: Math.round(R.cy), id: 2 }]); await sleep(300); const mt2 = await st();
+      check(`${tag} ${m}: a second finger is ignored (same pad finger), and lifting both ends it`, mt.active && !mt2.active, `during ${mt.active} after ${mt2.active}`);
+    }
+    // 途中で方式を切り替えても、指の途中状態が残らない
+    await setSteer("B"); await fresh(); const R = await pad(); await tp("touchStart", [{ x: Math.round(R.cx), y: Math.round(R.cy), id: 1 }]); await sleep(500);
+    await setSteer("C"); const sw = await st(); await tp("touchEnd", []); await sleep(200);
+    check(`${tag}: switching the mode with a finger down clears the pad (no stuck brake or finger)`, !sw.active && !sw.brake);
+    await setSteer("off"); const off = await p.evaluate(() => ({ s: document.body.dataset.steer, on: __game.input.steerOn, tag: document.getElementById("steerTag").textContent }));
+    check(`${tag}: 従来 restores the old controls`, off.s === "off" && !off.on && off.tag === "");
+  }
+  // 低 FPS: CPU を絞っても、短いタップは取りこぼさず長押しにもならない
+  await p.setViewportSize({ width: 892, height: 412 }); await sleep(400); await setCtl("right"); await setSteer("B"); await cdp.send("Emulation.setCPUThrottlingRate", { rate: 6 });
+  { let hit = 0; const R = await pad(); for (let i = 0; i < 6; i++) { await fresh(); await sleep(200); const k0 = await st(); await tp("touchStart", [{ x: Math.round(R.cx), y: Math.round(R.cy), id: 1 }]); await sleep(60); await tp("touchEnd", []); await sleep(500); const k1 = await st(); if (k1.taps === k0.taps + 1 && !k1.brake) hit++; }
+    check(`low FPS (CPU x6): short taps are all recognised, none becomes a brake (${hit}/6)`, hit === 6); }
+  await cdp.send("Emulation.setCPUThrottlingRate", { rate: 1 });
+  // 記録(比較用): 同じ開始位置から、各方式で同じ指の動きをしたときの旋回角速度・カメラ角速度・速さ
+  const rec = {};
+  { const R = await pad(); for (const m of ["A", "B", "C"]) { await setSteer(m); await p.evaluate(() => __game.steerTestStart()); await p.evaluate(() => { __game.steerLayer.resetStats(); }); await sleep(300);
+      const P = (dx, dy) => ({ x: Math.round(R.cx + dx * R.r), y: Math.round(R.cy + dy * R.r), id: 1 });
+      await tp("touchStart", [P(0, 0)]); for (let i = 1; i <= 5; i++) { await tp("touchMove", [P(0.18 * i, -0.05 * i)]); await sleep(20); } if (m !== "A") await sleep(1000); await tp("touchEnd", []); await sleep(2200);
+      rec[m] = await p.evaluate(() => { const L = __game.steerLayer; return { maxYawRate: +L.stats.maxYawRate.toFixed(2), maxCamRate: +L.stats.maxCamRate.toFixed(2), speedJumps: L.stats.speedJumps, taps: L.stats.taps, brakeFrames: L.stats.brakeFrames, speed: +__game.flight.speed.toFixed(1), yaw: +__game.flight.yaw.toFixed(2) }; }); }
+    console.log("   COMPARE (same start, same finger path)", JSON.stringify(rec));
+    check("comparison log: no mode produced a warp or an instant stop, and none turned faster than the physics limit", Object.values(rec).every(r => r.speedJumps === 0 && r.maxYawRate < 2.2)); }
+  await setSteer("off"); await setCtl("both");
+  check("H8: no page errors", errs.length === 0, errs.join(" | "));
+}
+
 const GROUPS = [
-  ["g1", g1, false], ["g2", g2, true], ["g3", g3, true], ["g4", g4, true], ["g5", g5, false], ["g6", g6, true], ["g7", g7, true], ["g8", g8, true], ["g9", g9, true], ["g10", g10, true], ["g11", g11, true], ["g12", g12, true], ["g13", g13, true],
+  ["g1", g1, false], ["g2", g2, true], ["g3", g3, true], ["g4", g4, true], ["g5", g5, false], ["g6", g6, true], ["g7", g7, true], ["g8", g8, true], ["g9", g9, true], ["g10", g10, true], ["g11", g11, true], ["g12", g12, true], ["g13", g13, true], ["g14", g14, true],
 ];
 // CIの5分割(各シャードの所要時間がほぼ等しくなるように)
-const SHARD_PLAN = [["g1", "g3"], ["g2", "g5"], ["g4", "g8"], ["g6", "g9", "g11"], ["g7", "g10", "g12"], ["g13"]];
+const SHARD_PLAN = [["g1", "g3"], ["g2", "g5"], ["g4", "g8"], ["g6", "g9", "g11"], ["g7", "g10", "g12"], ["g13"], ["g14"]];
 
 let want = GROUPS.map(g => g[0]);
 const only = arg("--only"), shard = arg("--shard");

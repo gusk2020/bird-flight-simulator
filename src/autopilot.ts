@@ -10,11 +10,11 @@ import type { AutoPolicy } from "./settings";
 export type PilotState = "cruise" | "approach" | "rest" | "walk" | "takeoff";
 type Kind = "ground" | "roof" | "wire";
 interface Target { x: number; y: number; z: number; kind: Kind; wire: number; dirx: number; dirz: number; box: number; tries: number }
-interface Weights { alt: [number, number]; leg: [number, number]; landP: number; rest: [number, number]; walkP: number; walk: [number, number]; spots: [number, number] } // spots: 地面の確率, 屋根の確率(残りは電線)
+interface Weights { alt: [number, number]; leg: [number, number]; landP: number; rest: [number, number]; walkP: number; walk: [number, number]; spots: [number, number]; waterP: number; sitP: number } // spots: 地面の確率, 屋根の確率(残りは電線)
 export const WEIGHTS: Record<Exclude<AutoPolicy, "random">, Weights> = {
-  life:      { alt: [14, 26], leg: [50, 110],  landP: 0.85, rest: [8, 22], walkP: 0.8, walk: [8, 20], spots: [0.6, 0.2] },   // 自然生活: 着地・歩行・休憩が多い
-  scenic:    { alt: [35, 65], leg: [110, 200], landP: 0.12, rest: [3, 7],  walkP: 0.2, walk: [3, 6],  spots: [0.1, 0.7] },   // 景色観賞: 高く長く飛ぶ
-  adventure: { alt: [9, 22],  leg: [40, 90],   landP: 0.55, rest: [3, 9],  walkP: 0.4, walk: [4, 10], spots: [0.2, 0.35] },  // 冒険探索: 低く、屋根・電線を巡る
+  life:      { alt: [14, 26], leg: [50, 110],  landP: 0.85, rest: [8, 22], walkP: 0.8, walk: [8, 20], spots: [0.6, 0.2], waterP: 0.6, sitP: 0.6 },   // 自然生活: 着地・歩行・休憩が多い
+  scenic:    { alt: [35, 65], leg: [110, 200], landP: 0.12, rest: [3, 7],  walkP: 0.2, walk: [3, 6],  spots: [0.1, 0.7], waterP: 0.1, sitP: 0.1 },   // 景色観賞: 高く長く飛ぶ
+  adventure: { alt: [9, 22],  leg: [40, 90],   landP: 0.55, rest: [3, 9],  walkP: 0.4, walk: [4, 10], spots: [0.2, 0.35], waterP: 0.3, sitP: 0.25 },  // 冒険探索: 低く、屋根・電線を巡る
 };
 const SUB: Exclude<AutoPolicy, "random">[] = ["life", "scenic", "adventure"];
 const RESCUE_AFTER = 14; // 3秒ごとの見張りで14回(約42秒)連続で動けないときだけ最終手段
@@ -26,6 +26,8 @@ function rng(seed: number) { let a = seed >>> 0; return () => { a = (a + 0x6d2b7
 export class Autopilot {
   /** 自動ついばみの最中(止まって頭を下げている)。固着と見なさない */
   busy = false;
+  /** H4: いちばん近い水辺(水たまり・池)の縁の点と距離。main が渡す。なければ水飲みには行かない */
+  water: ((x: number, z: number) => { x: number; z: number; d: number } | null) | null = null; waterRange = 45; private toWater = false; stats2 = { drinks: 0, sits: 0 };
   /** 季節による行動の偏り(1=変化なし)。控えめ。setSeasonBias で更新 */
   bias = { forage: 1, roof: 1, ground: 1, water: 1 };
   setSeasonBias(b: { forage: number; roof: number; ground: number; water: number }) { this.bias = { ...b }; }
@@ -238,16 +240,26 @@ export class Autopilot {
     if (f.mode === "rollout") { o.brake = true; return; }
     if (f.mode === "landed" || f.mode === "perch") {
       // 休憩中はときどきゆっくり向きを変える
-      if (Math.sin(this.stateT * 0.9) > 0.97) o.x = 0.4;
+      if (this.stateT < 0.1 && f.mode === "landed" && !f.sitting && this.r() < this.w().sitP) { f.sitting = true; this.stats2.sits++; }
+      if (!f.sitting && Math.sin(this.stateT * 0.9) > 0.97) o.x = 0.4;
       if (this.stateT > this.restFor) {
-        if (f.mode === "landed" && this.r() < this.w().walkP) { this.enter("walk"); this.walkFor = this.between(this.w().walk); this.walkYaw = f.yaw + (this.r() - 0.5) * 3; this.stats.walks++; this.blocked = 0; }
+        const wp = f.mode === "landed" && this.water ? this.water(f.pos.x, f.pos.z) : null;
+        if (wp && wp.d > 1.2 && wp.d < this.waterRange && this.r() < this.w().waterP * this.bias.water) { // 水を飲み・浴びに行く
+          this.enter("walk"); this.toWater = true; this.walkFor = wp.d / 1.6 + 4; this.walkYaw = Math.atan2(-(wp.x - f.pos.x), -(wp.z - f.pos.z)); this.stats.walks++; this.blocked = 0; f.sitting = false;
+        } else if (f.mode === "landed" && this.r() < this.w().walkP) { this.enter("walk"); this.walkFor = this.between(this.w().walk); this.walkYaw = f.yaw + (this.r() - 0.5) * 3; this.stats.walks++; this.blocked = 0; }
         else { this.enter("takeoff"); this.takeoffT = 0; this.hopped = false; }
       }
     }
   }
   private walkStep(f: Flight, o: FlightInput, dt: number) {
     if (f.mode !== "landed") { if (f.mode === "air") { this.enter("cruise"); this.newWaypoint(f); } else this.enter("rest"); return; }
-    if (this.stateT > this.walkFor) { this.enter("rest"); this.restFor = 1 + this.r() * 4; if (this.r() < 0.5) { this.enter("takeoff"); this.takeoffT = 0; this.hopped = false; } return; }
+    if (this.toWater) { // 水辺へ向かっている: 向きを水へ合わせ続け、着いたら座って長く休む(飲む・浴びるは生活動作が受け持つ)
+      const wp = this.water ? this.water(f.pos.x, f.pos.z) : null;
+      if (!wp) this.toWater = false;
+      else if (wp.d < 0.9) { this.toWater = false; this.enter("rest"); this.restFor = 14 + this.r() * 10; f.sitting = true; this.stats2.drinks++; return; }
+      else this.walkYaw = Math.atan2(-(wp.x - f.pos.x), -(wp.z - f.pos.z));
+    }
+    if (this.stateT > this.walkFor) { this.toWater = false; this.enter("rest"); this.restFor = 1 + this.r() * 4; if (this.r() < 0.5) { this.enter("takeoff"); this.takeoffT = 0; this.hopped = false; } return; }
     // 向きを保って前進。壁・段差で止まったら向きを変えるか、低い段なら小ジャンプ
     const e = wrap(this.walkYaw - f.yaw); o.x = -clamp(e * 2, -1, 1); o.brake = Math.abs(e) < 0.5;
     if (this.busy) return; // ついばみ中は止まっていて正常

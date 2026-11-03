@@ -674,7 +674,48 @@ async function g9({ p, cdp, errs }) {
   await tp("touchStart", [{ x: 120, y: 250, id: 71 }]); await tp("touchMove", [{ x: 120, y: 190, id: 71 }]); await sleep(300);
   const now = await p.evaluate(() => ({ act: __game.life.act, sit: __game.flight.sitting })); await tp("touchEnd", []);
   check("a stick input cancels any life action at once and stands the bird up", was !== "none" && now.act === "none" && !now.sit, JSON.stringify({ was, now }));
+  const cost = await p.evaluate(() => { const g = __game, r = g.renderer, cam = g.camera; const calls = () => { r.info.reset(); r.render(g.scene, cam); return r.info.render.calls; }; g.puddles.wet = 0; g.puddleView.update(0, 0); calls(); const dry = calls(); g.puddles.wet = 1; g.puddleView.update(0, 1); calls(); const wet = calls(); g.puddles.wet = 0; g.puddleView.update(0, 0); return { dry, wet }; });
+  check("puddles add little drawing work (extra draw calls at full rain <= 50)", cost.wet - cost.dry <= 50, JSON.stringify(cost));
   check("H3: no page errors", errs.length === 0, errs.join(" | "));
+}
+
+// ---- g10: 道路の色のちらつき(H4)。同じ場面を、カメラを数mm動かして何度も描き、画素が揺れる割合を測る(深度の衝突=z-fighting があると、動かすたびに勝つ面が入れ替わる)
+async function g10({ p, errs }) {
+  console.log("\n# road colour flicker (H4)");
+  const measure = (dist, high, tz = 0) => p.evaluate(([dist, high, tz]) => {
+    const g = __game, L = g.world, r1 = L.roads[3], r2 = L.roads[4] + tz, cam = g.camera, ren = g.renderer;
+    const W = 320, Hh = 200; ren.setSize(W, Hh, false); cam.aspect = W / Hh; cam.updateProjectionMatrix();
+    const grab = (dx, dy) => { cam.position.set(r1 + dx, high + dy, r2 + dist); cam.lookAt(r1, 0, r2); cam.updateMatrixWorld(); ren.render(g.scene, cam); const c = document.createElement("canvas"); c.width = W; c.height = Hh; const x = c.getContext("2d"); x.drawImage(ren.domElement, 0, 0); return x.getImageData(0, 0, W, Hh).data; };
+    grab(0, 0); grab(0, 0); const base = grab(0, 0); let diff = 0, tot = 0, worst = 0;
+    for (const [dx, dy] of [[0.003, 0], [-0.003, 0.002], [0, 0.004], [0.006, -0.003], [-0.005, 0.005], [0.002, 0.002]]) {
+      const im = grab(dx, dy); let d = 0, n = 0;
+      for (let y = 60; y < 150; y++) for (let x = 60; x < 260; x++) { const i = (y * W + x) * 4, a = base[i] * 0.3 + base[i + 1] * 0.59 + base[i + 2] * 0.11, b = im[i] * 0.3 + im[i + 1] * 0.59 + im[i + 2] * 0.11; n++; if (Math.abs(a - b) > 14) d++; }
+      diff += d; tot += n; worst = Math.max(worst, d / n);
+    }
+    return { frac: diff / tot, worst };
+  }, [dist, high, tz]);
+  await measure(40, 12); // 初回は読み込み・準備で不安定なので捨てる
+  // 道路の中心線を遠くから見下ろす。道路の真ん中の細い帯に「緑(草)」が漏れて見える画素の割合を、距離と位置を変えながら数える(道路は灰色、草は緑。深度の衝突があると草が道路に点々と出る)
+  const leak = (dists, high) => p.evaluate(([dists, high]) => {
+    const g = __game, L = g.world, r1 = L.roads[3], cam = g.camera, ren = g.renderer, W = 240, Hh = 240; ren.setSize(W, Hh, false); cam.aspect = 1; cam.updateProjectionMatrix();
+    const out = {};
+    for (const d of dists) { let green = 0, tot = 0;
+      for (let k = 0; k < 24; k++) { const z0 = L.roads[2] + 6 + k * 1.37, x = r1 + Math.sin(k) * 0.9;
+        cam.position.set(x, high, z0 + d); cam.lookAt(x, 0, z0); cam.updateMatrixWorld(); ren.render(g.scene, cam);
+        const c = document.createElement("canvas"); c.width = W; c.height = Hh; const cx = c.getContext("2d"); cx.drawImage(ren.domElement, 0, 0); const im = cx.getImageData(0, 0, W, Hh).data;
+        for (let y = Math.floor(Hh * 0.46); y < Hh * 0.56; y++) for (let xx = W / 2 - 1; xx <= W / 2 + 1; xx++) { const q = (y * W + Math.floor(xx)) * 4; tot++; if (im[q + 1] > im[q] + 12 && im[q + 1] > im[q + 2] + 6) green++; } }
+      out[d] = +(green / tot).toFixed(4); }
+    return out;
+  }, [dists, high]);
+  const lk = await leak([60, 150, 300, 500], 30);
+  // 基準: 草の面を3m下げた同じ場面。残る緑は「道路が画素に収まらない・隣の区画」など幾何学的なもの。深度の衝突があれば、通常の値は基準より多くなる
+  await p.evaluate(() => { const g = __game.world.group.children.find(m => m.geometry && m.geometry.type === "PlaneGeometry" && m.geometry.parameters.width === 3000); window.__grassY = g.position.y; g.position.y = -3; });
+  const ref = await leak([60, 150, 300, 500], 30);
+  await p.evaluate(() => { const g = __game.world.group.children.find(m => m.geometry && m.geometry.type === "PlaneGeometry" && m.geometry.parameters.width === 3000); g.position.y = window.__grassY; });
+  console.log("   grass-green pixels in the road centre line (normal):", JSON.stringify(lk), " reference with the grass 3 m lower:", JSON.stringify(ref));
+  const extra = Object.keys(lk).map(d => +(lk[d] - ref[d]).toFixed(4));
+  check("grass does not show through the road because of depth fighting at 60-500 m (extra green vs the 3 m-lower reference < 2 points; before the fix it was 7-38 points)", extra.every(v => v < 0.02), JSON.stringify(extra));
+  check("H4 flicker: no page errors", errs.length === 0, errs.join(" | "));
 }
 
 // ---- g11: 着地候補◯(H2)。表示の保持(5秒)、実際に描かれていること、画面サイズ・操作モード別の実タッチ、開始/拒否/ユーザー取消の分離
@@ -832,10 +873,10 @@ async function g12({ p, cdp, errs }) {
 }
 
 const GROUPS = [
-  ["g1", g1, false], ["g2", g2, true], ["g3", g3, true], ["g4", g4, true], ["g5", g5, false], ["g6", g6, true], ["g7", g7, true], ["g8", g8, true], ["g9", g9, true], ["g11", g11, true], ["g12", g12, true],
+  ["g1", g1, false], ["g2", g2, true], ["g3", g3, true], ["g4", g4, true], ["g5", g5, false], ["g6", g6, true], ["g7", g7, true], ["g8", g8, true], ["g9", g9, true], ["g10", g10, true], ["g11", g11, true], ["g12", g12, true],
 ];
 // CIの5分割(各シャードの所要時間がほぼ等しくなるように)
-const SHARD_PLAN = [["g1", "g3"], ["g2", "g5"], ["g4", "g8"], ["g6", "g9", "g11"], ["g7", "g12"]];
+const SHARD_PLAN = [["g1", "g3"], ["g2", "g5"], ["g4", "g8"], ["g6", "g9", "g11"], ["g7", "g10", "g12"]];
 
 let want = GROUPS.map(g => g[0]);
 const only = arg("--only"), shard = arg("--shard");

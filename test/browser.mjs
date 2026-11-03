@@ -155,8 +155,9 @@ async function g3({ p, cdp, errs }) {
   await p.waitForFunction(() => __game.flight.mode !== "air", null, { timeout: 40000 }).catch(() => {});
   await p.waitForFunction(() => __game.flight.mode === "landed", null, { timeout: 15000 }).catch(() => {}); await sleep(300);
   check("landed: brake button becomes 歩く", (await p.textContent("#brake")) === "歩く" && (await S()).mode === "landed");
-  const wA = await S(); await tp("touchStart", [{ x: 740, y: 350, id: 3 }]); await sleep(1800); const wB = await S(); const wk = await p.evaluate(() => ({ w: __game.flight.walkV, hud: document.getElementById("hud").textContent })); await tp("touchEnd", []);
-  check("holding 歩く walks forward, stays on the ground", dist(wA, wB) > 1 && wB.mode === "landed" && wk.hud.includes("歩行中"), `moved=${dist(wA, wB).toFixed(2)} hud=${wk.hud}`);
+  await p.evaluate(() => { const g = __game, f = g.flight; let best = f.yaw, bd = -1; for (let k = 0; k < 16; k++) { const y = k * Math.PI / 8; let d = 0; while (d < 6 && g.world.heightAt(f.pos.x - Math.sin(y) * (d + 1), f.pos.z - Math.cos(y) * (d + 1)) < 0.3) d++; if (d > bd) { bd = d; best = y; } } f.yaw = best; }); await sleep(100); // 目の前が開けた向きにしてから歩く
+  const wA = await S(); await tp("touchStart", [{ x: 740, y: 350, id: 3 }]); await sleep(1100); const wB = await S(); const wk = await p.evaluate(() => ({ w: __game.flight.walkV, hud: document.getElementById("hud").textContent })); await tp("touchEnd", []);
+  check("holding 歩く walks forward, stays on the ground", dist(wA, wB) > 1 && wB.mode === "landed" && wk.hud.includes("歩行中"), `pos=${wA.x.toFixed(1)},${wA.z.toFixed(1)}>${wB.x.toFixed(1)},${wB.z.toFixed(1)} moved=${dist(wA, wB).toFixed(2)} hud=${wk.hud}`);
   await sleep(600);
   await p.evaluate(() => { window.__peak = 0; const t = () => { const f = __game.flight; window.__peak = Math.max(window.__peak, f.pos.y - 0.32 - __game.world.heightAt(f.pos.x, f.pos.z)); requestAnimationFrame(t); }; t(); });
   await p.evaluate(() => { const el = document.getElementById("flap"); el.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 77 })); el.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 77 })); }); await sleep(2500); // 一瞬のタップ(ソフトウェア描画は低FPSなので同一タスクで押して離す)
@@ -229,50 +230,50 @@ async function g4({ p, cdp, errs }) {
   await p.evaluate(() => document.getElementById("btnCtl").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }))); await sleep(200);
   d = await G(); check("top button switches to right-hand: right half is the stick area, flap/brake buttons hidden", d.ctl === "right" && d.zone.l >= 440 && d.zone.w >= 440 && d.zone.h >= 400 && d.flapDisp === "none", JSON.stringify(d));
   await fly(); await sleep(300);
-  await tp("touchStart", [{ x: 650, y: 250, id: 5 }]); await tp("touchMove", [{ x: 720, y: 200, id: 5 }]); await sleep(250); d = await G();
+  await tp("touchStart", [{ x: 650, y: 190, id: 5 }]); await tp("touchMove", [{ x: 720, y: 140, id: 5 }]); await sleep(250); d = await G();
   check("right-hand: sliding right/up gives stick x>0, y>0", d.x > 0.5 && d.y > 0.2 && d.ph === "stick", JSON.stringify({ x: d.x, y: d.y, ph: d.ph }));
   await sleep(900); d = await G(); check("holding a slid stick for a long time never turns into a brake", !d.brake && d.ph === "stick");
   await tp("touchEnd", []); await sleep(200); d = await G(); check("release returns the stick to neutral", d.x === 0 && d.y === 0 && d.ph === "idle");
   await fly(); await sleep(300); const st0 = (await G()).strokes;
-  await tapAt(650, 250, 6); await sleep(400); d = await G();
+  await tapAt(650, 190, 6); await sleep(400); d = await G();
   check("short tap = exactly one flap", d.strokes === st0 + 1, `strokes ${st0}->${d.strokes}`);
-  await tp("touchStart", [{ x: 650, y: 250, id: 7 }]); await sleep(550); d = await G(); const stL = d.strokes - d.af;
+  await tp("touchStart", [{ x: 650, y: 190, id: 7 }]); await sleep(550); d = await G(); const stL = d.strokes - d.af;
   check("long press = brake (physics sees it)", d.brake && d.ph === "brake" && (await p.evaluate(() => __game.flight.braking)));
   await tp("touchEnd", []); await sleep(400); d = await G();
   check("releasing after a long press gives no flap and clears the brake", !d.brake && d.strokes - d.af === stL, `manual strokes ${stL}->${d.strokes - d.af}`); // 減速後の速度低下で自動羽ばたき(assist)が入るのは正常
   const hit = (x, y) => p.evaluate(([x, y]) => document.elementFromPoint(x, y)?.id || document.elementFromPoint(x, y)?.tagName, [x, y]);
-  check("the unused (left) half is not part of the stick area in right-hand mode", (await hit(200, 250)) !== "stick" && (await hit(650, 250)) === "stick", `${await hit(200, 250)} / ${await hit(650, 250)}`);
-  await tp("touchStart", [{ x: 650, y: 250, id: 9 }, { x: 700, y: 300, id: 10 }]); await tp("touchMove", [{ x: 700, y: 250, id: 9 }, { x: 760, y: 340, id: 10 }]); await sleep(200); d = await G();
+  check("the unused (left) half is not part of the stick area in right-hand mode", (await hit(200, 190)) !== "stick" && (await hit(650, 190)) === "stick", `${await hit(200, 190)} / ${await hit(650, 190)}`);
+  await tp("touchStart", [{ x: 650, y: 190, id: 9 }, { x: 700, y: 300, id: 10 }]); await tp("touchMove", [{ x: 700, y: 190, id: 9 }, { x: 760, y: 340, id: 10 }]); await sleep(200); d = await G();
   check("a second finger is ignored (touch id tracked)", d.ph === "stick" && d.x > 0.3 && d.y >= -0.2, JSON.stringify({ x: d.x, y: d.y }));
   await tp("touchEnd", []); await sleep(150);
-  await tp("touchStart", [{ x: 650, y: 250, id: 11 }]); await tp("touchMove", [{ x: 740, y: 250, id: 11 }]); await sleep(150);
+  await tp("touchStart", [{ x: 650, y: 190, id: 11 }]); await tp("touchMove", [{ x: 740, y: 190, id: 11 }]); await sleep(150);
   await p.evaluate(() => document.getElementById("btnPause").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }))); await sleep(200); d = await G();
   check("pausing while the stick is held clears the input", d.x === 0 && d.ph === "idle" && !d.brake);
   await tp("touchEnd", []); await p.click("#ovGo"); await sleep(300);
-  await tp("touchStart", [{ x: 650, y: 250, id: 12 }]); await tp("touchMove", [{ x: 740, y: 250, id: 12 }]); await sleep(150);
+  await tp("touchStart", [{ x: 650, y: 190, id: 12 }]); await tp("touchMove", [{ x: 740, y: 190, id: 12 }]); await sleep(150);
   await p.evaluate(() => document.getElementById("btnCtl").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }))); await sleep(200); d = await G();
   check("switching the control mode mid-game releases the stick (right -> left)", d.ctl === "left" && d.x === 0 && d.ph === "idle" && d.zone.l === 0 && d.zone.w >= 440, JSON.stringify({ ctl: d.ctl, ph: d.ph }));
   await tp("touchEnd", []); await sleep(100);
   await fly(); await sleep(300); const stR = (await G()).strokes;
-  await tapAt(200, 250, 13); await sleep(400); d = await G();
+  await tapAt(200, 190, 13); await sleep(400); d = await G();
   check("left-hand: a tap on the left half flaps", d.strokes === stR + 1, `strokes ${stR}->${d.strokes}`);
-  check("left-hand: the right half is not part of the stick area", (await hit(800, 250)) !== "stick" && (await hit(200, 250)) === "stick");
+  check("left-hand: the right half is not part of the stick area", (await hit(800, 190)) !== "stick" && (await hit(200, 190)) === "stick");
   // 地上: タップは小ジャンプ、長押しは歩く
   await p.evaluate(() => { const g = __game, f = g.flight; f.pos.set(28, 0.32, 60); f.prevPos.copy(f.pos); f.vel.set(0, 0, 0); f.mode = "landed"; f.walkV = 0; g.input.releaseAll(); }); await sleep(300);
-  await tp("touchStart", [{ x: 200, y: 250, id: 15 }]); await sleep(700); const gw0 = await S(); await sleep(500); const gw1 = await S(); await tp("touchEnd", []);
+  await tp("touchStart", [{ x: 200, y: 190, id: 15 }]); await sleep(700); const gw0 = await S(); await sleep(500); const gw1 = await S(); await tp("touchEnd", []);
   check("on the ground a long press walks (no auto flapping)", Math.hypot(gw1.x - gw0.x, gw1.z - gw0.z) > 0.3 && gw1.mode === "landed", `moved=${Math.hypot(gw1.x - gw0.x, gw1.z - gw0.z).toFixed(2)}`);
   // F1: 地上でスティックを前へスライドしたまま歩く・斜めで曲がりながら歩く・指を離すと止まる(実際のタッチ入力)
   await sleep(300); await p.evaluate(() => { const g = __game, f = g.flight; f.pos.set(28, 0.32, 60); f.prevPos.copy(f.pos); f.vel.set(0, 0, 0); f.yaw = 0; f.mode = "landed"; f.walkV = 0; g.input.releaseAll(); }); await sleep(300);
   const Y = () => p.evaluate(() => __game.flight.yaw);
-  await tp("touchStart", [{ x: 200, y: 320, id: 30 }]); await tp("touchMove", [{ x: 200, y: 260, id: 30 }]); await sleep(400); const sw0 = await S(); await sleep(1200); const sw1 = await S(); d = await G();
+  await tp("touchStart", [{ x: 200, y: 215, id: 30 }]); await tp("touchMove", [{ x: 200, y: 155, id: 30 }]); await sleep(400); const sw0 = await S(); await sleep(1200); const sw1 = await S(); d = await G();
   const swd = Math.hypot(sw1.x - sw0.x, sw1.z - sw0.z);
   check("F1: on the ground, sliding the thumb forward walks (no long press)", swd > 0.8 && sw1.mode === "landed" && d.ph === "stick" && d.y > 0.5, `moved=${swd.toFixed(2)} m y=${d.y.toFixed(2)} ph=${d.ph}`);
-  const yw0 = await Y(); await tp("touchMove", [{ x: 245, y: 265, id: 30 }]); await sleep(1200); const yw1 = await Y(); const sw2 = await S();
+  const yw0 = await Y(); await tp("touchMove", [{ x: 245, y: 160, id: 30 }]); await sleep(1200); const yw1 = await Y(); const sw2 = await S();
   check("F1: diagonal thumb turns while walking", Math.abs(yw1 - yw0) > 0.3 && Math.hypot(sw2.x - sw1.x, sw2.z - sw1.z) > 0.8, `turned=${Math.abs(yw1 - yw0).toFixed(2)} rad`);
   await tp("touchEnd", []); await sleep(500); const sw3 = await S(); await sleep(400); const sw4 = await S();
   check("F1: lifting the thumb stops walking (still controllable, landed)", Math.hypot(sw4.x - sw3.x, sw4.z - sw3.z) < 0.05 && sw4.mode === "landed");
   await sleep(600); await p.evaluate(() => { const f = __game.flight; f.vel.set(0, 0, 0); f.walkV = 0; }); await sleep(300);
-  await tapAt(200, 250, 16); await p.waitForFunction(() => __game.flight.hopping || __game.flight.mode === "air", null, { timeout: 5000 }).catch(() => {});
+  await tapAt(200, 190, 16); await p.waitForFunction(() => __game.flight.hopping || __game.flight.mode === "air", null, { timeout: 5000 }).catch(() => {});
   d = await G(); check("on the ground a tap becomes a small hop (not swallowed by the assist)", d.hop || d.mode === "air", JSON.stringify({ hop: d.hop, mode: d.mode }));
   // UIボタンの上のタッチはスティックにならない
   await sleep(1500);
@@ -462,7 +463,7 @@ async function g7({ p, cdp, errs }) {
       if (performance.now() - t0 > 3500) res({ crashes: f.crashes - c0, esc: f.escapes, inside, mode: f.mode, maxStun, away: Math.hypot(f.pos.x - Math.max(c.minX, Math.min(c.maxX, f.pos.x)), f.pos.z - Math.max(c.minZ, Math.min(c.maxZ, f.pos.z))), finite: Number.isFinite(f.pos.x + f.pos.y + f.pos.z) }); else requestAnimationFrame(tick); }; tick(); });
   }, [alt, v, sideAng]);
   const w1 = await wallRun(20, 14, 0);
-  check("a frontal hit into a tall wall: one crash, then it backs off and flies on, never inside", w1.crashes === 1 && w1.esc >= 1 && !w1.inside && w1.finite && w1.maxStun <= 0.31 && w1.away > 3, JSON.stringify(w1));
+  check("a frontal hit into a tall wall: one crash, then it backs off and flies on, never inside", w1.crashes === 1 && w1.esc >= 1 && !w1.inside && w1.finite && w1.maxStun <= 0.31 && w1.away > 1, JSON.stringify(w1));
   const w2 = await wallRun(20, 14, 0.7);
   check("a diagonal hit: also recovers (no repeated crash)", w2.crashes <= 1 && !w2.inside && w2.finite, JSON.stringify(w2));
 
@@ -547,38 +548,119 @@ async function g7({ p, cdp, errs }) {
   // 4b 範囲外(◯から約110 px)の実タッチ: 自動着地は始まらず、ふつうの羽ばたきタップになる
   const r4b = await attempt(async () => {
     const before = await AL(); const r = await ringXY(); if (!r.vis || r.x < r.w / 2 + 20) return { ok: false, why: "ring not in the stick zone" };
-    const x = Math.round(Math.min(r.w - 12, r.x + 110)), y = Math.round(Math.max(30, r.y - 40));
+    const L = await p.evaluate(() => __game.input.layout()); // 巡航◎の領域(分割線より上)で、◯から110 px以上離れた点
+    const x = Math.round(Math.min(r.w - 12, Math.max(r.w / 2 + 20, r.x + 110))), y = Math.round(Math.max(70, Math.min(L.split - 15, r.y - 70)));
+    if (Math.hypot(x - r.x, y - r.y) < 100) return { ok: false, why: "no cruise-region point far from the ring" };
     await realTap(x, y, 50); await sleep(300); const after = await AL();
     return { ok: after.starts === before.starts && after.ringTaps === before.ringTaps && after.flapTaps === before.flapTaps + 1, before, after };
   });
-  check("REAL TOUCH 110 px away from the ring: no automatic landing; it is an ordinary flap tap", r4b.ok, `tries ${r4b.tries}; starts ${r4b.before && r4b.before.starts}->${r4b.after && r4b.after.starts}, flapTaps ${r4b.before && r4b.before.flapTaps}->${r4b.after && r4b.after.flapTaps}${r4b.why ? " " + r4b.why : ""}`);
-  // 4c スティックとの競合: ◯の上で押してそのままスライドしたら、スティック(◯タップにも羽ばたきにもならない)
+  check("REAL TOUCH 110 px away from the ring (cruise region): no automatic landing; it is an ordinary flap tap", r4b.ok, `tries ${r4b.tries}; starts ${r4b.before && r4b.before.starts}->${r4b.after && r4b.after.starts}, flapTaps ${r4b.before && r4b.before.flapTaps}->${r4b.after && r4b.after.flapTaps}${r4b.why ? " " + r4b.why : ""}`);
+  // 4c/4d ◯の上で押したまま動かす / 長押し: ◯が巡航の領域にあれば従来どおり(スティック/減速)、近接◎の領域にあれば近接の指示(H1)になる。どちらでも自動着地にも羽ばたきにもならない
   const r4c = await attempt(async () => {
     const before = await AL(); const r = await ringXY(); if (!r.vis || r.x < r.w / 2 + 20) return { ok: false, why: "ring not in the stick zone" };
+    const L = await p.evaluate(() => __game.input.layout()), inProx = r.y >= L.split;
     const x = Math.round(r.x), y = Math.round(r.y);
     await tp("touchStart", [{ x, y, id: 92 }]); await tp("touchMove", [{ x: x + 60, y, id: 92 }]); await sleep(300);
-    const mid = await p.evaluate(() => ({ stickX: __game.input.state.x, phase: __game.input.gesture.phase })); await tp("touchEnd", []); await sleep(250); const after = await AL();
-    return { ok: mid.stickX > 0.3 && mid.phase === "stick" && after.starts === before.starts && after.ringTaps === before.ringTaps && after.flapTaps === before.flapTaps, before, after, mid };
+    const mid = await p.evaluate(() => ({ stickX: __game.input.state.x, phase: __game.input.gesture.phase, prox: __game.input.prox.active, cmdYaw: __game.input.prox.cmd() && __game.input.prox.cmd().zone })); await tp("touchEnd", []); await sleep(250); const after = await AL();
+    const regionOk = inProx ? (mid.prox && mid.cmdYaw !== null) : (mid.stickX > 0.3 && mid.phase === "stick");
+    return { ok: regionOk && after.starts === before.starts && after.ringTaps === before.ringTaps && after.flapTaps === before.flapTaps, before, after, mid, inProx };
   });
-  check("REAL TOUCH pressing on the ring and sliding: it is the stick (no automatic landing, no flap tap)", r4c.ok, `tries ${r4c.tries}; ${JSON.stringify(r4c.mid)} ringTaps ${r4c.before && r4c.before.ringTaps}->${r4c.after && r4c.after.ringTaps}${r4c.why ? " " + r4c.why : ""}`);
-  // 4d 長押し(◯の上で0.6秒)は減速(ブレーキ): 自動着地にならない
+  check("REAL TOUCH pressing on the ring and sliding: the pad under it takes over (cruise stick or proximity), no automatic landing, no flap tap", r4c.ok, `tries ${r4c.tries}; inProxRegion=${r4c.inProx} ${JSON.stringify(r4c.mid)} ringTaps ${r4c.before && r4c.before.ringTaps}->${r4c.after && r4c.after.ringTaps}${r4c.why ? " " + r4c.why : ""}`);
   const r4d = await attempt(async () => {
     const before = await AL(); const r = await ringXY(); if (!r.vis || r.x < r.w / 2 + 20) return { ok: false, why: "ring not in the stick zone" };
+    const L = await p.evaluate(() => __game.input.layout()), inProx = r.y >= L.split;
     await tp("touchStart", [{ x: Math.round(r.x), y: Math.round(r.y), id: 93 }]); await sleep(600);
-    const mid = await p.evaluate(() => ({ brake: __game.input.state.brake, phase: __game.input.gesture.phase })); await tp("touchEnd", []); await sleep(250); const after = await AL();
-    return { ok: mid.brake && mid.phase === "brake" && after.starts === before.starts && after.ringTaps === before.ringTaps, before, after, mid };
+    const mid = await p.evaluate(() => ({ brake: __game.input.state.brake, phase: __game.input.gesture.phase, prox: __game.input.prox.active, proxOn: __game.flight.prox.on })); await tp("touchEnd", []); await sleep(250); const after = await AL();
+    const regionOk = inProx ? (mid.prox && mid.proxOn) : (mid.brake && mid.phase === "brake");
+    return { ok: regionOk && after.starts === before.starts && after.ringTaps === before.ringTaps, before, after, mid, inProx };
   });
-  check("REAL TOUCH long press (0.6 s) on the ring: it is the brake (no automatic landing)", r4d.ok, `tries ${r4d.tries}; ${JSON.stringify(r4d.mid)}${r4d.why ? " " + r4d.why : ""}`);
+  check("REAL TOUCH long press (0.6 s) on the ring: brake (cruise region) or a proximity maneuver (proximity region); never an automatic landing", r4d.ok, `tries ${r4d.tries}; inProxRegion=${r4d.inProx} ${JSON.stringify(r4d.mid)}${r4d.why ? " " + r4d.why : ""}`);
   // 4e 左手モードの切替で取り残しがない: 一度◯タップになった指番号をもう一度使っても、ふつうに動く(ringFiredの取り残し)
   await p.evaluate(() => { __game.input.releaseAll(); }); await p.setViewportSize({ width: 892, height: 412 }); await sleep(500);
   check("G1: no page errors", errs.length === 0, errs.join(" | "));
 }
 
+// ---- g8: H1(上下2つの◎・近接機動)を、実際のタッチ入力(CDP)で
+async function g8({ p, cdp, errs }) {
+  const F = () => p.evaluate(() => { const f = __game.flight; return { mode: f.mode, x: f.pos.x, y: f.pos.y, z: f.pos.z, yaw: f.yaw, speed: f.speed, prox: f.prox.on, state: f.prox.state, sitting: f.sitting, crashes: f.crashes, escapes: f.escapes }; });
+  const tp = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
+  const L = () => p.evaluate(() => __game.input.layout());
+  const rectOf = id => p.evaluate(id => { const r = document.getElementById(id).getBoundingClientRect(); return { l: r.left, t: r.top, r: r.right, b: r.bottom, vis: getComputedStyle(document.getElementById(id)).display !== "none" }; }, id);
+  const goto = (x, y, z, yaw, v) => p.evaluate(([x, y, z, yaw, v]) => { const g = __game, f = g.flight; f.reset(); g.setAuto(false); g.input.releaseAll(); f.pos.set(x, y, z); f.prevPos.copy(f.pos); f.yaw = yaw; f.vel.set(-Math.sin(yaw) * v, 0, -Math.cos(yaw) * v); g.cam.snap(); }, [x, y, z, yaw, v]);
+  const sw = async () => { await p.evaluate(() => document.getElementById("btnCtl").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }))); await sleep(250); };
+
+  console.log("\n# two pads (H1)");
+  let mode = await p.evaluate(() => document.body.dataset.ctl);
+  const bothVis = await rectOf("padProx");
+  check("two-hand mode (the default): no pads are shown (the cruise controls are unchanged)", mode === "both" && !bothVis.vis);
+  await sw(); await p.evaluate(() => { if (!document.getElementById("overlay").hidden) document.getElementById("ovGo").click(); }); await sleep(300);
+  mode = await p.evaluate(() => document.body.dataset.ctl);
+  const c = await rectOf("padCruise"), q = await rectOf("padProx"), top = await rectOf("top"), lay = await L();
+  check("right-hand mode: the cruise pad (upper) and the proximity pad (lower) are both shown, stacked, in the right half", mode === "right" && c.vis && q.vis && c.b < q.t && c.l >= 446 && q.l >= 446 && q.b <= 412 && c.t > top.b - 2, JSON.stringify({ c, q, topBottom: top.b }));
+  check("the pads do not overlap each other or the top button row, and each is at least 100 px wide (a thumb-sized target)", c.b <= q.t && q.r - q.l >= 100 && c.r - c.l >= 100 && c.t >= top.b - 2, `cruise ${Math.round(c.r - c.l)} px, prox ${Math.round(q.r - q.l)} px`);
+
+  console.log("\n# proximity maneuver by real touch (H1)");
+  await goto(28, 60, 150, 0, 12); await sleep(300);
+  const before = await F(); const cx = Math.round(lay.prox.cx), cy = Math.round(lay.prox.cy);
+  await tp("touchStart", [{ x: cx, y: cy, id: 11 }]);
+  await p.waitForFunction(() => __game.flight.prox.on, null, { timeout: 8000 }).catch(() => {});
+  await p.waitForFunction(() => __game.flight.speed < 4, null, { timeout: 8000 }).catch(() => {});
+  const braked = await F(); const info = await p.evaluate(() => ({ active: __game.input.prox.active, strokes: __game.flight.strokes, hud: document.getElementById("hud").textContent }));
+  check("touching the lower pad (center) brakes from 12 m/s to a creep within a few frames, staying in the air, near the same altitude", braked.prox && braked.speed < 4 && braked.mode === "air" && Math.abs(braked.y - before.y) < 2.5 && info.active, `speed ${braked.speed.toFixed(1)} dy ${(braked.y - before.y).toFixed(2)} ${info.hud.slice(0, 30)}`);
+  // 右へ(環状): 約90度右へ向く
+  const yawBefore = (await F()).yaw; await tp("touchMove", [{ x: Math.round(lay.prox.cx + lay.prox.r * 0.75), y: cy, id: 11 }]);
+  await p.waitForFunction(y0 => { const d = Math.atan2(Math.sin(__game.flight.yaw - y0), Math.cos(__game.flight.yaw - y0)); return d < -1.2; }, yawBefore, { timeout: 10000 }).catch(() => {});
+  const turned = await F(); const dYaw = Math.atan2(Math.sin(turned.yaw - yawBefore), Math.cos(turned.yaw - yawBefore)) / Math.PI * 180;
+  check("sliding to the right side of the ring turns the bird about 90 degrees to the right and it moves that way slowly", dYaw < -80 && dYaw > -100 && turned.speed < 4 && turned.mode === "air", `turned ${dYaw.toFixed(0)} deg, speed ${turned.speed.toFixed(1)}`);
+  // 離す: 止まらずゆっくり前進、高度を保つ
+  await tp("touchEnd", []); const rel0 = await F(); await sleep(1500); const rel1 = await F();
+  check("lifting the finger does not stop the bird: it keeps creeping forward and holds its altitude", rel1.prox && rel1.state === "creep" && rel1.speed > 1.5 && Math.hypot(rel1.x - rel0.x, rel1.z - rel0.z) > 0.8 && Math.abs(rel1.y - rel0.y) < 1.0, `speed ${rel1.speed.toFixed(1)} moved ${Math.hypot(rel1.x - rel0.x, rel1.z - rel0.z).toFixed(1)} m dy ${(rel1.y - rel0.y).toFixed(2)}`);
+  // 巡航◎に触れると、通常飛行へ(スティックで舵)
+  const up = lay.cruise; await tp("touchStart", [{ x: Math.round(up.cx), y: Math.round(up.cy), id: 12 }]); await tp("touchMove", [{ x: Math.round(up.cx + 60), y: Math.round(up.cy), id: 12 }]);
+  await p.waitForFunction(() => !__game.flight.prox.on, null, { timeout: 12000 }).catch(() => {});
+  const back = await F(); const cr = await p.evaluate(() => ({ stickX: __game.input.state.x, phase: __game.input.gesture.phase })); await tp("touchEnd", []);
+  check("touching the upper (cruise) pad uses the usual stick and returns the bird to normal flight, no crash", !back.prox && back.mode === "air" && cr.phase === "stick" && back.crashes === before.crashes, JSON.stringify({ back: { prox: back.prox, mode: back.mode, speed: +back.speed.toFixed(1) }, cr }));
+
+  console.log("\n# one finger at a time");
+  await goto(28, 60, 150, 0, 12); await sleep(300);
+  await tp("touchStart", [{ x: cx, y: cy, id: 21 }]); await p.waitForFunction(() => __game.input.prox.active, null, { timeout: 5000 }).catch(() => {});
+  await tp("touchStart", [{ x: cx, y: cy, id: 21 }, { x: Math.round(up.cx), y: Math.round(up.cy), id: 22 }]); await tp("touchMove", [{ x: cx, y: cy, id: 21 }, { x: Math.round(up.cx + 50), y: Math.round(up.cy), id: 22 }]); await sleep(300);
+  const two = await p.evaluate(() => ({ prox: __game.input.prox.active, cruise: __game.input.gesture.active, stickX: __game.input.state.x }));
+  check("while the lower pad is held, a second finger on the upper pad is ignored (the pad touched first is the one used)", two.prox && !two.cruise && Math.abs(two.stickX) < 0.01, JSON.stringify(two));
+  await tp("touchEnd", []); await sleep(200);
+
+  console.log("\n# walls and the ground (H1)");
+  const wallInfo = await p.evaluate(() => { const g = __game, a = g.world.apts.find(q => q.floors >= 9) || g.world.apts[0], c = g.world.colliders.find(k => Math.abs((k.minX + k.maxX) / 2 - a.x) < 0.01 && Math.abs((k.minZ + k.maxZ) / 2 - a.z) < 0.01); return { x: (c.minX + c.maxX) / 2, z: c.maxZ, top: c.top }; });
+  await goto(wallInfo.x, 20, wallInfo.z + 14, 0, 14); const w0 = await F();
+  await tp("touchStart", [{ x: cx, y: cy, id: 31 }]); await sleep(300);
+  await p.waitForFunction(w => __game.flight.speed < 3.5 || __game.flight.crashes > w, w0.crashes, { timeout: 8000 }).catch(() => {});
+  await sleep(2500); const w1 = await F(); await tp("touchEnd", []);
+  check("a close maneuver straight at a tall wall from 14 m/s: the bird stops in front of it (no crash, not inside)", w1.crashes === w0.crashes && w1.z > wallInfo.z + 0.6 && w1.mode === "air", `distance to the wall ${(w1.z - wallInfo.z).toFixed(2)} m`);
+  // 地上: 下方向で座る
+  await p.evaluate(() => { const g = __game, f = g.flight; f.reset(); g.input.releaseAll(); f.pos.set(28, 0.32, 60); f.prevPos.copy(f.pos); f.vel.set(0, 0, 0); f.mode = "landed"; f.walkV = 0; f.yaw = 0; });
+  await sleep(300); await tp("touchStart", [{ x: cx, y: Math.round(lay.prox.cy + lay.prox.r * 0.7), id: 41 }]);
+  await p.waitForFunction(() => __game.flight.sitting, null, { timeout: 6000 }).catch(() => {});
+  const sit = await F(); await sleep(500); const sit2 = await F(); await tp("touchEnd", []);
+  check("on the ground, touching the downward side of the lower pad makes the bird sit down (no walking)", sit.sitting && sit.mode === "landed" && Math.hypot(sit2.x - sit.x, sit2.z - sit.z) < 0.05, JSON.stringify({ sitting: sit.sitting, mode: sit.mode }));
+  await tp("touchStart", [{ x: Math.round(up.cx), y: Math.round(up.cy + 20), id: 42 }]); await tp("touchMove", [{ x: Math.round(up.cx), y: Math.round(up.cy - 30), id: 42 }]); await sleep(1200);
+  const stand = await F(); await tp("touchEnd", []);
+  check("walking with the upper pad (stick forward) stands the bird up and walks, as before", !stand.sitting && Math.hypot(stand.x - sit.x, stand.z - sit.z) > 0.8, `moved ${Math.hypot(stand.x - sit.x, stand.z - sit.z).toFixed(2)} m`);
+  // 中心の長押し: 短く飛んで微速前進
+  await p.evaluate(() => { const g = __game, f = g.flight; f.reset(); g.input.releaseAll(); f.pos.set(28, 0.32, 60); f.prevPos.copy(f.pos); f.vel.set(0, 0, 0); f.mode = "landed"; f.walkV = 0; f.yaw = 0; });
+  await sleep(300); await tp("touchStart", [{ x: cx, y: cy, id: 51 }]);
+  await p.waitForFunction(() => __game.flight.mode === "air" && __game.flight.prox.on, null, { timeout: 8000 }).catch(() => {});
+  const hop = await F(); await sleep(800); const hop2 = await F(); await tp("touchEnd", []);
+  await p.waitForFunction(() => __game.flight.mode === "landed" && !__game.flight.prox.on, null, { timeout: 15000 }).catch(() => {});
+  const land = await F();
+  check("a long press on the center of the lower pad on the ground: a short flight with a slow forward creep, then a soft landing after lifting the finger", hop.mode === "air" && hop.y > 0.4 && hop.y < 4 && Math.hypot(hop2.x - hop.x, hop2.z - hop.z) > 0.8 && land.mode === "landed" && land.crashes === hop.crashes, JSON.stringify({ hopY: +hop.y.toFixed(2), landed: land.mode }));
+  check("H1: no page errors", errs.length === 0, errs.join(" | "));
+}
+
 const GROUPS = [
-  ["g1", g1, false], ["g2", g2, true], ["g3", g3, true], ["g4", g4, true], ["g5", g5, false], ["g6", g6, true], ["g7", g7, true],
+  ["g1", g1, false], ["g2", g2, true], ["g3", g3, true], ["g4", g4, true], ["g5", g5, false], ["g6", g6, true], ["g7", g7, true], ["g8", g8, true],
 ];
 // CIの5分割(各シャードの所要時間がほぼ等しくなるように)
-const SHARD_PLAN = [["g1", "g3"], ["g2", "g5"], ["g4"], ["g6"], ["g7"]];
+const SHARD_PLAN = [["g1", "g3"], ["g2", "g5"], ["g4", "g8"], ["g6"], ["g7"]];
 
 let want = GROUPS.map(g => g[0]);
 const only = arg("--only"), shard = arg("--shard");

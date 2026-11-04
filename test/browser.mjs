@@ -107,7 +107,7 @@ async function g2({ p, cdp, errs }) {
   await p.click('[data-set="weather"][data-val="rain"]'); await p.click('[data-set="wind"][data-val="2"]'); await p.click('[data-set="bearing"][data-val="90"]');
   let B = await p.evaluate(() => ({ rain: __game.rain.mesh.visible, lift: __game.flight.liftScale, fog: __game.scene.fog.far, bear: __game.wind.bearing, sp: __game.wind.speed, on: [...document.querySelectorAll("[data-set].on")].length }));
   check("rain: particles on, lift reduced, visibility shortened", B.rain && B.lift < 1 && B.fog < 500, JSON.stringify(B));
-  check("wind: strong east wind set, buttons highlighted", B.bear === 90 && B.sp > 7 && B.on === 13); // 13 = 12 + 操縦(H8-A)の既定 1 つ
+  check("wind: strong east wind set, buttons highlighted", B.bear === 90 && B.sp > 7 && B.on === 14); // 14 = 12 + 操縦(H8-A)の既定 1 つ + 着地点マーカー(H8-B)の既定 1 つ
   await p.click('[data-set="time"][data-val="2"]'); await p.click("#ovGo"); await sleep(300);
   const h0 = await p.evaluate(() => __game.env().lights + "|" + __game.game.gameTime);
   await sleep(2500); const w1 = await p.evaluate(() => ({ wv: __game.flight.windVec.length(), rc: __game.rain.count, q: __game.quality.level, hud: document.getElementById("hud").textContent }));
@@ -776,8 +776,9 @@ async function g11({ p, cdp, errs }) {
   const off = await p.evaluate(() => { let saved = null; try { saved = JSON.parse(localStorage.getItem("vindving.prefs.v1")).landmarks; } catch {} const cv = document.getElementById("spots"), c = cv.getContext("2d"); const d = c.getImageData(0, 0, cv.width, cv.height).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 0) n++; return { n: __game.spots.list.length, pressed: __game.spots.pressedId, saved, painted: n, active: __game.autoLand.active, enabled: __game.spots.enabled }; });
   check("OFF: no markers, nothing painted, the selection is cleared, the setting is saved - and the automatic landing already under way is NOT interrupted", off.n === 0 && off.painted === 0 && off.pressed === -1 && off.saved === false && off.active && !off.enabled, JSON.stringify(off));
   await unhover(); await p.waitForFunction(() => !__game.autoLand.active, null, { timeout: 30000 }).catch(() => {});
-  await setup("rock", 12, 2.6, 8, 0); await sleep(1200); const offNone = await p.evaluate(() => __game.spots.list.length);
+  await setup("rock", 12, 2.6, 8, 0); await hover(); await sleep(1500); const offNone = await p.evaluate(() => __game.spots.list.length); /* 鳥をその場にとどめる(OFF のあいだに足場を通り過ぎないように) */
   await setLm(true); await sleep(200); const reOn = await waitSpot(await p.evaluate(() => window.__target.id)); const savedOn = await p.evaluate(() => { try { return JSON.parse(localStorage.getItem("vindving.prefs.v1")).landmarks; } catch { return null; } });
+  await unhover();
   check("OFF keeps new candidates away; ON brings them back and is saved", offNone === 0 && reOn && savedOn === true, JSON.stringify({ offNone, reOn, savedOn }));
 
   // (E) 複数の中から狙った候補へ: 近い 2 つの目印を、それぞれ実タッチして、押した方の ID で自動着地が始まる(隣へは行かない)
@@ -831,6 +832,8 @@ async function g12({ p, cdp, errs }) {
   const realTap = (x, y) => cdp.send("Input.synthesizeTapGesture", { x, y, duration: 50, tapCount: 1, gestureSourceType: "touch" });
   const tp = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
   await p.evaluate(() => { if (!document.getElementById("overlay").hidden) document.getElementById("ovGo").click(); }); await sleep(300);
+  /* 木の枝・ベランダの床と手すりは 1 つの目印にまとめられるので、狙う足場の目印 = 同じ構造物を代表する目印 */
+  await p.evaluate(() => { window.__fs = (t) => { const g = __game, c = s => [(s.minX + s.maxX) / 2, (s.minZ + s.maxZ) / 2]; let q = g.spots.get(t.id); if (q) return q; const [cx, cz] = c(t), tree = t.kind === "branch"; return g.spots.list.find(q => { const [x, z] = c(q.s); return (q.kind === t.kind || (t.kind === "rail" && q.kind === "balcony") || (t.kind === "balcony" && q.kind === "rail")) && Math.hypot(x - cx, z - cz) < (tree ? 3.6 : 1.3) && Math.abs(q.s.top - t.top) < (tree ? 8 : 1.6); }) ?? null; }; });
   await p.setViewportSize({ width: 892, height: 412 }); await sleep(600);
   for (let i = 0; i < 3 && (await p.evaluate(() => document.body.dataset.ctl)) !== "right"; i++) { await p.evaluate(() => document.getElementById("btnCtl").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }))); await sleep(250); }
   // 測定用の試行: 種類ごとに、足場の通し番号 k で決まる位置・向き・速さ(調整には使っていない別の並び)
@@ -851,20 +854,21 @@ async function g12({ p, cdp, errs }) {
     }, [kind, k]);
     const row = { kind, k, result: "no-surface", retap: 0 };
     if (!info) { rows.push(row); continue; }
-    const tid = info.id, shown = await p.waitForFunction(i => !!__game.spots.get(i), tid, { timeout: 7000 }).then(() => true).catch(() => false); // 狙う足場の目印が出るまで(H8-B: 全候補のうち、この足場の ID)
+    const shown = await p.waitForFunction(() => !!window.__fs(window.__target), null, { timeout: 7000 }).then(() => true).catch(() => false); // 狙う足場の目印が出るまで(H8-B: 全候補のうち、この足場の ID)
     if (!shown) { row.result = "no-ring"; rows.push(row); continue; }
     // 目印が落ち着くのを待つ: 100 ms おいて2回読み、動きが 25 px 以内なら押す(足場のすぐ横を通り抜けるときの目印は画面を高速に横切る。そういう場面は押せるものとして数えず、unstable として別に数える)
-    let rs = null; for (let w = 0; w < 14 && !rs; w++) { const rd = () => p.evaluate(i => { const q = __game.spots.get(i); return q ? { x: q.dx, y: q.dy, v: true } : { x: 0, y: 0, v: false }; }, tid); const a1 = await rd(); await sleep(100); const a2 = await rd(); if (a1.v && a2.v && Math.hypot(a2.x - a1.x, a2.y - a1.y) <= 25) rs = a2; }
+    let rs = null; for (let w = 0; w < 14 && !rs; w++) { const rd = () => p.evaluate(() => { const q = window.__fs(window.__target); return q ? { x: q.dx, y: q.dy, v: true } : { x: 0, y: 0, v: false }; }); const a1 = await rd(); await sleep(100); const a2 = await rd(); if (a1.v && a2.v && Math.hypot(a2.x - a1.x, a2.y - a1.y) <= 25) rs = a2; }
     if (!rs) { row.result = "unstable-ring"; rows.push(row); continue; }
+    const tid = await p.evaluate(() => { const q = window.__fs(window.__target); return q ? q.id : window.__target.id; }); // 押す前に、狙う目印の ID を確定
     const b = await p.evaluate(() => ({ starts: __game.autoLand.stats.starts, refused: __game.autoLand.stats.refused, crashes: __game.flight.crashes, ok: __game.autoLand.stats.success, taps: __game.input.stats.ringTaps, gone: __game.spots.stats.gone }));
     await realTap(Math.round(rs.x), Math.round(rs.y)); await sleep(250);
     const a = await p.evaluate(() => ({ starts: __game.autoLand.stats.starts, refused: __game.autoLand.stats.refused, why: __game.autoLand.lastRefusal, taps: __game.input.stats.ringTaps, tgt: __game.autoLand.target ? __game.autoLand.target.id : -1, active: __game.autoLand.active, gone: __game.spots.stats.gone }));
     row.tapped = a.taps === b.taps + 1;
     if (a.refused > b.refused) { row.result = "refused:" + a.why; rows.push(row); continue; } // 認識したが安全判定で拒否(認識の失敗とは別)
     if (a.starts === b.starts) { // 認識されなかった: 押した位置が目印に届いていたかで、取りこぼしと「指が届く前に目印が動いた/去った」を分ける
-      const now = await p.evaluate(i => { const q = __game.spots.get(i); return q ? { x: q.dx, y: q.dy } : null; }, tid); row.dbg = { taps: [b.taps, a.taps], now, press: rs, rd: await p.evaluate(() => ({ ...__game.input.ringDiag })) };
+      const now = await p.evaluate(() => { const q = window.__fs(window.__target); return q ? { x: q.dx, y: q.dy } : null; }); row.dbg = { taps: [b.taps, a.taps], now, press: rs, rd: await p.evaluate(() => ({ ...__game.input.ringDiag })) };
       row.result = !now ? "ring-gone-before-tap" : Math.hypot(now.x - rs.x, now.y - rs.y) > 34 ? "ring-moved-before-tap" : "tap-not-recognised"; rows.push(row); continue; }
-    row.targetOk = a.tgt === tid || (await p.evaluate(([t, tid]) => { const g = __game, A = g.surfaces.all[tid], B = g.surfaces.all[t]; return !!A && !!B && ((A.kind === "balcony" && B.kind === "rail") || (A.kind === "rail" && B.kind === "balcony")); }, [a.tgt, tid])); /* ベランダの目印は、手すりの上へ降りる設計(AutoLand.retarget)なので、同じ構造物の床と手すりは同じ目的地とみなす */ // 押した足場そのものへ着地を始めた(隣ではない)
+    row.targetOk = a.tgt === tid || (await p.evaluate(([t, tid]) => { const g = __game, A = g.surfaces.all[tid], B = g.surfaces.all[t]; const bal = k => k === "balcony" || k === "rail"; return !!A && !!B && bal(A.kind) && bal(B.kind) && Math.hypot((A.minX + A.maxX) / 2 - (B.minX + B.maxX) / 2, (A.minZ + A.maxZ) / 2 - (B.minZ + B.maxZ) / 2) < 4; }, [a.tgt, tid])); /* ベランダの目印は、手すりの上へ降りる設計(AutoLand.retarget: 鳥のいる側の手すり)なので、同じベランダの床・手すりは同じ目的地とみなす(4 m 以内) */ // 押した足場そのものへ着地を始めた(隣ではない)
     await p.waitForFunction(() => !__game.autoLand.active, null, { timeout: 25000 }).catch(() => {});
     const e = await p.evaluate(([bo]) => ({ end: __game.autoLand.end, crashes: __game.flight.crashes, ok: __game.autoLand.stats.success, mode: __game.flight.mode }), [b.ok]);
     row.end = e.end; row.crash = e.crashes - b.crashes > 0;

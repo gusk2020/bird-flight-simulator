@@ -818,6 +818,38 @@ async function g11({ p, cdp, errs }) {
   check("REAL TOUCH on a marker starts the automatic landing for it in every viewport / hand / steering-mode combination (a marker tap, not a flap or a steer)", rows.every(r => r.ok), JSON.stringify(rows.filter(r => !r.ok)));
   await setSteer("off"); await p.setViewportSize({ width: 892, height: 412 }); await sleep(400); await setCtl("right");
 
+  // (I) H8-C 遠くの目印を押す: 断られず「接近先」になり、向きを合わせて近づき、届く範囲(18 m)に入ったら既存の自動着地が(安全検査つきで)始まる
+  const farSetup = (side) => setup("rock", 38, 3, 10, side); /* 縁から 38 m = 目印まで 約 40 m。hover は速さを 0 にして先読みが 45 m に縮むので、固定の確認はそれより手前で */
+  await p.setViewportSize({ width: 892, height: 412 }); await sleep(400); await setCtl("right"); await setSteer("off");
+  const fi = await farSetup(7); const fid2 = fi.id; await waitSpot(fid2); await hover(); await sleep(200);
+  const fq = await spotXY(fid2); const fd = await p.evaluate(i => __game.spots.get(i).d, fid2);
+  const bf = await stat(); await realTap(fq.x, fq.y); await sleep(250); const afp = await p.evaluate(() => ({ id: __game.approach.id, sel: __game.approach.stats.selected, active: __game.autoLand.active, refused: __game.autoLand.stats.refused }));
+  check("tapping a marker beyond the auto-landing reach selects it as the approach target (not refused with 'too far')", fd > 25 && afp.id === fid2 && afp.sel >= 1 && !afp.active && afp.refused === bf.refused, JSON.stringify({ fd: Math.round(fd), ...afp }));
+  const drawnPending = await p.evaluate(() => { const cv = document.getElementById("spots"), c = cv.getContext("2d"), q = __game.spots.get(__game.approach.id), k = cv.width / innerWidth; if (!q) return -1; const d = c.getImageData(Math.max(0, Math.round((q.dx - 30) * k)), Math.max(0, Math.round((q.dy - 30) * k)), Math.round(60 * k), Math.round(60 * k)).data; let n = 0; for (let i = 0; i < d.length; i += 4) if (d[i + 2] > 200 && d[i] < 200 && d[i + 3] > 100) n++; return n; });
+  check("the selected target is drawn in its own colour (blue ring) so the player can see it is armed", drawnPending > 10, `${drawnPending} blue px`);
+  await realTap(fq.x, fq.y); await sleep(250); const cancelled = await p.evaluate(() => __game.approach.id);
+  check("tapping the selected marker again cancels the approach", cancelled === -1);
+  await unhover();
+  // 実際に近づく: 接近先を選んだら、手を触れずに(鳥は向きを自動で合わせて)届く範囲に入り、その足場へ自動着地が始まる
+  const fi2 = await farSetup(7); await waitSpot(fi2.id); await sleep(150); const q2 = await spotXY(fi2.id);
+  await realTap(q2.x, q2.y); await sleep(200); const sel2 = await p.evaluate(() => __game.approach.id);
+  const starts0 = await p.evaluate(() => __game.autoLand.stats.starts); const startedOk = await p.waitForFunction(([i, n]) => __game.autoLand.lastTargetId === i && __game.autoLand.stats.starts > n, [fi2.id, starts0], { timeout: 90000 }).then(() => true).catch(() => false);
+  await sleep(300); const fin = await p.evaluate(() => ({ started: __game.approach.stats.started, id: __game.approach.id, crashes: __game.flight.crashes, brake: __game.approach.stats.steerFrames, last: __game.approach.lastReason }));
+  check("selected from ~50 m with a 7 m lateral offset: the bird turns toward it by itself, and the automatic landing starts for exactly that perch (via the existing safety check)", sel2 === fi2.id && startedOk && fin.started >= 1 && fin.id === -1 && fin.crashes === 0, JSON.stringify({ sel2, startedOk, ...fin }));
+  await p.waitForFunction(() => !__game.autoLand.active, null, { timeout: 40000 }).catch(() => {});
+  // 去ったら解除: 接近先を選んだあと、鳥を反対へ向けて目印が視界から去ると、選択は自動で解け、着地は始まらない
+  const fi3 = await farSetup(0); await waitSpot(fi3.id); await sleep(150); const q3 = await spotXY(fi3.id); const st3a = await stat();
+  await realTap(q3.x, q3.y); await sleep(200);
+  await p.evaluate(() => { const f = __game.flight; f.yaw += Math.PI; f.vel.set(-f.vel.x, f.vel.y, -f.vel.z); __game.cam.snap(); });
+  const cleared = await p.waitForFunction(() => __game.approach.id === -1, null, { timeout: 20000 }).then(() => true).catch(() => false); const st3 = await stat();
+  const goneBy = await p.evaluate(() => ({ ...__game.approach.stats.goneBy, g: __game.approach.stats.gone, cancelled: __game.approach.stats.cancelled, last: __game.approach.lastReason, mode: __game.flight.mode, al: __game.autoLand.active }));
+  check("the target left the view (the bird turned away): the unstarted selection is released with the reason recorded, and no landing was started", cleared && st3.starts === st3a.starts && goneBy.g >= 1, JSON.stringify({ cleared, goneBy }));
+  // OFF にすると接近先も消える
+  const fi4 = await farSetup(0); await waitSpot(fi4.id); await sleep(150); const q4 = await spotXY(fi4.id); await realTap(q4.x, q4.y); await sleep(200); const armed = await p.evaluate(() => __game.approach.id);
+  await setLm(false); await sleep(300); const offAp = await p.evaluate(() => __game.approach.id); await setLm(true); await sleep(200);
+  check("OFF also clears an armed approach target", armed === fi4.id && offAp === -1, JSON.stringify({ armed, offAp }));
+  await p.evaluate(() => __game.autoLand.cancel("user"));
+
   // (H) 負荷: マーカー数・1 フレームあたりの処理時間(列挙+投影+遮蔽+配置と描画)。ソフトウェア描画の環境なので絶対値は実機と違う
   await p.evaluate(([x, z, yaw]) => { const g = __game, f = g.flight; f.reset(); f.pos.set(x, 14, z); f.prevPos.copy(f.pos); f.yaw = yaw; f.vel.set(0, 0, 0); g.cam.snap(); window.__hv = setInterval(() => { f.pos.set(x, 14, z); f.vel.set(0, 0, 0); }, 8); }, town.pos); await sleep(2500);
   const perf = await p.evaluate(() => ({ shown: __game.spots.list.length, maxShown: __game.spots.stats.maxShown, enumerated: __game.spots.stats.enumerated, updateMs: +__game.stats.spotMs.toFixed(3), drawMs: +__game.stats.spotDrawMs.toFixed(3), calls: __game.renderer.info.render.calls })); await unhover();
@@ -859,14 +891,19 @@ async function g12({ p, cdp, errs }) {
     // 目印が落ち着くのを待つ: 100 ms おいて2回読み、動きが 25 px 以内なら押す(足場のすぐ横を通り抜けるときの目印は画面を高速に横切る。そういう場面は押せるものとして数えず、unstable として別に数える)
     let rs = null; for (let w = 0; w < 14 && !rs; w++) { const rd = () => p.evaluate(() => { const q = window.__fs(window.__target); return q ? { x: q.dx, y: q.dy, v: true } : { x: 0, y: 0, v: false }; }); const a1 = await rd(); await sleep(100); const a2 = await rd(); if (a1.v && a2.v && Math.hypot(a2.x - a1.x, a2.y - a1.y) <= 25) rs = a2; }
     if (!rs) { row.result = "unstable-ring"; rows.push(row); continue; }
-    const tid = await p.evaluate(() => { const q = window.__fs(window.__target); return q ? q.id : window.__target.id; }); // 押す前に、狙う目印の ID を確定
+    const tid = await p.evaluate(() => { const q = window.__fs(window.__target); window.__fsId = q ? q.id : window.__target.id; return window.__fsId; }); // 押す前に、狙う目印の ID を確定
     const b = await p.evaluate(() => ({ starts: __game.autoLand.stats.starts, refused: __game.autoLand.stats.refused, crashes: __game.flight.crashes, ok: __game.autoLand.stats.success, taps: __game.input.stats.ringTaps, gone: __game.spots.stats.gone }));
     await realTap(Math.round(rs.x), Math.round(rs.y)); await sleep(250);
     const a = await p.evaluate(() => ({ starts: __game.autoLand.stats.starts, refused: __game.autoLand.stats.refused, why: __game.autoLand.lastRefusal, taps: __game.input.stats.ringTaps, tgt: __game.autoLand.lastTargetId, active: __game.autoLand.active, gone: __game.spots.stats.gone }));
     row.tapped = a.taps === b.taps + 1;
+    if (row.tapped && a.starts === b.starts && a.refused === b.refused && (await p.evaluate(() => __game.approach.id)) >= 0) { // H8-C: 遠い目印を押した = 接近先に選んだ。向きを合わせて近づき、届く範囲で自動着地が始まる(または目印が去って解除される)のを待つ
+      row.approach = true; await p.waitForFunction(n => __game.autoLand.stats.starts > n || __game.approach.id < 0, b.starts, { timeout: 30000 }).catch(() => {});
+      const a2 = await p.evaluate(() => ({ starts: __game.autoLand.stats.starts, refused: __game.autoLand.stats.refused, why: __game.autoLand.lastRefusal, taps: __game.input.stats.ringTaps, tgt: __game.autoLand.lastTargetId, active: __game.autoLand.active, gone: __game.spots.stats.gone, apWhy: __game.approach.lastReason }));
+      if (a2.starts === b.starts) { row.result = a2.refused > b.refused ? "refused:" + a2.why : "approach-" + (a2.apWhy || "ended"); rows.push(row); continue; }
+      Object.assign(a, a2); }
     if (a.refused > b.refused) { row.result = "refused:" + a.why; rows.push(row); continue; } // 認識したが安全判定で拒否(認識の失敗とは別)
     if (a.starts === b.starts) { // 認識されなかった: 押した位置が目印に届いていたかで、取りこぼしと「指が届く前に目印が動いた/去った」を分ける
-      const now = await p.evaluate(() => { const q = window.__fs(window.__target); return q ? { x: q.dx, y: q.dy } : null; }); row.dbg = { taps: [b.taps, a.taps], now, press: rs, rd: await p.evaluate(() => ({ ...__game.input.ringDiag })) };
+      const now = await p.evaluate(() => { const q = window.__fs(window.__target); return q ? { x: q.dx, y: q.dy } : null; }); row.goneWhy = await p.evaluate(() => { const q = window.__target; return __game.spots.goneWhy(window.__fsId ?? q.id); }); row.dbg = { taps: [b.taps, a.taps], now, press: rs, rd: await p.evaluate(() => ({ ...__game.input.ringDiag })) };
       row.result = !now ? "ring-gone-before-tap" : Math.hypot(now.x - rs.x, now.y - rs.y) > 34 ? "ring-moved-before-tap" : "tap-not-recognised"; rows.push(row); continue; }
     row.dbgT = await p.evaluate(([t, tid]) => { const g = __game, A = g.surfaces.all[tid], B = g.surfaces.all[t]; return { spot: A && [A.kind, A.minX.toFixed(1), A.minZ.toFixed(1), A.top], tgt: B && [B.kind, B.minX.toFixed(1), B.minZ.toFixed(1), B.top], want: [window.__target.kind, window.__target.minX.toFixed(1), window.__target.minZ.toFixed(1), window.__target.top] }; }, [a.tgt, tid]);
     row.targetOk = a.tgt === tid || (await p.evaluate(([t, tid]) => { const g = __game, A = g.surfaces.all[tid], B = g.surfaces.all[t]; const bal = k => k === "balcony" || k === "rail"; return !!A && !!B && bal(A.kind) && bal(B.kind) && Math.hypot((A.minX + A.maxX) / 2 - (B.minX + B.maxX) / 2, (A.minZ + A.maxZ) / 2 - (B.minZ + B.maxZ) / 2) < 4; }, [a.tgt, tid])); /* ベランダの目印は、手すりの上へ降りる設計(AutoLand.retarget: 鳥のいる側の手すり)なので、同じベランダの床・手すりは同じ目的地とみなす(4 m 以内) */ // 押した足場そのものへ着地を始めた(隣ではない)

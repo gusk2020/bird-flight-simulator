@@ -69,3 +69,39 @@ export function h8SpotTests() {
     check("real town: many candidates are shown at once, of several kinds, never a duplicate id", best >= 8 && kinds >= 3 && dups === 0, `max ${best} markers, ${kinds} kinds`);
     check("every listed marker is a real surface with the same id", sp.list.every(q => idx.all[q.id] === q.s)); }
 }
+
+import { Approach, APPROACH } from "../src/approach";
+import { AUTOLAND } from "../src/autoland";
+import { Flight } from "../src/flight";
+export function h8cTests() {
+  suite("H8-C: speed-based look-ahead and the approach target");
+  // --- 先読み: 速いほど遠くの目印が見つかる。下限 45 m・上限 90 m
+  { const idx = mkIdx([["pole", 0, -70, 0.2, 0.2, 6], ["pole", 3, -30, 0.2, 0.2, 6], ["pole", -3, -100, 0.2, 0.2, 6]]);
+    const at = (v: number) => { const sp = new LandSpots(idx); sp.update({ ...frame(0, 8, 0, 0), speed: v }, true); return { n: sp.list.length, R: sp.rangeNow }; };
+    const s6 = at(6), s10 = at(10), s14 = at(14);
+    check("look-ahead range = clamp(speed x 7 s, 45 m, 90 m): slow 45 m, 10 m/s 70 m, fast 90 m", s6.R === SPOTS.range && Math.abs(s10.R - 70) < 1e-9 && s14.R === SPOTS.rangeMax, JSON.stringify({ s6, s10, s14 }));
+    check("a perch 70 m ahead is marked at 10 m/s (not at 6 m/s); 100 m ahead is out even at the maximum", s10.n === 2 && s6.n === 1 && s14.n === 2, JSON.stringify({ s6, s10, s14 })); }
+  // --- 去った理由の記録
+  { const idx = mkIdx([["bench", 0, -12, 0.4, 0.8, 0.5], ["bench", 60, -12, 0.4, 0.8, 0.5]]); const sp = new LandSpots(idx);
+    sp.update({ ...frame(0, 6, 0, 0, 0), speed: 8 }, true); const id = sp.list[0].id; sp.update({ ...frame(0, 6, -13, 0, 0.1), speed: 8 }, true);
+    check("the reason a candidate vanished is recorded (behind)", sp.goneWhy(id) === "behind", String(sp.goneWhy(id))); }
+  // --- 接近先: 遠い目印を選ぶ → 届く範囲に入るまで待つ → 範囲に入ったら安全検査をして始める。去ったら解除。手動操作中は操舵しない
+  { const idx = mkIdx([["pole", 0, -60, 0.2, 0.2, 6]]); const s = idx.all[0]; const ap = new Approach(); const f = new Flight({ colliders: [], heightAt: () => 0, perchAt: () => null, perchPoint: () => null, wireDir: () => null, waterAt: () => false } as never);
+    f.pos.set(0, 10, 0); f.vel.set(0, 0, -10); f.yaw = 0; ap.select(0, 0);
+    let started = 0; const start = () => { started++; return true; };
+    check("far (60 m): waits, no start attempt", ap.update(0.1, { s, d: 60, near: false }, null, start, () => "") === "waiting" && started === 0);
+    check("inside the auto-landing reach: the existing start is attempted (and the approach ends as started)", ap.update(1, { s, d: AUTOLAND.maxRange - 1, near: true }, null, start, () => "") === "started" && started === 1 && !ap.active);
+    ap.select(0, 2); check("the candidate vanished (offscreen): the selection is released, not left waiting", ap.update(2.1, null, "offscreen", start, () => "") === "cleared" && !ap.active && ap.stats.goneBy.offscreen === 1);
+    ap.select(0, 3); let t = 3; let r = "waiting"; for (let i = 0; i < 30 && r === "waiting"; i++) { t += 0.2; r = ap.update(t, { s, d: 15, near: true }, null, () => false, () => "dangerous path"); }
+    check("refused for a safety reason for 1.5 s: it gives up with that reason (no unsafe start)", r === "cleared" && ap.lastReason === "refused:dangerous path", ap.lastReason);
+    ap.select(0, 10); r = "waiting"; t = 10; for (let i = 0; i < 20; i++) { t += 0.2; r = ap.update(t, { s, d: 40, near: false }, null, () => true, () => "too far"); } check("farther than the reach it keeps waiting (never starts early)", r === "waiting");
+    ap.select(0, 20); check("times out after the maximum approach time", ap.update(20 + APPROACH.maxS + 1, { s, d: 40, near: false }, null, start, () => "") === "cleared" && ap.stats.timeout === 1);
+    // 操舵: 目標が右にあれば右へ(x>0)、手動の入力があれば足さない、速さが足りなければ上昇を指示しない、近いと減速
+    const raw = { x: 0, y: 0, flapHeld: false, flapTap: false, brake: false }; const right = { ...s, minX: 20, maxX: 20.4, minZ: -40, maxZ: -39.6, top: 12 } as typeof s;
+    ap.select(0, 30); for (let i = 0; i < 30; i++) { raw.x = 0; raw.y = 0; raw.brake = false; ap.steer(f, raw, right, 1 / 60); }
+    check("target to the right: steers right (x > 0) smoothly", raw.x > 0.05 && raw.x <= 1, `x ${raw.x.toFixed(2)}`);
+    check("target above the bird at low speed: no climb command (no stall)", (() => { const g = new Flight({ colliders: [], heightAt: () => 0, perchAt: () => null, perchPoint: () => null, wireDir: () => null, waterAt: () => false } as never); g.pos.set(0, 10, 0); g.vel.set(0, 0, -8); g.yaw = 0; g.speed = 8; const rr = { x: 0, y: 0, flapHeld: false, flapTap: false, brake: false }; const hi = { ...s, minX: 0, maxX: 0.4, minZ: -30, maxZ: -29.6, top: 25 } as typeof s; const a2 = new Approach(); a2.select(0, 0); for (let i = 0; i < 30; i++) { rr.y = 0; a2.steer(g, rr, hi, 1 / 60); } return rr.y <= 0.001; })());
+    const man = { x: 0.8, y: 0, flapHeld: false, flapTap: false, brake: false }; const lx = man.x; ap.steer(f, man, right, 1 / 60); check("manual stick input present: the approach adds no steering", Math.abs(man.x - lx) < 0.12, `x ${man.x.toFixed(2)}`);
+    const fast = new Flight({ colliders: [], heightAt: () => 0, perchAt: () => null, perchPoint: () => null, wireDir: () => null, waterAt: () => false } as never); fast.pos.set(0, 10, 0); fast.vel.set(0, 0, -13); fast.yaw = 0; fast.speed = 13; const rb = { x: 0, y: 0, flapHeld: false, flapTap: false, brake: false }; ap.steer(fast, rb, { ...s, minX: 0, maxX: 0.4, minZ: -30, maxZ: -29.6, top: 8 } as typeof s, 1 / 60);
+    check("fast and within 40 m: the ordinary brake input is used (speed above the limit)", rb.brake === true); }
+}

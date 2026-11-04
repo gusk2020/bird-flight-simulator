@@ -19,6 +19,11 @@ export const SPOTS = {
   graceS: 0.25,      // 指を押してから離すまでの間に一瞬(描画が遅いとき)見えなくなっても、押した候補として扱う猶予(秒)
   mergeTreeXZ: 3.5, mergeTreeY: 8, // 同じ木の枝は 1 つにまとめる(枝は 1 本の木に何本もある)
   mergeXZ: 1.2, mergeY: 1.5, // 同じ構造物の重複(ベランダの床と手すりなど)を 1 つにまとめる距離(m)
+  // H8-D: 混同のおそれ(= 別の候補を拾い得る押し方)の判定。触れた点の近く(riskPx。35 m 超の遠い目印がからむときは riskFarPx を足す)に、別の候補の現在位置または直近の位置があれば、1 回目のタップは「仮選択」にして確認を求める
+  riskPx: 44, riskFarPx: 14, farM: 35,
+  staticPx: 30,   // 別の候補がこの距離(px)以内にあれば、止まっていても取り違え得る(重なり)ので常に確認
+  driftPx: 15,    // 直近 driftS 秒で狙った目印がこれ以上動いていれば、見てから触れるまでのずれで取り違え得る(動く目印)
+  driftS: 0.2,
   radiusPx: 15,      // 描く大きさ(半径 px)
   hitPx: 34, ambigPx: 6, // 触れた点に近い目印が 2 つあり、その距離の差が ambigPx 未満なら「紛らわしい押し方」として数える(選択は最も近いほう)
           // 触れたとき、この半径(px)に入る最寄りの目印を選ぶ
@@ -159,6 +164,25 @@ export class LandSpots {
   /** 見えなくなった理由(診断用): behind / offscreen / ui / occluded / merged / range。まだ見えているときは null */
   goneWhy(id: number): string | null { return this.list.some(q => q.id === id) ? null : this.lost.get(id)?.why ?? null; }
   get(id: number): Spot | null { return this.list.find(q => q.id === id) ?? null; }
+  /**
+   * H8-D: 押した点 (x,y) が、picked を選ぶときに別の候補と取り違え得る押し方か。
+   * 触れた点から riskPx(遠い候補がからむときは +riskFarPx)以内に、picked 以外の候補の「いまの位置」か「直近の位置(軌跡)」があれば混同のおそれありとする
+   * (指が見てから遅れて触れるとき、狙った目印の過去の位置の近くに、別の目印がいま来ている = 取り違える典型)。孤立した目印は risky にならず、1 タップで始まる。
+   */
+  assess(x: number, y: number, picked: Spot): { risky: boolean; neighbors: number; nearestPx: number } {
+    let n = 0, nearest = 1e9;
+    // 狙った目印の動き(直近 driftS 秒の画面上の移動量): 動いていなければ、見てから触れるまでのずれは起きず、重なり(staticPx)だけが問題
+    const tr = picked.trail, last = tr[tr.length - 1]; let drift = 0; if (last) for (const q of tr) if (last.t - q.t <= SPOTS.driftS + 1e-6) drift = Math.max(drift, Math.hypot(last.x - q.x, last.y - q.y));
+    const moving = drift >= SPOTS.driftPx;
+    for (const j of this.list) {
+      if (j.id === picked.id) continue;
+      const dnow = Math.hypot(x - j.dx, y - j.dy); let dj = dnow; for (const q of j.trail) dj = Math.min(dj, Math.hypot(x - q.x, y - q.y));
+      nearest = Math.min(nearest, dj);
+      const farExtra = picked.d > SPOTS.farM || j.d > SPOTS.farM ? SPOTS.riskFarPx : 0;
+      if (dnow <= SPOTS.staticPx + farExtra * 0.5 || (moving && dj <= SPOTS.riskPx + farExtra)) n++;
+    }
+    return { risky: n > 0, neighbors: n, nearestPx: nearest };
+  }
   /** 画面の (x,y) に触れたとき、狙われた候補。表示位置が近い順(同じなら、鳥に近いほう)。見つからなければ null。 */
   pick(x: number, y: number): Spot | null {
     let best: Spot | null = null, bd = 1e9, second = 1e9;

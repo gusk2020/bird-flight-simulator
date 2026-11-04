@@ -893,7 +893,7 @@ async function g12({ p, cdp, errs }) {
     if (!rs) { row.result = "unstable-ring"; rows.push(row); continue; }
     const tid = await p.evaluate(() => { const q = window.__fs(window.__target); window.__fsId = q ? q.id : window.__target.id; return window.__fsId; }); // 押す前に、狙う目印の ID を確定
     const b = await p.evaluate(() => ({ starts: __game.autoLand.stats.starts, refused: __game.autoLand.stats.refused, crashes: __game.flight.crashes, ok: __game.autoLand.stats.success, taps: __game.input.stats.ringTaps, gone: __game.spots.stats.gone }));
-    await realTap(Math.round(rs.x), Math.round(rs.y)); await sleep(250);
+    await realTap(Math.round(rs.x), Math.round(rs.y)); await sleep(250); await p.evaluate(() => { if (__game.spotConfirm.active) document.getElementById("spotGo").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "touch" })); }); await sleep(150);
     const a = await p.evaluate(() => ({ starts: __game.autoLand.stats.starts, refused: __game.autoLand.stats.refused, why: __game.autoLand.lastRefusal, taps: __game.input.stats.ringTaps, tgt: __game.autoLand.lastTargetId, active: __game.autoLand.active, gone: __game.spots.stats.gone }));
     row.tapped = a.taps === b.taps + 1;
     if (row.tapped && a.starts === b.starts && a.refused === b.refused && (await p.evaluate(() => __game.approach.id)) >= 0) { // H8-C: 遠い目印を押した = 接近先に選んだ。向きを合わせて近づき、届く範囲で自動着地が始まる(または目印が去って解除される)のを待つ

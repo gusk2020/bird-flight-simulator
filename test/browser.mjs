@@ -892,8 +892,8 @@ async function g12({ p, cdp, errs }) {
     let rs = null; for (let w = 0; w < 14 && !rs; w++) { const rd = () => p.evaluate(() => { const q = window.__fs(window.__target); return q ? { x: q.dx, y: q.dy, v: true } : { x: 0, y: 0, v: false }; }); const a1 = await rd(); await sleep(100); const a2 = await rd(); if (a1.v && a2.v && Math.hypot(a2.x - a1.x, a2.y - a1.y) <= 25) rs = a2; }
     if (!rs) { row.result = "unstable-ring"; rows.push(row); continue; }
     const tid = await p.evaluate(() => { const q = window.__fs(window.__target); window.__fsId = q ? q.id : window.__target.id; return window.__fsId; }); // 押す前に、狙う目印の ID を確定
-    const b = await p.evaluate(() => ({ starts: __game.autoLand.stats.starts, refused: __game.autoLand.stats.refused, crashes: __game.flight.crashes, ok: __game.autoLand.stats.success, taps: __game.input.stats.ringTaps, gone: __game.spots.stats.gone }));
-    const cb = await p.evaluate(() => ({ asked: __game.spotConfirm.stats.asked, gone: __game.spotConfirm.stats.gone, conf: __game.spotConfirm.stats.confirmed }));
+    const b = await p.evaluate(() => ({ starts: __game.autoLand.stats.starts, refused: __game.autoLand.stats.refused, crashes: __game.flight.crashes, ok: __game.autoLand.stats.success, taps: __game.input.stats.ringTaps, gone: __game.spots.stats.gone, asked: __game.spotConfirm.stats.asked, cgone: __game.spotConfirm.stats.gone, conf: __game.spotConfirm.stats.confirmed }));
+    const cb = { asked: b.asked, gone: b.cgone, conf: b.conf };
     await realTap(Math.round(rs.x), Math.round(rs.y));
     // H8-D: 密集した目印は 1 回目のタップが仮選択になる。ここでは「ここへ接近」を、仮選択が出た次の瞬間に押す(人の反応時間は別の指標: 仮選択後に目印が去った件数を行ごとに記録する)
     await p.waitForFunction(x => { const g = __game; return g.spotConfirm.stats.asked > x.asked || g.autoLand.stats.starts > x.s || g.autoLand.stats.refused > x.r || g.approach.id >= 0 || g.spots.stats.gone > x.g; }, { asked: cb.asked, s: b.starts, r: b.refused, g: b.gone }, { timeout: 1500, polling: "raf" }).catch(() => {});

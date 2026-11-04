@@ -862,12 +862,13 @@ async function g12({ p, cdp, errs }) {
     const tid = await p.evaluate(() => { const q = window.__fs(window.__target); return q ? q.id : window.__target.id; }); // 押す前に、狙う目印の ID を確定
     const b = await p.evaluate(() => ({ starts: __game.autoLand.stats.starts, refused: __game.autoLand.stats.refused, crashes: __game.flight.crashes, ok: __game.autoLand.stats.success, taps: __game.input.stats.ringTaps, gone: __game.spots.stats.gone }));
     await realTap(Math.round(rs.x), Math.round(rs.y)); await sleep(250);
-    const a = await p.evaluate(() => ({ starts: __game.autoLand.stats.starts, refused: __game.autoLand.stats.refused, why: __game.autoLand.lastRefusal, taps: __game.input.stats.ringTaps, tgt: __game.autoLand.target ? __game.autoLand.target.id : -1, active: __game.autoLand.active, gone: __game.spots.stats.gone }));
+    const a = await p.evaluate(() => ({ starts: __game.autoLand.stats.starts, refused: __game.autoLand.stats.refused, why: __game.autoLand.lastRefusal, taps: __game.input.stats.ringTaps, tgt: __game.autoLand.lastTargetId, active: __game.autoLand.active, gone: __game.spots.stats.gone }));
     row.tapped = a.taps === b.taps + 1;
     if (a.refused > b.refused) { row.result = "refused:" + a.why; rows.push(row); continue; } // 認識したが安全判定で拒否(認識の失敗とは別)
     if (a.starts === b.starts) { // 認識されなかった: 押した位置が目印に届いていたかで、取りこぼしと「指が届く前に目印が動いた/去った」を分ける
       const now = await p.evaluate(() => { const q = window.__fs(window.__target); return q ? { x: q.dx, y: q.dy } : null; }); row.dbg = { taps: [b.taps, a.taps], now, press: rs, rd: await p.evaluate(() => ({ ...__game.input.ringDiag })) };
       row.result = !now ? "ring-gone-before-tap" : Math.hypot(now.x - rs.x, now.y - rs.y) > 34 ? "ring-moved-before-tap" : "tap-not-recognised"; rows.push(row); continue; }
+    row.dbgT = await p.evaluate(([t, tid]) => { const g = __game, A = g.surfaces.all[tid], B = g.surfaces.all[t]; return { spot: A && [A.kind, A.minX.toFixed(1), A.minZ.toFixed(1), A.top], tgt: B && [B.kind, B.minX.toFixed(1), B.minZ.toFixed(1), B.top], want: [window.__target.kind, window.__target.minX.toFixed(1), window.__target.minZ.toFixed(1), window.__target.top] }; }, [a.tgt, tid]);
     row.targetOk = a.tgt === tid || (await p.evaluate(([t, tid]) => { const g = __game, A = g.surfaces.all[tid], B = g.surfaces.all[t]; const bal = k => k === "balcony" || k === "rail"; return !!A && !!B && bal(A.kind) && bal(B.kind) && Math.hypot((A.minX + A.maxX) / 2 - (B.minX + B.maxX) / 2, (A.minZ + A.maxZ) / 2 - (B.minZ + B.maxZ) / 2) < 4; }, [a.tgt, tid])); /* ベランダの目印は、手すりの上へ降りる設計(AutoLand.retarget: 鳥のいる側の手すり)なので、同じベランダの床・手すりは同じ目的地とみなす(4 m 以内) */ // 押した足場そのものへ着地を始めた(隣ではない)
     await p.waitForFunction(() => !__game.autoLand.active, null, { timeout: 25000 }).catch(() => {});
     const e = await p.evaluate(([bo]) => ({ end: __game.autoLand.end, crashes: __game.flight.crashes, ok: __game.autoLand.stats.success, mode: __game.flight.mode }), [b.ok]);

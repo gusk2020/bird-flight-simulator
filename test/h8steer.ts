@@ -84,6 +84,9 @@ export function h8SteerTests() {
     for (const [pad, upT] of [[quick, 1060], [slow, 1900]] as const) { pad.down(1, RECT.cx, RECT.cy, 1000, RECT, 0); pad.poll(1700); /* 処理が遅れて、先に 0.7 秒ぶん進んだ */ pad.up(1, upT); }
     check(`${m}: a late-delivered release still counts as a tap when its own timestamp says 60 ms (and a real 0.9 s press is not a tap)`, quick.tapSeq === 1 && slow.tapSeq === 0, `quick ${quick.tapSeq} slow ${slow.tapSeq}`);
   }
+  { const slowPad = new SteerPad(), fastPad = new SteerPad(); slowPad.mode = fastPad.mode = "A"; slowPad.tapLimit = () => 600; // 10fps: 「離した」の到着は数フレーム遅れる
+    for (const pad of [slowPad, fastPad]) { pad.down(1, RECT.cx, RECT.cy, 1000, RECT, 0); pad.up(1, 1450); }
+    check("tap length limit grows with slow frames (450 ms counts as a tap at 10 fps, not at 60 fps)", slowPad.tapSeq === 1 && fastPad.tapSeq === 0, `slow ${slowPad.tapSeq} fast ${fastPad.tapSeq}`); }
   // 地上: 同じ◎で向き直って前進歩行(後退しない)、上=小ジャンプ、タップ=羽ばたき(小ジャンプ)
   { const gnd = () => { const f = at(0, 0.5, 0, 0, 0); f.pos.y = world.heightAt(0, 0) + 0.32; f.mode = "landed"; f.vel.set(0, 0, 0); f.walkV = 0; f.prevPos.copy(f.pos); return f; };
     for (const m of ["A", "B", "C"] as SteerMode[]) {

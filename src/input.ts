@@ -18,7 +18,11 @@ export class Input {
   /** 描画が固まった区間(main が記録)。タップの長さからは、この区間と重なる分を引く */
   stalls: { s: number; e: number }[] = [];
   /** 直前のフレームの開始時刻(main が設定)。いま進行中の長いフレームも「固まった区間」に数える(入力イベントは次のフレームの記録より前に届くため) */
-  frameAt = 0;
+  frameAt = 0; frameGap = 0;
+  /** main が毎フレーム呼ぶ。直近のフレームの長さ(なだらかに平均)を覚える */
+  noteFrame(now: number) { if (this.frameAt > 0) { const g = now - this.frameAt; if (g < 1000) this.frameGap += (g - this.frameGap) * 0.2; } this.frameAt = now; }
+  /** タップとみなす最長ms。「離した」の届くのはフレーム単位なので、描画が遅いほど短いタップも長く測られる(10fpsで数フレーム分)。60fpsではほぼ300ms */
+  tapLimit() { return 300 + Math.min(600, 3 * this.frameGap); }
   private pendingCut(t0: number, t1: number, minMs: number) { const now = performance.now(); return this.frameAt > 0 && now - this.frameAt >= minMs ? Math.max(0, Math.min(t1, now) - Math.max(t0, this.frameAt)) : 0; }
   tapMs(t0: number, t1: number) { let cut = this.pendingCut(t0, t1, 100); for (const q of this.stalls) cut += Math.max(0, Math.min(t1, q.e) - Math.max(t0, q.s)); return Math.max(0, t1 - t0 - Math.min(cut, 4000)); } // 引くのは最大4秒まで(それより長い押下は、固まっていても長押しとして扱う)
   /** ブレーキ/止まっている判定用: 0.4秒以上の固まりだけを引く(ふつうに重い描画=毎フレーム0.2秒、は固まりとは見なさない) */
@@ -49,10 +53,10 @@ export class Input {
 
   constructor() {
     const zone = document.getElementById("stick")!;
-    this.steer.stall = (a, b) => this.longStallMs(a, b); this.steer.tapStall = (a, b) => this.tapMs(a, b);
+    this.steer.stall = (a, b) => this.longStallMs(a, b); this.steer.tapStall = (a, b) => this.tapMs(a, b); this.steer.tapLimit = () => this.tapLimit();
     // ◯のタップ(G1-5): スティックや羽ばたきタップより先(キャプチャ段階)に見る。◯の上で押して、ほとんど動かさず短く離したときだけ「◯タップ」。
     // 動かせばスティック、長く押せば減速/歩行として今までどおり扱う。◯タップになった指は、羽ばたきタップにも歩行にもしない
-    const RING_TAP_MS = 300, RING_SLOP_PX = 14;
+    const RING_SLOP_PX = 14; // タップの最長時間は tapLimit()(描画の遅さに応じて延びる)
     document.addEventListener("pointerdown", e => {
       this.ringFired.delete(e.pointerId); // 前に使った指番号の取り残しを消す
       this.ringDiag.down++;
@@ -63,8 +67,8 @@ export class Input {
     document.addEventListener("pointerup", e => {
       const c = this.ringCand.get(e.pointerId); this.ringCand.delete(e.pointerId); const D = this.ringDiag; D.up++;
       const dur = c ? this.tapMs(c.t, e.timeStamp) : 0, near = c ? Math.hypot(e.clientX - c.x, e.clientY - c.y) <= RING_SLOP_PX : false;
-      if (!c) D.upNoCand++; else if (!(dur < RING_TAP_MS)) { D.upSlow++; D.last += ` slow dt=${Math.round(e.timeStamp - c.t)} eff=${Math.round(dur)}`; } else if (!near) { D.upFar++; D.last += ` far`; } else D.upOk++;
-      if (c && dur < RING_TAP_MS && near) { // 押した時点で◯の当たり判定の中だったことは確かめ済み(◯は飛びながら動く・消えることがあるので、離した時点では確かめ直さない)。長さは、描画が固まっていた分を引いて測る
+      if (!c) D.upNoCand++; else if (!(dur < this.tapLimit())) { D.upSlow++; D.last += ` slow dt=${Math.round(e.timeStamp - c.t)} eff=${Math.round(dur)}`; } else if (!near) { D.upFar++; D.last += ` far`; } else D.upOk++;
+      if (c && dur < this.tapLimit() && near) { // 押した時点で◯の当たり判定の中だったことは確かめ済み(◯は飛びながら動く・消えることがあるので、離した時点では確かめ直さない)。長さは、描画が固まっていた分を引いて測る
          this.ringFired.add(e.pointerId); this.stats.ringTaps++; this.onRingTap(); }
     }, true);
     document.addEventListener("pointercancel", e => { this.ringDiag.cancel++; this.ringCand.delete(e.pointerId); this.ringFired.delete(e.pointerId); }, true);

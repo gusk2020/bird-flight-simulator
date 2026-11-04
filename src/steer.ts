@@ -50,6 +50,8 @@ export class SteerPad {
   stall: (t0: number, t1: number) => number = (a, b) => b - a;
   /** タップかどうかの判定に使う経過ms(H6: 描画が固まった間に入った短いタップを、長押しと誤判定しない)。既定は stall と同じ */
   tapStall: (t0: number, t1: number) => number = (a, b) => b - a;
+  /** タップとみなす最長ms(描画が遅いほど長い)。既定は STEER.tapMs */
+  tapLimit: () => number = () => STEER.tapMs;
   private rect: PadRect = { cx: 0, cy: 0, r: 60 };
   private x0 = 0; private y0 = 0; private tDown = 0; private tSeen = 0; private lastPoll = -1; private gap = 0; private lastMoveT = 0; private ax = 0; private ay = 0; private centreSince = -1;
   get active() { return this.phase !== "idle"; }
@@ -88,7 +90,7 @@ export class SteerPad {
   }
   up(id: number, t: number) {
     if (id !== this.id || this.phase === "idle") return;
-    if ((this.phase === "pending" || this.phase === "brake") && !this.moved && this.tapStall(this.tDown, t) < STEER.tapMs) this.tapSeq++; // ブレーキが早く入ってしまっても、指を離したときのイベントの時刻で見て短ければタップ(描画が遅れて「離した」の到着が遅れた場合の救済) // 短く離した = タップ(長押し成立後・動かしたあとは羽ばたかない)
+    if ((this.phase === "pending" || this.phase === "brake") && !this.moved && this.tapStall(this.tDown, t) < this.tapLimit()) this.tapSeq++; // ブレーキが早く入ってしまっても、指を離したときのイベントの時刻で見て短ければタップ(描画が遅れて「離した」の到着が遅れた場合の救済) // 短く離した = タップ(長押し成立後・動かしたあとは羽ばたかない)
     if (this.mode === "A" && this.moved) { const v = this.vec(); if (v.mag > 0) { this.course = { yaw: wrap(this.refYaw + v.yawOff), pitch: v.pitch }; this.courseSeq++; } } // スワイプして離した: 進路を確定
     this.reset();
   }

@@ -16,6 +16,10 @@ canvas{display:block;width:100%;height:100%}
 .pad b{position:absolute;left:0;right:0;bottom:-15px;font-size:11px;font-weight:normal;color:#fffc;text-shadow:0 0 3px #000}
 #padProx{border-color:#9fe4ffaa}#padCruise{opacity:.8}
 body[data-ctl=right] .pad,body[data-ctl=left] .pad{display:block}
+body[data-steer=A] #padCruise,body[data-steer=B] #padCruise,body[data-steer=C] #padCruise{display:none}
+body[data-steer=A] #padProx b,body[data-steer=B] #padProx b,body[data-steer=C] #padProx b{font-size:0}body[data-steer=A] #padProx b::after,body[data-steer=B] #padProx b::after,body[data-steer=C] #padProx b::after{content:"◎";font-size:22px}
+body[data-steer=C] #padProx{background:radial-gradient(circle,#ffffff2e 0 30%,transparent 31%)}
+#steerTag{position:fixed;left:8px;bottom:6px;font:11px/1.2 sans-serif;color:#fff;opacity:.75;text-shadow:0 0 3px #000;pointer-events:none;z-index:3}
 body[data-auto="1"] .pad{display:none!important}
 #padDot{position:fixed;display:none;width:22px;height:22px;margin:-11px 0 0 -11px;border-radius:50%;background:#9fe4ffcc;border:2px solid #fff;pointer-events:none;z-index:3}
 #stickBase,#stickKnob{position:fixed;border-radius:50%;pointer-events:none;display:none;transform:translate(-50%,-50%)}
@@ -50,11 +54,12 @@ body[data-ctl=right] #flap,body[data-ctl=right] #brake,body[data-ctl=left] #flap
 #toast{position:fixed;left:50%;top:58px;transform:translateX(-50%);padding:6px 14px;border-radius:14px;background:rgba(20,26,36,.72);color:#fff;font-size:13px;z-index:7;opacity:0;transition:opacity .3s;pointer-events:none}
 </style></head><body>
 <div id="toast"></div><div id="ringEdge"></div><div id="autoland"></div><div id="vig"></div><canvas id="fx"></canvas><div id="hud"></div><div id="msg">左:ドラッグで旋回・上下　右:羽ばたき(押し続けで連続)・減速　着地中に羽ばたくと離陸</div>
-<div id="stick"></div><div class="pad" id="padCruise"><b>巡航</b></div><div class="pad" id="padProx"><b>近接</b></div><div id="padDot"></div><div id="stickBase"></div><div id="stickKnob"></div>
-<div id="top"><button class="btn" id="btnPause">⏸</button><button class="btn" id="btnCtl">両手</button><button class="btn" id="btnTime">昼</button><button class="btn" id="btnSeason">春</button><button class="btn" id="btnCam">三人称</button><button class="btn" id="btnReset">リセット</button></div>
+<div id="stick"></div><div class="pad" id="padCruise"><b>巡航</b></div><div class="pad" id="padProx"><b>近接</b></div><div id="padDot"></div><div id="steerTag"></div><div id="stickBase"></div><div id="stickKnob"></div>
+<div id="top"><button class="btn" id="btnPause">⏸</button><button class="btn" id="btnSteer">操縦 従来</button><button class="btn" id="btnCtl">両手</button><button class="btn" id="btnTime">昼</button><button class="btn" id="btnSeason">春</button><button class="btn" id="btnCam">三人称</button><button class="btn" id="btnReset">リセット</button></div>
 <div id="autoBar"><button class="btn" id="btnAutoOff" hidden>オート解除</button><button class="btn" id="btnPol" hidden>おまかせ</button><button class="btn" id="btnTs" hidden>時間 標準</button></div>
 <button class="btn" id="brake">減速</button><button class="btn" id="flap">羽ばたき</button>
 <div id="overlay"><h1 id="ovTitle"></h1><p>左:ドラッグで旋回・上下　右:羽ばたき(押し続けで連続)・減速<br>着地中: 歩く(押し続け)・羽ばたき短押しで小ジャンプ・長押しで離陸　⏸で一時停止<br>片手: スライド=旋回/上下　タップ=羽ばたき　長押し=減速(地上は歩く)</p><div class="set" id="settings">
+<div>操縦(片手) <button data-set="steer" data-val="off">従来</button><button data-set="steer" data-val="A">A</button><button data-set="steer" data-val="B">B</button><button data-set="steer" data-val="C">C</button> <button id="btnSteerStart">同じ位置から開始</button></div>
 <div>操作 <button data-set="ctl" data-val="both">両手</button><button data-set="ctl" data-val="right">右手</button><button data-set="ctl" data-val="left">左手</button></div>
 <div>行動 <button data-set="apol" data-val="life">自然生活</button><button data-set="apol" data-val="scenic">景色</button><button data-set="apol" data-val="adventure">冒険</button><button data-set="apol" data-val="random">おまかせ</button></div>
 <div>オート時間 <button data-set="ats" data-val="slow">ゆったり</button><button data-set="ats" data-val="normal">標準</button><button data-set="ats" data-val="fast">高速</button></div>

@@ -18,6 +18,7 @@ import type { TimeSpeed } from "./settings";
 import { Rain } from "./rain";
 import { Quality } from "./quality";
 import { loadPrefs, savePrefs, ControlMode } from "./settings";
+import { SteerLayer, STEER_MODES, STEER_NAMES, STEER_SHORT, type SteerMode } from "./steer";
 import { FlapAssist } from "./assist";
 import { PHYS } from "./params";
 import { Autopilot } from "./autopilot";
@@ -65,7 +66,7 @@ sky.renderOrder = -1; scene.add(sky);
 const cloudMat = (world.clouds.children[0] as THREE.Mesh).material as THREE.MeshBasicMaterial;
 let hour: number = TIME_PRESETS[1].hour, preset = 1, targetHour: number | null = null;
 const prefs = loadPrefs(); // 前回の操作方式など(壊れていれば既定値)。ゲーム自体は必ず開始待ちで始まる
-const settings = { weather: "clear" as Weather, wind: 1, bearing: 270, time: 0, fx: 2, npc: 2, gfx: 0, ctl: prefs.control as string, apol: prefs.autoPolicy as string, ats: prefs.autoTimeSpeed as string, ahide: prefs.autoHideUi ? "1" : "0", ss: prefs.seasonSpeed as string };
+const settings = { weather: "clear" as Weather, wind: 1, bearing: 270, time: 0, fx: 2, npc: 2, gfx: 0, ctl: prefs.control as string, apol: prefs.autoPolicy as string, ats: prefs.autoTimeSpeed as string, ahide: prefs.autoHideUi ? "1" : "0", ss: prefs.seasonSpeed as string, steer: prefs.steer as string };
 const WX_INDEX: Record<Weather, number> = { clear: 0, cloudy: 1, rain: 2 }, WX_NAMES: Weather[] = ["clear", "cloudy", "rain"];
 // 天気の連続値(0晴/1曇/2雨)。手動ではボタンの値、オート中はゆっくり移り変わる
 let wxLevel = 0, appliedWeather: Weather = "clear";
@@ -133,13 +134,18 @@ const CTL_NAMES: Record<ControlMode, string> = { both: "両手", right: "右手"
 /** 片手操作の巡航◎・近接◎の位置と大きさを画面に合わせる(両手操作では非表示) */
 function layoutPads() {
   const L = input.layout(); if (!L) return;
+  if (input.steerOn) { const r = input.steerRect(), el = document.getElementById("padProx")!; el.style.left = r.cx - r.r + "px"; el.style.top = r.cy - r.r + "px"; el.style.width = el.style.height = r.r * 2 + "px"; dirty = true; return; }
   for (const [id, r] of [["padCruise", L.cruise], ["padProx", L.prox]] as const) { const el = document.getElementById(id)!; el.style.left = r.cx - r.r + "px"; el.style.top = r.cy - r.r + "px"; el.style.width = el.style.height = r.r * 2 + "px"; }
   dirty = true;
 }
+input.getYaw = () => flight.yaw;
 input.getHeading = () => (flight.vel.length() > 2 ? Math.atan2(-flight.vel.x, -flight.vel.z) : flight.yaw); // 触れ始めの進行方向(近接◎の基準)
+const steerLayer = new SteerLayer(), camDir0 = new THREE.Vector3(), camDir1 = new THREE.Vector3(); let camReady = false;
 function applyControl() {
   const m = settings.ctl as ControlMode;
   input.setMode(m); assist.enabled = m !== "both"; assist.reset();
+  { const sm = settings.steer as SteerMode; input.setSteer(sm); steerLayer.reset(); document.body.dataset.steer = m !== "both" ? sm : "off"; // H8-A: 単一◎の操縦方式。両手操作では使わない(従来のスティック)
+    document.getElementById("btnSteer")!.textContent = "操縦 " + STEER_SHORT[sm]; const tag = document.getElementById("steerTag")!; tag.textContent = m !== "both" && sm !== "off" ? "◎ " + STEER_NAMES[sm] : ""; if (prefs.steer !== sm) { prefs.steer = sm; savePrefs(prefs); } }
   document.body.dataset.ctl = m; document.getElementById("btnCtl")!.textContent = CTL_NAMES[m]; layoutPads();
   if (prefs.control !== m) { prefs.control = m; savePrefs(prefs); }
   const p = settings.apol as AutoPolicy;
@@ -177,7 +183,7 @@ function applySettings() {
   document.getElementById("rowBearing")!.hidden = settings.wind === 0;
 }
 document.querySelectorAll<HTMLElement>("[data-set]").forEach(b => b.addEventListener("click", () => {
-  (settings as Record<string, unknown>)[b.dataset.set!] = b.dataset.set === "weather" || b.dataset.set === "ctl" || b.dataset.set === "apol" || b.dataset.set === "ats" || b.dataset.set === "ahide" || b.dataset.set === "ss" ? b.dataset.val : Number(b.dataset.val); applySettings();
+  (settings as Record<string, unknown>)[b.dataset.set!] = b.dataset.set === "weather" || b.dataset.set === "ctl" || b.dataset.set === "apol" || b.dataset.set === "ats" || b.dataset.set === "ahide" || b.dataset.set === "ss" || b.dataset.set === "steer" ? b.dataset.val : Number(b.dataset.val); applySettings();
 }));
 applyEnv();
 input.onTime = () => {
@@ -196,6 +202,11 @@ const autopilot = new Autopilot(world, (Date.now() & 0xffff) + 1); autopilot.set
 autopilot.water = (x, z) => { const n = puddles.nearest(x, z); if (!n) return null; const dx = x - n.p.x, dz = z - n.p.z, h = Math.hypot(dx, dz) || 1, r = puddles.radius(n.p); return { x: n.p.x + dx / h * (r - 0.3), z: n.p.z + dz / h * (r - 0.3), d: n.d }; };
 const director = new CameraDirector((Date.now() >>> 3) + 7), drift = new WeatherDrift(0, (Date.now() >>> 5) + 3), uiHider = new UiHider();
 const TS_NAMES: Record<TimeSpeed, string> = { slow: "ゆったり", normal: "標準", fast: "高速" }, TS_ORDER: TimeSpeed[] = ["slow", "normal", "fast"];
+document.getElementById("btnSteer")!.addEventListener("pointerdown", e => { e.preventDefault(); e.stopPropagation(); // H8-A: 操縦方式をその場で切り替える(従来→A→B→C)。両手操作のときは片手に切り替えるよう知らせる
+  settings.steer = STEER_MODES[(STEER_MODES.indexOf(settings.steer as SteerMode) + 1) % STEER_MODES.length]; applySettings(); toast("操縦: " + STEER_NAMES[settings.steer as SteerMode] + (settings.ctl === "both" ? "(両手操作では使われません。右手/左手にしてください)" : "")); });
+/** 開発用の固定開始: 方式を比べるとき、毎回同じ位置・向き・速さから始める */
+function steerTestStart() { forage.reset(); game.reset(); input.releaseAll(); steerLayer.reset(); steerLayer.samples.length = 0; flight.yaw = 0; flight.vel.set(0, 0, -10); cam.snap(); toast("同じ開始位置へ"); }
+document.getElementById("btnSteerStart")!.addEventListener("click", () => { steerTestStart(); });
 document.getElementById("btnSeason")!.addEventListener("pointerdown", e => { e.preventDefault(); e.stopPropagation(); settings.ss = SEASON_ORDER[(SEASON_ORDER.indexOf(season.speed) + 1) % 3]; applySettings(); toast("季節の速さ: " + SEASON_SPEED_NAME[season.speed]); });
 applySeasonLook(true);
 const autoIn = { x: 0, y: 0, flapHeld: false, flapTap: false, brake: false };
@@ -204,6 +215,7 @@ const POL_NAMES: Record<AutoPolicy, string> = { life: "自然生活", scenic: "�
 const readInput = () => {
   if (autopilot.enabled) { autoIn.flapTap = false; autoIn.flapHeld = false; autoIn.brake = false; autopilot.busy = forage.active; const ao = autopilot.drive(flight, autoIn, 1 / 60); if (autopilot.state === "cruise" && flight.mode === "air" && !flight.hopping && flight.stun <= 0) cruiseGuard.apply(world, flight, ao); /* H4: 巡航中だけ、手動と同じ衝突予測の減速・引き起こしを共有(着陸進入・離陸は自分の目標を優先) */ return forage.apply(ao, flight, false); }
   const raw = input.read();
+  if (input.steerOn) steerLayer.apply(flight, raw, input.steer, 1 / 60, autoLand.active, performance.now()); // H8-A: 単一◎の指示を操舵の入力にする(物理・補助・回避はこの後も従来どおり)
   if (!autoLand.active && proxLand.update(flight, 1 / 60, !!raw.prox)) toast("自動着地");
   if (autoLand.active) raw.prox = undefined; // 自動着地中は近接機動の指示を使わない
   if (flight.mode === "air" && !flight.prox.on && !flight.hopping && flight.stun <= 0 && !autoLand.active) cruiseGuard.apply(world, flight, raw);
@@ -269,6 +281,7 @@ const STALL_MS = 100;
 let lastGT = 0, last = performance.now(), fpsT = 0, fpsN = 0, fps = 0, hudT = 0;
 const bp = new THREE.Vector3();
 function frame(now: number) {
+  input.noteFrame(now);
   if (now - last > STALL_MS) { input.stalls.push({ s: last, e: now }); if (input.stalls.length > 8) input.stalls.shift(); } // 画面が固まった(長いフレーム)区間を覚えておく。そのあいだに入ったタップは、押してから離すまでの時間が実際より長く測られるため
   const dt = Math.min(0.1, Math.max(0, (now - last) / 1000)); last = now;
   const running = game.state === "running";
@@ -313,6 +326,7 @@ function frame(now: number) {
     const sh = director.update(vdt, flight); cam.setShot(sh.yaw, sh.dist, sh.h); bird.setVisible(cam.shotDist >= FIRST_PERSON_BELOW);
   }
   cam.update(vdt, flight, bp, fxc);
+  { camDir1.copy(camDir0); camera.getWorldDirection(camDir0); if (vdt > 0 && camReady) steerLayer.camSample(camDir1.angleTo(camDir0) / vdt); camReady = true; } // 開発用: カメラの向きの角速度(rad/s)
   { const d = document.getElementById("padDot")!, v = input.proxVisual, on = v.on && input.mode !== "both" && !autopilot.enabled; if (on) { d.style.display = "block"; d.style.left = v.x + "px"; d.style.top = v.y + "px"; } else if (d.style.display !== "none") d.style.display = "none"; } // 近接◎の指の位置(目印)
   { // 着地候補の目印(◯): 手動・空中のときだけ。候補が一瞬見えなくなっても数秒は保つ(PerchAssist.marker)。◯をタップすると自動着地
     const mk = perchAssist.marker, hasPt = !!mk && markerPt.on(perchAssist, flight);
@@ -360,4 +374,4 @@ function updateHud(dt: number, now: number) {
 }
 renderer.setAnimationLoop(frame);
 // テスト・デバッグ用
-(window as unknown as Record<string, unknown>).__game = { game, flight, world, input, cam, camera, renderer, scene, frame, env: () => envAt(hour), stats, npc, lines, streaks, speedIntensity, setHour: (h: number) => { hour = h; targetHour = null; applyEnv(); }, settings, applySettings, assist, prefs, autopilot, setAuto, season, applySeasonLook, saveSeason, forage, perchAssist, perchMarker, autoLand, proxLand, ringDiag, puddles, puddleView, life, ring, surfaces, cruiseGuard, npcView, npcUpdate: () => npcView.update(npc, camera.position, 220, world.lightsLevel()), hour: () => hour, director, drift, uiHider, wxLevel: () => wxLevel, wind, rain, quality };
+(window as unknown as Record<string, unknown>).__game = { steerLayer, steerTestStart, game, flight, world, input, cam, camera, renderer, scene, frame, env: () => envAt(hour), stats, npc, lines, streaks, speedIntensity, setHour: (h: number) => { hour = h; targetHour = null; applyEnv(); }, settings, applySettings, assist, prefs, autopilot, setAuto, season, applySeasonLook, saveSeason, forage, perchAssist, perchMarker, autoLand, proxLand, ringDiag, puddles, puddleView, life, ring, surfaces, cruiseGuard, npcView, npcUpdate: () => npcView.update(npc, camera.position, 220, world.lightsLevel()), hour: () => hour, director, drift, uiHider, wxLevel: () => wxLevel, wind, rain, quality };

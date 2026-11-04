@@ -21,6 +21,8 @@ export const SPOTS = {
   mergeXZ: 1.2, mergeY: 1.5, // 同じ構造物の重複(ベランダの床と手すりなど)を 1 つにまとめる距離(m)
   // H8-D: 混同のおそれ(= 別の候補を拾い得る押し方)の判定。触れた点の近く(riskPx。35 m 超の遠い目印がからむときは riskFarPx を足す)に、別の候補の現在位置または直近の位置があれば、1 回目のタップは「仮選択」にして確認を求める
   riskPx: 44, riskFarPx: 14, farM: 35,
+  // 確認の時間が残らない目印(画面の端から出る・鳥の真横を過ぎて背後へ回る)は、仮選択にしても確認前に消える。confirmMinS 秒以内に去ると見込まれる目印は、確認を求めず従来どおり 1 タップで始める
+  confirmMinS: 0.6,
   staticPx: 30,   // 別の候補がこの距離(px)以内にあれば、止まっていても取り違え得る(重なり)ので常に確認
   driftPx: 15,    // 直近 driftS 秒で狙った目印がこれ以上動いていれば、見てから触れるまでのずれで取り違え得る(動く目印)
   driftS: 0.2,
@@ -84,6 +86,7 @@ export class LandSpots {
   update(F: SpotFrame, active: boolean) {
     this.stats.frames++;
     if (!this.enabled || !active) { if (this.list.length) this.clear(); else this.pressedId = -1; return; }
+    this.vw = F.w; this.vh = F.h; this.spd = F.speed ?? 0;
     const R = Math.min(SPOTS.rangeMax, Math.max(SPOTS.range, (F.speed ?? 0) * SPOTS.lookS)); this.rangeNow = R; // H8-C: 速いほど遠くから
     const near = this.idx.near(F.bx, F.bz, R, this.tmp); this.behindIds.clear(); this.why.clear();
     this.stats.enumerated = near.length;
@@ -163,6 +166,14 @@ export class LandSpots {
   valid(id: number, t: number): boolean { if (this.list.some(q => q.id === id)) return true; const l = this.lost.get(id); return !!l && !l.behind && t - l.t <= SPOTS.graceS; }
   /** 見えなくなった理由(診断用): behind / offscreen / ui / occluded / merged / range。まだ見えているときは null */
   goneWhy(id: number): string | null { return this.list.some(q => q.id === id) ? null : this.lost.get(id)?.why ?? null; }
+  private vw = 0; private vh = 0; private spd = 0;
+  /** 画面の動き(直近 driftS 秒)と鳥の速さから見て、confirmMinS 秒以内に画面の外へ出る・背後へ回ると見込まれる目印か */
+  leavesSoon(p: Spot): boolean {
+    const T = SPOTS.confirmMinS, tr = p.trail, last = tr[tr.length - 1]; if (!last || this.vw <= 0) return false;
+    let first = last; for (const q of tr) if (last.t - q.t <= SPOTS.driftS + 1e-6) { first = q; break; }
+    const dt = last.t - first.t; if (dt > 0.03) { const px = p.dx + (last.x - first.x) / dt * T, py = p.dy + (last.y - first.y) / dt * T; if (px < 0 || px > this.vw || py < 0 || py > this.vh) return true; }
+    return this.spd > 3 && (p.d - 3) / this.spd < T;
+  }
   get(id: number): Spot | null { return this.list.find(q => q.id === id) ?? null; }
   /**
    * H8-D: 押した点 (x,y) が、picked を選ぶときに別の候補と取り違え得る押し方か。
@@ -181,7 +192,7 @@ export class LandSpots {
       const farExtra = picked.d > SPOTS.farM || j.d > SPOTS.farM ? SPOTS.riskFarPx : 0;
       if (dnow <= SPOTS.staticPx + farExtra * 0.5 || (moving && dj <= SPOTS.riskPx + farExtra)) n++;
     }
-    return { risky: n > 0, neighbors: n, nearestPx: nearest };
+    return { risky: n > 0 && !this.leavesSoon(picked), neighbors: n, nearestPx: nearest };
   }
   /** 画面の (x,y) に触れたとき、狙われた候補。表示位置が近い順(同じなら、鳥に近いほう)。見つからなければ null。 */
   pick(x: number, y: number): Spot | null {

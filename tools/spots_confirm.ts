@@ -8,7 +8,7 @@ import { L, idx } from "./autoland_success";
 import { LandSpots, SPOTS, type SpotFrame } from "../src/landspots";
 let seed = 21; const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
 const N = Number(process.argv[2] || 80), PN = Number(process.argv[3] || 0.9), SEEDBASE = Number(process.env.SEEDBASE ?? 3000);
-if (process.env.RISKPX) SPOTS.riskPx = Number(process.env.RISKPX); if (process.env.RISKFAR) SPOTS.riskFarPx = Number(process.env.RISKFAR); if (process.env.STATICPX) SPOTS.staticPx = Number(process.env.STATICPX); if (process.env.DRIFT) SPOTS.driftPx = Number(process.env.DRIFT);
+if (process.env.CONFIRMMIN) SPOTS.confirmMinS = Number(process.env.CONFIRMMIN); if (process.env.RISKPX) SPOTS.riskPx = Number(process.env.RISKPX); if (process.env.RISKFAR) SPOTS.riskFarPx = Number(process.env.RISKFAR); if (process.env.STATICPX) SPOTS.staticPx = Number(process.env.STATICPX); if (process.env.DRIFT) SPOTS.driftPx = Number(process.env.DRIFT);
 function frame(bx: number, by: number, bz: number, yaw: number, t: number, W: number, H: number, speed: number): SpotFrame {
   const fx = -Math.sin(yaw), fz = -Math.cos(yaw), cx = bx - fx * 7, cz = bz - fz * 7, cy = by + 3, tanV = Math.tan(0.5), tanH = tanV * (W / H), pitch = -0.1;
   return { bx, by, bz, fx, fz, feetY: by - 0.32, cx, cy, cz, w: W, h: H, t, speed, heightAt: L.heightAt,

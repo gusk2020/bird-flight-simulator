@@ -120,13 +120,16 @@ export function h8dTests() {
   // 近くて、ある程度離れている目印: 動いていても確認なし(過剰な確認を避ける)
   { const near = mv([["bench", 0, -20, 0.4, 0.8, 0.5], ["pole", 9, -26, 0.2, 0.2, 5]], 12); const a = near.list.find(q => q.kind === "bench")!;
     check("two well-separated close markers are not risky even in fast flight (no needless confirmation)", near.list.length === 2 && !near.assess(a.dx, a.dy, a).risky, `gap ${Math.hypot(near.list[0].dx - near.list[1].dx, near.list[0].dy - near.list[1].dy).toFixed(0)} px`); }
+  // 確認の時間が残らない目印は確認を求めない(押しても確認前に消える): 遠く正面で落ち着いた目印は去らない、鳥の真横に迫った目印は去る
+  { const calm = mv([["bench", 0, -40, 0.4, 0.8, 0.5]], 9), c = calm.list[0]; const soon = mv([["bench", 0, -8, 0.4, 0.8, 0.5]], 12), sn = soon.list[0];
+    check("a calm marker far ahead does not leave within the confirm window; one about to pass the bird does", !!c && !calm.leavesSoon(c) && (!sn || soon.leavesSoon(sn)), `calm ${c ? calm.leavesSoon(c) : "-"} soon ${sn ? soon.leavesSoon(sn) : "none(already gone)"}`); }
   // assess() が、独立に計算した規則(触れた点の近くに別の候補の現在位置/軌跡があるか)と、街の実データの無数の押し方で一致する
   { const idx = buildSurfaces(L), sp = new LandSpots(idx); let agree = 0, tot = 0, risky = 0;
     for (const [x, z, yaw, v] of [[30, 0, Math.PI / 2, 9], [0, 40, 0, 12], [-30, 20, Math.PI, 7]] as const) { for (let i = 0; i < 40; i++) sp.update({ ...frame(x, 14, z - i * v / 60 * Math.cos(yaw), yaw, i / 60, world.heightAt), speed: v }, true);
       for (const q of sp.list) for (const [ox, oy] of [[0, 0], [10, 6], [-20, 12], [30, -8]]) { const tx = q.dx + ox, ty = q.dy + oy; const r = sp.assess(tx, ty, q); risky += r.risky ? 1 : 0; tot++;
         const tr = q.trail, last = tr[tr.length - 1]; let dr = 0; if (last) for (const p of tr) if (last.t - p.t <= SPOTS.driftS + 1e-6) dr = Math.max(dr, Math.hypot(last.x - p.x, last.y - p.y));
         let n = 0; for (const j of sp.list) { if (j.id === q.id) continue; const dn = Math.hypot(tx - j.dx, ty - j.dy); let dj = dn; for (const p of j.trail) dj = Math.min(dj, Math.hypot(tx - p.x, ty - p.y)); const fe = q.d > SPOTS.farM || j.d > SPOTS.farM ? SPOTS.riskFarPx : 0; if (dn <= SPOTS.staticPx + fe * 0.5 || (dr >= SPOTS.driftPx && dj <= SPOTS.riskPx + fe)) n++; }
-        if ((n > 0) === r.risky) agree++; } }
+        if ((n > 0 && !sp.leavesSoon(q)) === r.risky) agree++; } }
     check("assess() agrees with an independent computation of the rule on real-town touches", tot > 40 && agree === tot, `${agree}/${tot} agree; ${risky} risky`); }
   // 仮選択の状態管理
   { const c = new SpotConfirm(); c.ask(3, 0); check("ask pre-selects an id", c.active && c.id === 3 && c.stats.asked === 1);

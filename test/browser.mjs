@@ -785,7 +785,7 @@ async function g11({ p, cdp, errs }) {
   const two = await p.evaluate(async ([x, z, yaw]) => { const g = __game, f = g.flight; f.reset(); f.pos.set(x, 14, z); f.prevPos.copy(f.pos); f.yaw = yaw; f.vel.set(0, 0, 0); g.cam.snap(); window.__hv = setInterval(() => { f.pos.set(x, 14, z); f.vel.set(0, 0, 0); }, 8); await new Promise(r => setTimeout(r, 900));
     const L = g.spots.list.filter(q => q.near && q.d < 30); let best = null; for (const a of L) for (const b of L) if (a.id < b.id) { const dd = Math.hypot(a.dx - b.dx, a.dy - b.dy); if (dd > 30 && (!best || dd < best.dd)) best = { a: a.id, b: b.id, dd }; } return best; }, town.pos);
   if (!two) { check("two nearby markers exist for the pick test in this town view", false, "none"); } else {
-    for (const which of ["a", "b"]) { const id = two[which]; const q = await spotXY(id); const b0 = await stat(); await realTap(q.x, q.y); await sleep(300); const a1 = await stat();
+    for (const which of ["a", "b"]) { const id = two[which]; const q = await spotXY(id); const b0 = await stat(); await realTap(q.x, q.y); await sleep(300); await p.evaluate(() => { if (__game.spotConfirm.active) document.getElementById("spotGo").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "touch" })); }); await sleep(300); const a1 = await stat();
       check(`tapping marker ${which} (${q.kind}) acts on that perch only: started or refused for id ${id}, never the neighbour`, (a1.active ? a1.tgt === id : a1.refused > b0.refused) && a1.ringTaps === b0.ringTaps + 1 && a1.flapTaps === b0.flapTaps, JSON.stringify({ id, a1: { tgt: a1.tgt, active: a1.active, refusal: a1.refusal } }));
       await p.evaluate(() => __game.autoLand.cancel("user")); await sleep(100); }
   }
@@ -832,7 +832,7 @@ async function g11({ p, cdp, errs }) {
   await unhover();
   // 実際に近づく: 接近先を選んだら、手を触れずに(鳥は向きを自動で合わせて)届く範囲に入り、その足場へ自動着地が始まる
   const fi2 = await farSetup(7); await waitSpot(fi2.id); await sleep(150); const q2 = await spotXY(fi2.id);
-  await realTap(q2.x, q2.y); await sleep(200); const sel2 = await p.evaluate(() => __game.approach.id);
+  await realTap(q2.x, q2.y); await sleep(200); await p.evaluate(() => { if (__game.spotConfirm.active) document.getElementById("spotGo").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "touch" })); }); await sleep(200); const sel2 = await p.evaluate(() => __game.approach.id);
   const starts0 = await p.evaluate(() => __game.autoLand.stats.starts); const startedOk = await p.waitForFunction(([i, n]) => __game.autoLand.lastTargetId === i && __game.autoLand.stats.starts > n, [fi2.id, starts0], { timeout: 90000 }).then(() => true).catch(() => false);
   await sleep(300); const fin = await p.evaluate(() => ({ started: __game.approach.stats.started, id: __game.approach.id, crashes: __game.flight.crashes, brake: __game.approach.stats.steerFrames, last: __game.approach.lastReason }));
   check("selected from ~50 m with a 7 m lateral offset: the bird turns toward it by itself, and the automatic landing starts for exactly that perch (via the existing safety check)", sel2 === fi2.id && startedOk && fin.started >= 1 && fin.id === -1 && fin.crashes === 0, JSON.stringify({ sel2, startedOk, ...fin }));

@@ -4,8 +4,8 @@ export type ControlMode = "both" | "right" | "left";
 export type AutoPolicy = "life" | "scenic" | "adventure" | "random";
 export type TimeSpeed = "slow" | "normal" | "fast";
 export type SeasonSpeedPref = "fast" | "normal" | "slow";
-export interface Prefs { control: ControlMode; autoPolicy: AutoPolicy; autoTimeSpeed: TimeSpeed; autoHideUi: boolean; seasonSpeed: SeasonSpeedPref; seasonPhase: number; /** H8-A: 単一◎の操縦方式(off=従来) */ steer: SteerMode }
-export const DEFAULT_PREFS: Prefs = { control: "both", autoPolicy: "random", autoTimeSpeed: "normal", autoHideUi: true, seasonSpeed: "normal", steer: "off", seasonPhase: 0 };
+export interface Prefs { control: ControlMode; autoPolicy: AutoPolicy; autoTimeSpeed: TimeSpeed; autoHideUi: boolean; seasonSpeed: SeasonSpeedPref; seasonPhase: number; /** H8-A: 単一◎の操縦方式(off=従来) */ steer: SteerMode; /** H8-B: 着地点マーカーを表示するか */ landmarks: boolean }
+export const DEFAULT_PREFS: Prefs = { control: "both", autoPolicy: "random", autoTimeSpeed: "normal", autoHideUi: true, seasonSpeed: "normal", steer: "off", landmarks: true, seasonPhase: 0 };
 export const PREFS_KEY = "vindving.prefs.v1";
 const CONTROLS: ControlMode[] = ["both", "right", "left"], POLICIES: AutoPolicy[] = ["life", "scenic", "adventure", "random"], SPEEDS: TimeSpeed[] = ["slow", "normal", "fast"], SPEEDS_SEASON: SeasonSpeedPref[] = ["fast", "normal", "slow"];
 type Store = Pick<Storage, "getItem" | "setItem">;
@@ -15,7 +15,7 @@ export function sanitizePrefs(raw: unknown): Prefs {
   const o = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   return { control: pick(o.control, CONTROLS, DEFAULT_PREFS.control), autoPolicy: pick(o.autoPolicy, POLICIES, DEFAULT_PREFS.autoPolicy),
     autoTimeSpeed: pick(o.autoTimeSpeed, SPEEDS, DEFAULT_PREFS.autoTimeSpeed), autoHideUi: typeof o.autoHideUi === "boolean" ? o.autoHideUi : DEFAULT_PREFS.autoHideUi,
-    seasonSpeed: pick(o.seasonSpeed, SPEEDS_SEASON, DEFAULT_PREFS.seasonSpeed), steer: pick(o.steer, STEER_MODES, DEFAULT_PREFS.steer), seasonPhase: typeof o.seasonPhase === "number" && Number.isFinite(o.seasonPhase) ? ((o.seasonPhase % 1) + 1) % 1 : DEFAULT_PREFS.seasonPhase };
+    seasonSpeed: pick(o.seasonSpeed, SPEEDS_SEASON, DEFAULT_PREFS.seasonSpeed), steer: pick(o.steer, STEER_MODES, DEFAULT_PREFS.steer), landmarks: typeof o.landmarks === "boolean" ? o.landmarks : DEFAULT_PREFS.landmarks, seasonPhase: typeof o.seasonPhase === "number" && Number.isFinite(o.seasonPhase) ? ((o.seasonPhase % 1) + 1) % 1 : DEFAULT_PREFS.seasonPhase };
 }
 const defaultStore = (): Store | null => { try { return globalThis.localStorage ?? null; } catch { return null; } }; // プライベートモード等では例外になりうる
 export function loadPrefs(store: Store | null = defaultStore()): Prefs {

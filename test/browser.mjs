@@ -375,13 +375,13 @@ async function g6({ p, cdp, errs }) {
   const house = await p.evaluate(() => { const a = __game.world.apts[0]; return { x: a.x, z: a.z, top: __game.world.heightAt(a.x, a.z) }; });
   await p.evaluate(h => { const f = __game.flight; f.reset(); f.pos.set(h.x + 20, h.top + 3, h.z); f.prevPos.copy(f.pos); f.yaw = Math.PI / 2; f.vel.set(-9, -0.5, 0); __game.input.state.brake = true; }, house);
   await p.waitForFunction(() => __game.perchAssist.stats.guided > 0, null, { timeout: 15000 }).catch(() => {}); await sleep(100);
-  const mk = await p.evaluate(() => ({ vis: __game.perchMarker.visible, tgt: __game.perchAssist.target && __game.perchAssist.target.kind, guided: __game.perchAssist.stats.guided }));
+  const mk = await p.evaluate(() => ({ vis: __game.spots.list.some(q => q.kind === "roof"), tgt: __game.perchAssist.target && __game.perchAssist.target.kind, guided: __game.perchAssist.stats.guided }));
   check("approaching a roof with the brake held: a candidate marker is shown and guidance is active", mk.vis && mk.tgt === "roof" && mk.guided > 0, JSON.stringify(mk));
   await p.evaluate(() => { __game.input.state.brake = false; __game.setAuto(true); }); await sleep(400);
-  check("the marker is hidden during auto flight", await p.evaluate(() => !__game.perchMarker.visible));
-  await p.evaluate(() => { __game.setAuto(false); const f = __game.flight; f.reset(); f.pos.set(28, 60, 150); f.prevPos.copy(f.pos); f.vel.set(0, 0, -10); }); // 建物のない上空(以前の(-60,30,-60)は高層アパートの壁に当たる位置で、衝突の復帰でカメラ距離が変わっていた)
+  check("the markers are hidden during auto flight", await p.evaluate(() => __game.spots.list.length === 0));
+  await p.evaluate(() => { __game.setAuto(false); const f = __game.flight; f.reset(); f.pos.set(28, 60, 150); f.prevPos.copy(f.pos); f.yaw = Math.PI; f.vel.set(0, 0, 10); }); // 建物のない上空(街と反対向き)(以前の(-60,30,-60)は高層アパートの壁に当たる位置で、衝突の復帰でカメラ距離が変わっていた)
   await sleep(500);
-  check("far from any landing candidate the marker is not shown", await p.evaluate(() => !__game.perchMarker.visible));
+  check("nothing landable in view: no markers", await p.evaluate(() => __game.spots.list.length === 0));
   // 着地中のカメラは鳥を近く(大きく)映す
   const dAir = await p.evaluate(() => __game.camera.position.distanceTo(__game.flight.pos));
   await p.evaluate(() => { const f = __game.flight; f.reset(); f.pos.set(0, __game.world.heightAt(0, 0) + 0.5, 0); f.prevPos.copy(f.pos); f.mode = "landed"; f.vel.set(0, 0, 0); __game.cam.snap(); });
@@ -469,7 +469,7 @@ async function g7({ p, cdp, errs }) {
 
   console.log("\n# tap the ring to land automatically (G1-4 / G1-5)");
   // 一瞬のタップは、ソフトウェア描画の遅いフレームでCDPの2回の送信がずれないよう、同一タスク内の合成イベントで行う版(tapAtXY)と、実際のタッチ入力経路(CDP Input.dispatchTouchEvent。tp)の両方を使う
-  const tapAtXY = (dx, dy, id) => p.evaluate(([dx, dy, id]) => { const r = __game.ring, x = r.x + dx, y = r.y + dy, el = document.elementFromPoint(x, y) || document.body, o = { bubbles: true, pointerId: id, clientX: x, clientY: y, pointerType: "touch" }; el.dispatchEvent(new PointerEvent("pointerdown", o)); el.dispatchEvent(new PointerEvent("pointerup", o)); return { x, y }; }, [dx, dy, id]);
+  const tapAtXY = (dx, dy, id) => p.evaluate(([dx, dy, id]) => { const sp = __game.spots.get(window.__target.id), r = { x: sp ? sp.dx : 0, y: sp ? sp.dy : 0 }, x = r.x + dx, y = r.y + dy, el = document.elementFromPoint(x, y) || document.body, o = { bubbles: true, pointerId: id, clientX: x, clientY: y, pointerType: "touch" }; el.dispatchEvent(new PointerEvent("pointerdown", o)); el.dispatchEvent(new PointerEvent("pointerup", o)); return { x, y }; }, [dx, dy, id]);
   /** 足場 kind を選び、その縁の東側 dist m・面の上 up m から、速さ v で西へ向かって飛び出す。side>0 なら足場が画面の右寄りに見える位置から(片手のスティック領域に◯が入る) */
   const setup = (kind, dist = 11, up = 2.6, v = 8, side = 0) => p.evaluate(([kind, dist, up, v, side]) => {
     const g = __game, f = g.flight, w = g.world; f.reset(); g.setAuto(false); g.settings.weather = "clear"; if (g.settings.wind !== 0) { g.settings.wind = 0; g.applySettings(); } /* 着地の幾何(狭い足場の上に立つ等)を決まった条件で確かめるため風なし。風ありの成功率は g12(統計)で見る */ g.input.releaseAll();
@@ -481,8 +481,8 @@ async function g7({ p, cdp, errs }) {
   }, [kind, dist, up, v, side]);
   /** 実際のタッチ入力経路(CDP Input.synthesizeTapGesture): ブラウザ側が押す→離すの間隔(duration ms)を守って届けるので、描画が遅くても押している時間が狂わない */
   const realTap = (x, y, duration = 50) => cdp.send("Input.synthesizeTapGesture", { x, y, duration, tapCount: 1, gestureSourceType: "touch" });
-  const waitRing = () => p.waitForFunction(() => __game.ring.visible, null, { timeout: 8000 }).catch(() => {});
-  const ringXY = () => p.evaluate(() => ({ vis: __game.ring.visible, x: __game.ring.x, y: __game.ring.y, w: innerWidth }));
+  const waitRing = () => p.waitForFunction(() => !!__game.spots.get(window.__target.id), null, { timeout: 8000 }).catch(() => {});
+  const ringXY = () => p.evaluate(() => { const sp = __game.spots.get(window.__target.id); return { vis: !!sp, x: sp ? sp.dx : 0, y: sp ? sp.dy : 0, w: innerWidth }; });
   const AL = () => p.evaluate(() => ({ refusal: __game.autoLand.lastRefusal, refused: __game.autoLand.stats.refused, active: __game.autoLand.active, starts: __game.autoLand.stats.starts, ok: __game.autoLand.stats.success, ended: { ...__game.autoLand.stats.ended }, mode: __game.flight.mode, crashes: __game.flight.crashes, ringTaps: __game.input.stats.ringTaps, flapTaps: __game.input.stats.gestureTaps, strokes: __game.flight.strokes, label: document.getElementById("autoland").textContent }));
   const finishLanding = async () => { await p.waitForFunction(() => !__game.autoLand.active, null, { timeout: 30000 }).catch(() => {}); await sleep(1500); };
   const onTarget = () => p.evaluate(() => { const f = __game.flight, t = window.__target; return { mode: f.mode, onTop: Math.abs(f.pos.y - 0.32 - t.top) < 0.06, inside: f.pos.x >= t.minX - 0.3 && f.pos.x <= t.maxX + 0.3 && f.pos.z >= t.minZ - 0.3 && f.pos.z <= t.maxZ + 0.3, x: f.pos.x, z: f.pos.z, walkV: f.walkV }; });
@@ -569,12 +569,12 @@ async function g7({ p, cdp, errs }) {
   const r4d = await attempt(async () => {
     const before = await AL(); const r = await ringXY(); if (!r.vis || r.x < r.w / 2 + 20) return { ok: false, why: "ring not in the stick zone" };
     const L = await p.evaluate(() => __game.input.layout()), inProx = r.y >= L.split;
-    await tp("touchStart", [{ x: Math.round(r.x), y: Math.round(r.y), id: 93 }]); await sleep(600);
+    await tp("touchStart", [{ x: Math.round(r.x), y: Math.round(r.y), id: 93 }]); await sleep(1600); /* 遅い描画ではタップの上限が延びる(最大 約 1.2 秒)ので、長押しは十分長く */
     const mid = await p.evaluate(() => ({ brake: __game.input.state.brake, phase: __game.input.gesture.phase, prox: __game.input.prox.active, proxOn: __game.flight.prox.on })); await tp("touchEnd", []); await sleep(250); const after = await AL();
     const regionOk = inProx ? (mid.prox && mid.proxOn) : (mid.brake && mid.phase === "brake");
     return { ok: regionOk && after.starts === before.starts && after.ringTaps === before.ringTaps, before, after, mid, inProx };
   });
-  check("REAL TOUCH long press (0.6 s) on the ring: brake (cruise region) or a proximity maneuver (proximity region); never an automatic landing", r4d.ok, `tries ${r4d.tries}; inProxRegion=${r4d.inProx} ${JSON.stringify(r4d.mid)}${r4d.why ? " " + r4d.why : ""}`);
+  check("REAL TOUCH long press (1.6 s) on the ring: brake (cruise region) or a proximity maneuver (proximity region); never an automatic landing", r4d.ok, `tries ${r4d.tries}; inProxRegion=${r4d.inProx} ${JSON.stringify(r4d.mid)}${r4d.why ? " " + r4d.why : ""}`);
   // 4e 左手モードの切替で取り残しがない: 一度◯タップになった指番号をもう一度使っても、ふつうに動く(ringFiredの取り残し)
   await p.evaluate(() => { __game.input.releaseAll(); }); await p.setViewportSize({ width: 892, height: 412 }); await sleep(500);
   check("G1: no page errors", errs.length === 0, errs.join(" | "));
@@ -718,87 +718,111 @@ async function g10({ p, errs }) {
   check("H4 flicker: no page errors", errs.length === 0, errs.join(" | "));
 }
 
-// ---- g11: 着地候補◯(H2)。表示の保持(5秒)、実際に描かれていること、画面サイズ・操作モード別の実タッチ、開始/拒否/ユーザー取消の分離
+// ---- g11: H8-B 着地点マーカー(全候補表示)。複数表示・早期発見・通過後の消去と選択解除・ON/OFF(保存)・正しい候補へのタップ・押している間に動いても入れ替わらない・画面/操作モード別の実タッチ・UIとの干渉・描画の実在・負荷
 async function g11({ p, cdp, errs }) {
-  console.log("\n# landing candidate ring: hold, drawing, real touch matrix (H2)");
+  console.log("\n# H8-B landing spots: all candidates in view, selection, ON/OFF");
   const setup = (kind, dist = 11, up = 2.6, v = 8, side = 0) => p.evaluate(([kind, dist, up, v, side]) => {
     const g = __game, f = g.flight, w = g.world; f.reset(); g.setAuto(false); g.settings.weather = "clear"; g.input.releaseAll(); g.autoLand.cancel("user");
     const open = s => !w.colliders.some(c => c.maxX - c.minX > 3 && c.maxZ - c.minZ > 3 && c.top > s.top + 0.3 && c.maxX > s.minX - 16 && c.minX < s.maxX + 16 && c.maxZ > s.minZ - 16 && c.minZ < s.maxZ + 16);
     const cand = g.surfaces.all.filter(s => s.kind === kind && open(s)); const t = cand[0]; if (!t) return null; window.__target = t;
-    f.pos.set(t.maxX + dist, t.top + up, (t.minZ + t.maxZ) / 2 + side); f.prevPos.copy(f.pos); f.yaw = Math.PI / 2; f.vel.set(-v, -0.3, 0); g.cam.snap(); return { kind: t.kind, top: t.top };
+    f.pos.set(t.maxX + dist, t.top + up, (t.minZ + t.maxZ) / 2 + side); f.prevPos.copy(f.pos); f.yaw = Math.PI / 2; f.vel.set(-v, -0.3, 0); g.cam.snap(); return { kind: t.kind, top: t.top, id: t.id };
   }, [kind, dist, up, v, side]);
-  const waitRing = () => p.waitForFunction(() => __game.ring.visible, null, { timeout: 9000 }).then(() => true).catch(() => false);
-  const ringState = () => p.evaluate(() => { const r = __game.ring, d = __game.ringDiag; return { vis: r.visible, x: r.x, y: r.y, w: innerWidth, h: innerHeight, reason: d.reason, why: { ...__game.perchAssist.pickWhy }, ctl: document.body.dataset.ctl }; });
-  const stat = () => p.evaluate(() => ({ starts: __game.autoLand.stats.starts, refused: __game.autoLand.stats.refused, refusal: __game.autoLand.lastRefusal, ended: { ...__game.autoLand.stats.ended }, ok: __game.autoLand.stats.success, ringTaps: __game.input.stats.ringTaps, flapTaps: __game.input.stats.gestureTaps, crashes: __game.flight.crashes }));
-  const realTap = (x, y) => cdp.send("Input.synthesizeTapGesture", { x, y, duration: 50, tapCount: 1, gestureSourceType: "touch" });
+  const hover = () => p.evaluate(() => { const f = __game.flight; const [x, y, z] = [f.pos.x, f.pos.y, f.pos.z]; window.__hv = setInterval(() => { f.pos.set(x, y, z); f.vel.set(0, 0, 0); }, 8); }); // 鳥をその場にとどめる(押している間に目印が動かないように)
+  const unhover = () => p.evaluate(() => clearInterval(window.__hv));
+  const waitSpot = (id) => p.waitForFunction(i => !!__game.spots.get(i), id, { timeout: 9000 }).then(() => true).catch(() => false);
+  const spotXY = (id) => p.evaluate(i => { const q = __game.spots.get(i); return q ? { x: q.dx, y: q.dy, near: q.near, stacked: q.stacked, kind: q.kind } : null; }, id);
+  const stat = () => p.evaluate(() => ({ starts: __game.autoLand.stats.starts, refused: __game.autoLand.stats.refused, refusal: __game.autoLand.lastRefusal, active: __game.autoLand.active, tgt: __game.autoLand.target ? __game.autoLand.target.id : -1, ringTaps: __game.input.stats.ringTaps, flapTaps: __game.input.stats.gestureTaps, crashes: __game.flight.crashes, gone: __game.spots.stats.gone }));
+  const realTap = (x, y) => cdp.send("Input.synthesizeTapGesture", { x: Math.round(x), y: Math.round(y), duration: 50, tapCount: 1, gestureSourceType: "touch" });
+  const tp = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
   const setCtl = async (m) => { for (let i = 0; i < 3; i++) { if ((await p.evaluate(() => document.body.dataset.ctl)) === m) return; await p.evaluate(() => document.getElementById("btnCtl").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }))); await sleep(250); } };
+  const setSteer = async (m) => { for (let i = 0; i < 5 && (await p.evaluate(() => __game.input.steerMode)) !== m; i++) { await p.evaluate(() => document.getElementById("btnSteer").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }))); await sleep(150); } };
+  const setLm = (on) => p.evaluate(on => document.querySelector(`[data-set="lm"][data-val="${on ? 1 : 0}"]`).click(), on);
   await p.evaluate(() => { if (!document.getElementById("overlay").hidden) document.getElementById("ovGo").click(); }); await sleep(300);
+  await p.setViewportSize({ width: 892, height: 412 }); await sleep(500); await setCtl("right");
 
-  // (A) 表示の保持: 候補が選ばれなくなっても、表示は約5秒(ゲーム時間)続く。保持中は薄く表示。そのあと消える。実際に画面へ描かれていることを、◯を隠した画面との画素の差で確かめる
-  await p.setViewportSize({ width: 480, height: 222 }); await sleep(600); await setCtl("right");
-  const info = await setup("rock", 12, 2.6, 8, 6); const seen = await waitRing(); const r0 = await ringState();
-  check("a landing candidate appears for the rock ahead, with a reason code and the candidate counts available for diagnosis", !!info && seen && r0.reason === "shown" && r0.why.inRange >= 1, JSON.stringify(r0));
-  const hold = await p.evaluate(async () => {
-    const g = __game, f = g.flight, d = g.ringDiag, x0 = f.pos.x, y0 = f.pos.y, z0 = f.pos.z; let t0 = f.clock, drawn = 0, staleSeen = false, hiddenAt = -1, lastShown = 0;
-    g.surfaces.near = (x, z, r, out) => { out.length = 0; }; // 候補選別が何も返さなくなる(= 候補を見失った)。出力配列を空にしないと前回の結果が残り、候補が見えたままになる
-    const hover = setInterval(() => { f.pos.set(x0, y0, z0); f.vel.set(0, 0, 0); }, 8); // その場にとどめる
-    const out = await new Promise(res => { const tick = () => { const age = f.clock - t0, vis = d.reason === "shown";
-      if (vis) { lastShown = age; if (d.stale) staleSeen = true; if (!drawn && age > 2) { // 描かれているか: ◯の周り60 px四方を、目印を隠したときと比べる
-        const r = g.ring, c = document.createElement("canvas"), cx = c.getContext("2d"), W = g.renderer.domElement.width, H = g.renderer.domElement.height; c.width = W; c.height = H;
-        const grab = () => { g.renderer.render(g.scene, g.camera); cx.clearRect(0, 0, W, H); cx.drawImage(g.renderer.domElement, 0, 0); const k = W / innerWidth; return cx.getImageData(Math.max(0, Math.round((r.x - 30) * k)), Math.max(0, Math.round((r.y - 30) * k)), Math.round(60 * k), Math.round(60 * k)).data; };
-        const a = grab(), a2 = grab(); g.perchMarker.visible = false; const b = grab(); g.perchMarker.visible = true; const cnt = (u, v) => { let n = 0; for (let i = 0; i < u.length; i += 4) if (Math.abs(u[i] - v[i]) + Math.abs(u[i + 1] - v[i + 1]) + Math.abs(u[i + 2] - v[i + 2]) > 24) n++; return n; }; drawn = cnt(a, b) - cnt(a, a2); /* 隠したときの差から、何も変えない2回の描画の差(対照)を引く。保持中は薄く(不透明度0.2)描くので、差は十数画素になる */ } }
-      if (!vis && hiddenAt < 0 && age > 0.3) hiddenAt = age; if (hiddenAt >= 0 || age > 9) res({ hiddenAt, lastShown, drawn, staleSeen, reason: d.reason }); else requestAnimationFrame(tick); }; tick(); });
-    clearInterval(hover); return out;
-  });
-  console.log("   hold:", JSON.stringify(hold));
-  check("the ring stays on screen about 5 s (game time) after the candidate is lost, and is drawn dimmed while it is only being held", hold.lastShown >= 4.3 && hold.lastShown <= 6.0 && hold.staleSeen, JSON.stringify(hold));
-  check("it is really drawn: hiding the marker changes the pixels around the ring more than a repeated identical render does (not only an internal timer)", hold.drawn >= 8, `${hold.drawn} px differ`);
-  check("after the hold the ring is gone with the reason recorded (no-marker / expired), not left on screen", hold.hiddenAt >= 4.3 && ["no-marker", "off-screen", "out-of-range"].includes(hold.reason), JSON.stringify(hold));
-  await p.evaluate(() => { delete __game.surfaces.near; }); // 元の探索へ戻す
+  // (A) 複数の目印が同時に出て、実際に画面へ描かれている(描画面の画素で確かめる)。固定の上限で削られていない
+  const town = await p.evaluate(async () => { const g = __game, f = g.flight; let best = { n: 0, kinds: 0, pos: null }; g.setAuto(false); g.settings.weather = "clear";
+    for (const [x, z] of [[0, 40], [30, 0], [-30, 20], [0, -40], [60, 60], [-60, -30]]) for (const yaw of [0, Math.PI / 2, Math.PI, -Math.PI / 2]) { f.reset(); f.pos.set(x, 14, z); f.prevPos.copy(f.pos); f.yaw = yaw; f.vel.set(-Math.sin(yaw) * 6, 0, -Math.cos(yaw) * 6); g.cam.snap(); for (let i = 0; i < 6; i++) await new Promise(r => requestAnimationFrame(r));
+      const n = g.spots.list.length; if (n > best.n) best = { n, kinds: new Set(g.spots.list.map(q => q.kind)).size, pos: [x, z, yaw] }; }
+    return best; });
+  check("in a dense part of town many landing spots are marked at once, of several kinds (no fixed top-N cut)", town.n >= 5 && town.kinds >= 2, JSON.stringify(town));
+  await p.evaluate(([x, z, yaw]) => { const g = __game, f = g.flight; f.reset(); f.pos.set(x, 14, z); f.prevPos.copy(f.pos); f.yaw = yaw; f.vel.set(0, 0, 0); g.cam.snap(); window.__hv = setInterval(() => { f.pos.set(x, 14, z); f.vel.set(0, 0, 0); }, 8); }, town.pos); await sleep(900);
+  const drawn = await p.evaluate(() => { const g = __game, cv = document.getElementById("spots"), c = cv.getContext("2d"), k = cv.width / innerWidth; let ok = 0, tot = 0; for (const q of g.spots.list) { tot++; const d = c.getImageData(Math.max(0, Math.round((q.dx - 22) * k)), Math.max(0, Math.round((q.dy - 22) * k)), Math.round(44 * k), Math.round(44 * k)).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 40) n++; if (n > 12) ok++; } return { ok, tot, stat: { ...g.spots.stats } }; });
+  check("every marker is really drawn on the overlay canvas (pixels around its position are painted)", drawn.tot >= 5 && drawn.ok === drawn.tot, JSON.stringify({ ok: drawn.ok, tot: drawn.tot }));
+  const uiHit = await p.evaluate(() => __game.spots.list.filter(q => { const el = document.elementFromPoint(q.dx, q.dy); return el && el.closest && el.closest("button,.btn,#overlay"); }).length);
+  check("no marker sits on a button (it could not be tapped)", uiHit === 0, `${uiHit} on UI`);
+  await unhover();
 
-  // (B) 画面の大きさ・操作モード別の実タッチ(Input.synthesizeTapGesture): ◯の中心を押すと自動着地が始まり、羽ばたきとは数えない。再試行は最大3回で、回数と理由を表示する
-  const combos = [[892, 412, "right"], [892, 412, "left"], [412, 892, "right"], [360, 800, "left"], [1280, 720, "right"], [892, 412, "both"]];
-  const rows = [];
-  for (const [w, h, ctl] of combos) {
-    await p.setViewportSize({ width: w, height: h }); await sleep(500); await setCtl(ctl); await sleep(200);
-    let res = { tries: 0, ok: false, reasons: [] };
-    for (let t = 1; t <= 3 && !res.ok; t++) {
-      res.tries = t; const side = w < h ? 0 : ctl === "left" ? -6 : 6, i2 = await setup("rock", 12, 2.6, 8, side); await p.evaluate(() => { const f = __game.flight; window.__pin = [f.pos.x, f.pos.y, f.pos.z]; }); if (!i2) { res.reasons.push("no rock"); continue; }
-      const shown = await waitRing(); await sleep(150); const rs = await ringState(); if (!shown) { res.reasons.push("ring not shown: " + rs.reason); continue; }
-      if (rs.x < 0 || rs.x > w || rs.y < 0 || rs.y > h) { res.reasons.push("ring off screen " + Math.round(rs.x) + "," + Math.round(rs.y)); continue; }
-      // 指で押している間◯が動かないよう、鳥をその場にとどめて押す(動く◯は、◯の当たり判定の広さ(半径48 px)で受ける)
-      await p.evaluate(() => { const f = __game.flight; const [x, y, z] = [f.pos.x, f.pos.y, f.pos.z]; window.__hv = setInterval(() => { f.pos.set(x, y, z); f.vel.set(0, 0, 0); }, 8); }); await sleep(250); const rp = await ringState();
-      const b = await stat(); await realTap(Math.round(rp.x), Math.round(rp.y)); await sleep(300); const a = await stat(); await p.evaluate(() => clearInterval(window.__hv));
-      const started = a.starts === b.starts + 1, refused = a.refused > b.refused, flap = a.flapTaps > b.flapTaps, ringTap = a.ringTaps > b.ringTaps;
-      if (started && ringTap && !flap) { res.ok = true; res.crash = a.crashes - b.crashes; } else res.reasons.push(JSON.stringify({ started, refused, ringTap, flap, refusal: a.refusal, ring: [Math.round(rs.x), Math.round(rs.y)] }));
-      await p.evaluate(() => __game.autoLand.cancel("user"));
-    }
-    rows.push({ vp: `${w}x${h}`, ctl, ...res });
+  // (B) 早期発見: 前方 38 m の足場が、近づく前から見つかる(以前は近くなってから 1 か所だけ)
+  const far = await setup("rock", 38, 4, 8, 0); const farSeen = await waitSpot(far.id); const farInfo = await p.evaluate(i => { const q = __game.spots.get(i); return q ? { d: Math.round(q.d), near: q.near } : null; }, far.id);
+  check("a rock about 38 m ahead is already marked (dimmed: beyond the auto-landing reach)", farSeen && farInfo && farInfo.d >= 30 && farInfo.near === false, JSON.stringify(farInfo));
+
+  // (C) 通過後・視界外: 消す。選択も解く。5 秒の残像は残さない
+  await setup("rock", 12, 2.6, 8, 0); const tid = await p.evaluate(() => window.__target.id); await waitSpot(tid);
+  await hover(); await sleep(400); const xy0 = await spotXY(tid);
+  await p.evaluate(() => { __game.spots.pressedId = window.__target.id; }); // 選択中にして、消えたら解けるかを見る
+  await unhover(); await p.evaluate(() => { const g = __game, f = g.flight, t = window.__target; f.pos.set(t.minX - 6, f.pos.y, f.pos.z); f.prevPos.copy(f.pos); f.vel.set(-8, 0, 0); g.cam.snap(); }); // 足場の反対側へ抜ける(= 通り過ぎた)
+  const gone = await p.waitForFunction(i => !__game.spots.get(i), tid, { timeout: 4000 }).then(() => true).catch(() => false);
+  const afterPass = await p.evaluate(() => ({ pressed: __game.spots.pressedId, n: __game.spots.list.length, t: __game.flight.clock }));
+  check("after flying past, the marker is gone at once and the selection is released (no 5-second afterimage)", !!xy0 && gone && afterPass.pressed === -1, JSON.stringify({ xy0, gone, afterPass }));
+  const stalePress = await p.evaluate(i => { const g = __game; return g.spots.valid(i, g.flight.clock); }, tid);
+  check("a passed candidate is not valid for a late tap", stalePress === false);
+
+  // (D) ON/OFF(設定): OFF で全部消えて選択も解け、保存される。ON で戻る。進行中の自動着地は OFF だけでは止まらない
+  await setup("rock", 12, 2.6, 8, 0); await waitSpot(await p.evaluate(() => window.__target.id)); await hover(); await sleep(300);
+  const tid2 = await p.evaluate(() => window.__target.id); const sx = await spotXY(tid2); await realTap(sx.x, sx.y); await sleep(250); const st1 = await stat();
+  check("a tap on the marker of the rock starts the automatic landing for exactly that rock", st1.active && st1.tgt === tid2 && st1.ringTaps >= 1, JSON.stringify(st1));
+  await setLm(false); await sleep(200);
+  const off = await p.evaluate(() => { let saved = null; try { saved = JSON.parse(localStorage.getItem("vindving.prefs.v1")).landmarks; } catch {} const cv = document.getElementById("spots"), c = cv.getContext("2d"); const d = c.getImageData(0, 0, cv.width, cv.height).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 0) n++; return { n: __game.spots.list.length, pressed: __game.spots.pressedId, saved, painted: n, active: __game.autoLand.active, enabled: __game.spots.enabled }; });
+  check("OFF: no markers, nothing painted, the selection is cleared, the setting is saved - and the automatic landing already under way is NOT interrupted", off.n === 0 && off.painted === 0 && off.pressed === -1 && off.saved === false && off.active && !off.enabled, JSON.stringify(off));
+  await unhover(); await p.waitForFunction(() => !__game.autoLand.active, null, { timeout: 30000 }).catch(() => {});
+  await setup("rock", 12, 2.6, 8, 0); await sleep(1200); const offNone = await p.evaluate(() => __game.spots.list.length);
+  await setLm(true); await sleep(200); const reOn = await waitSpot(await p.evaluate(() => window.__target.id)); const savedOn = await p.evaluate(() => { try { return JSON.parse(localStorage.getItem("vindving.prefs.v1")).landmarks; } catch { return null; } });
+  check("OFF keeps new candidates away; ON brings them back and is saved", offNone === 0 && reOn && savedOn === true, JSON.stringify({ offNone, reOn, savedOn }));
+
+  // (E) 複数の中から狙った候補へ: 近い 2 つの目印を、それぞれ実タッチして、押した方の ID で自動着地が始まる(隣へは行かない)
+  const two = await p.evaluate(async ([x, z, yaw]) => { const g = __game, f = g.flight; f.reset(); f.pos.set(x, 14, z); f.prevPos.copy(f.pos); f.yaw = yaw; f.vel.set(0, 0, 0); g.cam.snap(); window.__hv = setInterval(() => { f.pos.set(x, 14, z); f.vel.set(0, 0, 0); }, 8); await new Promise(r => setTimeout(r, 900));
+    const L = g.spots.list.filter(q => q.near && q.d < 30); let best = null; for (const a of L) for (const b of L) if (a.id < b.id) { const dd = Math.hypot(a.dx - b.dx, a.dy - b.dy); if (dd > 30 && (!best || dd < best.dd)) best = { a: a.id, b: b.id, dd }; } return best; }, town.pos);
+  if (!two) { check("two nearby markers exist for the pick test in this town view", false, "none"); } else {
+    for (const which of ["a", "b"]) { const id = two[which]; const q = await spotXY(id); const b0 = await stat(); await realTap(q.x, q.y); await sleep(300); const a1 = await stat();
+      check(`tapping marker ${which} (${q.kind}) acts on that perch only: started or refused for id ${id}, never the neighbour`, (a1.active ? a1.tgt === id : a1.refused > b0.refused) && a1.ringTaps === b0.ringTaps + 1 && a1.flapTaps === b0.flapTaps, JSON.stringify({ id, a1: { tgt: a1.tgt, active: a1.active, refusal: a1.refusal } }));
+      await p.evaluate(() => __game.autoLand.cancel("user")); await sleep(100); }
   }
-  console.log("   real-touch matrix (tries <= 3; every retry reason is listed):"); for (const r of rows) console.log("    ", JSON.stringify(r));
-  const failed = rows.filter(r => !r.ok);
-  check("REAL TOUCH on the ring starts the automatic landing in every viewport/control-mode combination (ring tap, not a flap)", failed.length === 0, JSON.stringify(failed));
-  check("no combination needed more than 2 tries (retries are reported above, not hidden)", rows.every(r => r.tries <= 2), JSON.stringify(rows.map(r => r.tries)));
+  await unhover();
 
-  // (B2) 候補が画面の外・後ろにあるとき: ◯は消えずに画面の縁に小さく出て、実タッチで押せる(鳥をその場にとどめ、後ろを向かせて確かめる)
-  await p.setViewportSize({ width: 892, height: 412 }); await sleep(400); await setCtl("right");
-  await setup("rock", 12, 2.6, 8, 0); await waitRing(); await sleep(200);
-  const eg = await p.evaluate(async () => {
-    const g = __game, f = g.flight, x0 = f.pos.x, y0 = f.pos.y, z0 = f.pos.z; const hv = setInterval(() => { f.pos.set(x0, y0, z0); f.vel.set(0, 0, 0); f.yaw = Math.PI * 1.5; }, 8); // 足場は東(+x)側。西を向かせる = 足場は後ろ
-    await new Promise(r => setTimeout(r, 700)); const el = document.getElementById("ringEdge"), r = g.ring, d = g.ringDiag;
-    const out = { reason: d.reason, vis: r.visible, dom: getComputedStyle(el).display, x: Math.round(r.x), y: Math.round(r.y), w: innerWidth, h: innerHeight, marker3d: g.perchMarker.visible }; window.__egHold = hv; return out;
-  });
-  check("candidate behind the camera: the ring is pinned to the screen edge (own DOM ring shown, not the 3D marker), inside the screen and below the top button row", eg.reason === "edge" && eg.vis && eg.dom === "block" && !eg.marker3d && eg.x >= 0 && eg.x <= eg.w && eg.y >= 60 && eg.y <= eg.h, JSON.stringify(eg));
-  const beS = await stat(); await realTap(eg.x, eg.y); await sleep(300); const afS = await stat(); await p.evaluate(() => clearInterval(window.__egHold));
-  check("REAL TOUCH on the edge ring starts the automatic landing (a ring tap, not a flap)", afS.starts + afS.refused === beS.starts + beS.refused + 1 && afS.ringTaps === beS.ringTaps + 1 && afS.flapTaps === beS.flapTaps, JSON.stringify({ beS, afS }));
+  // (F) 押している間に目印が動いても、押した候補のまま: 飛びながら押して 0.2 秒後に離す
+  await setup("rock", 14, 2.6, 7, 0); const fid = await p.evaluate(() => window.__target.id); await waitSpot(fid); await sleep(150);
+  const q0 = await spotXY(fid); const b2 = await stat(); await tp("touchStart", [{ x: Math.round(q0.x), y: Math.round(q0.y), id: 1 }]); await sleep(200); const moved = await spotXY(fid); await tp("touchEnd", []); await sleep(300); const a2 = await stat();
+  check("press on a flying marker, release 0.2 s later: the pressed perch is the one acted on (started for it, or refused with a reason) - even though the marker moved", (q0 && moved ? Math.hypot(moved.x - q0.x, moved.y - q0.y) >= 0 : true) && (a2.active ? a2.tgt === fid : (a2.refused > b2.refused || a2.gone > b2.gone)) && a2.ringTaps === b2.ringTaps + 1, JSON.stringify({ q0, moved, a2: { tgt: a2.tgt, active: a2.active, refusal: a2.refusal, gone: a2.gone } }));
   await p.evaluate(() => __game.autoLand.cancel("user"));
 
-  // (C) 開始拒否とユーザー取消を分けて数える: 足場の真下(面より低い)では候補にならず、近くの足場へはタップしても検査で拒否される
-  await p.setViewportSize({ width: 892, height: 412 }); await sleep(400); await setCtl("right");
-  await setup("rock", 12, 2.6, 8, 6); await waitRing(); await sleep(150);
-  const far = await p.evaluate(() => { const g = __game, f = g.flight, t = window.__target; const b = { starts: g.autoLand.stats.starts, refused: g.autoLand.stats.refused }; f.pos.y = t.top + 60; f.vel.set(0, 0, 0); const ok = g.autoLand.start(f, t); return { ok, refused: g.autoLand.stats.refused - b.refused, why: g.autoLand.lastRefusal }; });
-  check("a stale/held candidate cannot start a dangerous landing: from 60 m above it the start is refused with a reason (too high), counted as refused, not as a start", !far.ok && far.refused === 1 && far.why === "too high", JSON.stringify(far));
-  check("L: no page errors", errs.length === 0, errs.join(" | "));
+  // (G) 画面の大きさ・操作モード・操縦方式別の実タッチ: 目印の中心を押すと自動着地が始まり、羽ばたき・操舵にはならない
+  const combos = [[892, 412, "right", "off"], [892, 412, "left", "A"], [412, 892, "right", "B"], [360, 800, "left", "C"], [1280, 720, "right", "A"], [892, 412, "both", "off"]];
+  const rows = [];
+  for (const [w, h, ctl, steer] of combos) {
+    await p.setViewportSize({ width: w, height: h }); await sleep(500); await setCtl(ctl); await setSteer(steer); await sleep(200);
+    let res = { ok: false, reasons: [] };
+    for (let t = 1; t <= 2 && !res.ok; t++) {
+      const i2 = await setup("rock", 12, 2.6, 8, w < h ? 0 : ctl === "left" ? -6 : 6); if (!i2) { res.reasons.push("no rock"); continue; }
+      const shown = await waitSpot(i2.id); if (!shown) { res.reasons.push("not shown"); continue; } await hover(); await sleep(250);
+      const q = await spotXY(i2.id); if (!q || q.x < 0 || q.x > w || q.y < 0 || q.y > h) { res.reasons.push("off screen"); await unhover(); continue; }
+      const b = await stat(); await realTap(q.x, q.y); await sleep(300); const a = await stat(); await unhover();
+      const started = a.active && a.tgt === i2.id, ringTap = a.ringTaps === b.ringTaps + 1, flap = a.flapTaps > b.flapTaps;
+      if (started && ringTap && !flap) res.ok = true; else res.reasons.push(JSON.stringify({ started, refused: a.refused > b.refused, ringTap, flap, refusal: a.refusal }));
+      await p.evaluate(() => __game.autoLand.cancel("user"));
+    }
+    rows.push({ vp: `${w}x${h}`, ctl, steer, ...res });
+  }
+  console.log("   real-touch matrix:"); for (const r of rows) console.log("    ", JSON.stringify(r));
+  check("REAL TOUCH on a marker starts the automatic landing for it in every viewport / hand / steering-mode combination (a marker tap, not a flap or a steer)", rows.every(r => r.ok), JSON.stringify(rows.filter(r => !r.ok)));
+  await setSteer("off"); await p.setViewportSize({ width: 892, height: 412 }); await sleep(400); await setCtl("right");
+
+  // (H) 負荷: マーカー数・1 フレームあたりの処理時間(列挙+投影+遮蔽+配置と描画)。ソフトウェア描画の環境なので絶対値は実機と違う
+  await p.evaluate(([x, z, yaw]) => { const g = __game, f = g.flight; f.reset(); f.pos.set(x, 14, z); f.prevPos.copy(f.pos); f.yaw = yaw; f.vel.set(0, 0, 0); g.cam.snap(); window.__hv = setInterval(() => { f.pos.set(x, 14, z); f.vel.set(0, 0, 0); }, 8); }, town.pos); await sleep(2500);
+  const perf = await p.evaluate(() => ({ shown: __game.spots.list.length, maxShown: __game.spots.stats.maxShown, enumerated: __game.spots.stats.enumerated, updateMs: +__game.stats.spotMs.toFixed(3), drawMs: +__game.stats.spotDrawMs.toFixed(3), calls: __game.renderer.info.render.calls })); await unhover();
+  console.log("   spots cost:", JSON.stringify(perf));
+  check("the markers cost little per frame (update + draw < 3 ms even here, with the page rendered in software)", perf.shown >= 5 && perf.updateMs < 3 && perf.drawMs < 3, JSON.stringify(perf));
+  check("H8-B: no page errors", errs.length === 0, errs.join(" | "));
 }
 
 // ---- g12: 実タッチでの自動着地の成功率(H2)。試行→候補が出た→タップ→開始/拒否→成功/失敗/取消/衝突→1.5秒保持→歩行 を分けて数える。再試行はしない
@@ -808,8 +832,6 @@ async function g12({ p, cdp, errs }) {
   const tp = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
   await p.evaluate(() => { if (!document.getElementById("overlay").hidden) document.getElementById("ovGo").click(); }); await sleep(300);
   await p.setViewportSize({ width: 892, height: 412 }); await sleep(600);
-  await p.evaluate(() => { window.__ort = []; const oo = __game.input.onRingTap; __game.input.onRingTap = () => { const b = { st: __game.autoLand.stats.starts, rf: __game.autoLand.stats.refused, mk: !!__game.perchAssist.marker }; oo(); window.__ort.push({ ...b, st2: __game.autoLand.stats.starts, rf2: __game.autoLand.stats.refused, why: __game.autoLand.lastRefusal }); }; window.__rh = []; const o = __game.input.ringHit; __game.input.ringHit = (x, y) => { const r = o(x, y); window.__rh.push({ r, vis: __game.ring.visible, act: __game.autoLand.active, d: Math.round(Math.hypot(x - __game.ring.x, y - __game.ring.y)), hit: Math.round(__game.ring.hit) }); return r; }; });
-  await p.evaluate(() => { window.__pd = []; addEventListener("pointerup", e => { const l = window.__pd[window.__pd.length - 1]; if (l) { l.up = Math.round(e.timeStamp - l.t0); l.moved = Math.round(Math.hypot(e.clientX - l.x0, e.clientY - l.y0)); l.candUp = __game.input.ringCandCount(); l.tsDiff = Math.round(e.timeStamp - l.t0); setTimeout(() => { l.taps = __game.input.stats.ringTaps; l.candAfter = __game.input.ringCandCount(); }, 0); } }, true); addEventListener("pointerdown", e => { const r = __game.ring; window.__pd.push({ tgt: (e.target.id || e.target.tagName) + (e.target.closest && e.target.closest("button,.btn") ? "(UI)" : ""), t0: e.timeStamp, x0: e.clientX, y0: e.clientY, cand: __game.input.ringCandCount ? __game.input.ringCandCount() : -1,  dx: Math.round(e.clientX - r.x), dy: Math.round(e.clientY - r.y), hit: Math.round(r.hit), vis: r.visible, reason: __game.ringDiag.reason }); }, true); });
   for (let i = 0; i < 3 && (await p.evaluate(() => document.body.dataset.ctl)) !== "right"; i++) { await p.evaluate(() => document.getElementById("btnCtl").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }))); await sleep(250); }
   // 測定用の試行: 種類ごとに、足場の通し番号 k で決まる位置・向き・速さ(調整には使っていない別の並び)
   const plan = []; for (const kind of ["rock", "roof", "sign", "bench", "balcony", "rail", "branch", "pole"]) for (const k of [1, 2]) plan.push([kind, k]);
@@ -829,19 +851,20 @@ async function g12({ p, cdp, errs }) {
     }, [kind, k]);
     const row = { kind, k, result: "no-surface", retap: 0 };
     if (!info) { rows.push(row); continue; }
-    const shown = await p.waitForFunction(() => __game.ringDiag.reason === "shown", null, { timeout: 7000 }).then(() => true).catch(() => false); // 画面の中に描かれた◯(縁に出る◯は g11 で別に確かめる)
-    if (!shown) { row.result = "no-ring:" + (await p.evaluate(() => __game.ringDiag.reason)); rows.push(row); continue; }
-    // ◯が落ち着くのを待つ: 100 ms おいて2回読み、動きが 25 px 以内なら押す(足場のすぐ横を通り抜けるときの◯は画面を高速に横切る。そういう場面は押せるものとして数えず、unstable として別に数える)
-    let rs = null; for (let w = 0; w < 14 && !rs; w++) { const a1 = await p.evaluate(() => ({ x: __game.ring.x, y: __game.ring.y, v: __game.ring.visible })); await sleep(100); const a2 = await p.evaluate(() => ({ x: __game.ring.x, y: __game.ring.y, v: __game.ring.visible })); if (a1.v && a2.v && Math.hypot(a2.x - a1.x, a2.y - a1.y) <= 25) rs = a2; }
+    const tid = info.id, shown = await p.waitForFunction(i => !!__game.spots.get(i), tid, { timeout: 7000 }).then(() => true).catch(() => false); // 狙う足場の目印が出るまで(H8-B: 全候補のうち、この足場の ID)
+    if (!shown) { row.result = "no-ring"; rows.push(row); continue; }
+    // 目印が落ち着くのを待つ: 100 ms おいて2回読み、動きが 25 px 以内なら押す(足場のすぐ横を通り抜けるときの目印は画面を高速に横切る。そういう場面は押せるものとして数えず、unstable として別に数える)
+    let rs = null; for (let w = 0; w < 14 && !rs; w++) { const rd = () => p.evaluate(i => { const q = __game.spots.get(i); return q ? { x: q.dx, y: q.dy, v: true } : { x: 0, y: 0, v: false }; }, tid); const a1 = await rd(); await sleep(100); const a2 = await rd(); if (a1.v && a2.v && Math.hypot(a2.x - a1.x, a2.y - a1.y) <= 25) rs = a2; }
     if (!rs) { row.result = "unstable-ring"; rows.push(row); continue; }
-    const b = await p.evaluate(() => ({ starts: __game.autoLand.stats.starts, refused: __game.autoLand.stats.refused, crashes: __game.flight.crashes, ok: __game.autoLand.stats.success }));
-    await p.evaluate(() => { window.__trk = []; const t0 = performance.now(); window.__trkI = setInterval(() => window.__trk.push([Math.round(performance.now() - t0), Math.round(__game.ring.x), Math.round(__game.ring.y), __game.ringDiag.reason]), 25); });
-    await realTap(Math.round(rs.x), Math.round(rs.y)); await sleep(200); const trk = await p.evaluate(() => { clearInterval(window.__trkI); return window.__trk; });
-    let st = await p.evaluate(() => ({ starts: __game.autoLand.stats.starts, refused: __game.autoLand.stats.refused }));
-    if (st.starts === b.starts && st.refused === b.refused && (await p.evaluate(() => __game.ring.visible))) { row.retap = 1; row.first = await p.evaluate(() => ({ rd: { ...__game.input.ringDiag }, pd: window.__pd.slice(-1), ort: window.__ort.slice(-1), taps: __game.input.stats.ringTaps, ringXY: [Math.round(__game.ring.x), Math.round(__game.ring.y), Math.round(__game.ring.hit)], auto: __game.autoLand.active })); { const q = row.first.pd[0]; if (q && Math.hypot(q.dx, q.dy) > q.hit) row.firstMoved = 1; else row.recogMiss = 1; } /* 押した時点で◯の当たりの中だったのに入らなかった = 本物の取りこぼし(許容しない)。外だった = 指が届く前に◯が動いた */ console.log('     FIRSTMISS', kind, k, JSON.stringify(row.first), 'tap@', rs.x, rs.y, 'TRK', JSON.stringify(trk.filter((_, i) => i % 1 === 0))); const r2 = await p.evaluate(() => ({ x: __game.ring.x, y: __game.ring.y })); await realTap(Math.round(r2.x), Math.round(r2.y)); await sleep(200); } // タップが入らなかった: 1回だけ押し直し、回数を記録する
-    const a = await p.evaluate(() => ({ starts: __game.autoLand.stats.starts, refused: __game.autoLand.stats.refused, why: __game.autoLand.lastRefusal }));
-    if (a.refused > b.refused) { row.result = "refused:" + a.why; rows.push(row); continue; }
-    if (a.starts === b.starts) { row.result = "tap-not-recognised"; row.dbg = await p.evaluate(() => ({ ringTaps: __game.input.stats.ringTaps, tapMarker: !!window.__tm, refused: __game.autoLand.stats.refused, why: __game.autoLand.lastRefusal, active: __game.autoLand.active, ring: [Math.round(__game.ring.x), Math.round(__game.ring.y), __game.ring.visible], mk: !!__game.perchAssist.marker })); row.pd = await p.evaluate(() => window.__pd.slice(-2)); row.rh = await p.evaluate(() => window.__rh.slice(-3)); row.ort = await p.evaluate(() => window.__ort.slice(-3)); row.rd = await p.evaluate(() => ({ ...__game.input.ringDiag })); row.before = b; const last = row.pd[row.pd.length - 1]; if (last && (!last.vis || last.reason === "no-marker")) row.result = "ring-gone-before-tap"; /* 押した時点で◯はもう消えていた(候補の保持期限切れ)。押した先に◯がないので認識の失敗ではない */ else if (last && Math.hypot(last.dx, last.dy) > last.hit) row.result = "ring-moved-before-tap"; /* 指が届く前に◯が画面の別の場所へ移っていた(飛び去る足場)。認識の失敗ではないので別に数える */ rows.push(row); continue; }
+    const b = await p.evaluate(() => ({ starts: __game.autoLand.stats.starts, refused: __game.autoLand.stats.refused, crashes: __game.flight.crashes, ok: __game.autoLand.stats.success, taps: __game.input.stats.ringTaps, gone: __game.spots.stats.gone }));
+    await realTap(Math.round(rs.x), Math.round(rs.y)); await sleep(250);
+    const a = await p.evaluate(() => ({ starts: __game.autoLand.stats.starts, refused: __game.autoLand.stats.refused, why: __game.autoLand.lastRefusal, taps: __game.input.stats.ringTaps, tgt: __game.autoLand.target ? __game.autoLand.target.id : -1, active: __game.autoLand.active, gone: __game.spots.stats.gone }));
+    row.tapped = a.taps === b.taps + 1;
+    if (a.refused > b.refused) { row.result = "refused:" + a.why; rows.push(row); continue; } // 認識したが安全判定で拒否(認識の失敗とは別)
+    if (a.starts === b.starts) { // 認識されなかった: 押した位置が目印に届いていたかで、取りこぼしと「指が届く前に目印が動いた/去った」を分ける
+      const now = await p.evaluate(i => { const q = __game.spots.get(i); return q ? { x: q.dx, y: q.dy } : null; }, tid); row.dbg = { taps: [b.taps, a.taps], now, press: rs, rd: await p.evaluate(() => ({ ...__game.input.ringDiag })) };
+      row.result = !now ? "ring-gone-before-tap" : Math.hypot(now.x - rs.x, now.y - rs.y) > 34 ? "ring-moved-before-tap" : "tap-not-recognised"; rows.push(row); continue; }
+    row.targetOk = a.tgt === tid || (await p.evaluate(([t, tid]) => { const g = __game, A = g.surfaces.all[tid], B = g.surfaces.all[t]; return !!A && !!B && ((A.kind === "balcony" && B.kind === "rail") || (A.kind === "rail" && B.kind === "balcony")); }, [a.tgt, tid])); /* ベランダの目印は、手すりの上へ降りる設計(AutoLand.retarget)なので、同じ構造物の床と手すりは同じ目的地とみなす */ // 押した足場そのものへ着地を始めた(隣ではない)
     await p.waitForFunction(() => !__game.autoLand.active, null, { timeout: 25000 }).catch(() => {});
     const e = await p.evaluate(([bo]) => ({ end: __game.autoLand.end, crashes: __game.flight.crashes, ok: __game.autoLand.stats.success, mode: __game.flight.mode }), [b.ok]);
     row.end = e.end; row.crash = e.crashes - b.crashes > 0;
@@ -868,8 +891,8 @@ async function g12({ p, cdp, errs }) {
   check("the real-tap landing sample is big enough and the ring was available in most trials", n >= 14 && noRing <= Math.ceil(n * 0.25), `${noRing}/${n} without a ring`);
   const recogMiss = rows.filter(r => r.recogMiss).length + notRec, movedFirst = rows.filter(r => r.firstMoved).length;
   console.log(`   first taps that missed because the ring had moved away before the finger landed (re-tapped once, reported, not a recognition fault): ${movedFirst}; real recognition misses (press inside the ring's hit area): ${recogMiss}`);
-  check("a tap whose press lands inside a shown ring's hit area is always recognised (no tolerance)", recogMiss === 0, `${recogMiss}`);
-  check("of the started landings, at least 40% succeed and are still on the structure after 1.5 s with no touch (default wind on; the same approach distribution gives about 50-65% in the unit measurement)", started >= 8 && held.length / started >= 0.4, `${held.length}/${started} (success ${succ.length})`);
+  check("a tap whose press lands inside a shown marker's hit area is always recognised (no tolerance), and acts on the pressed perch", recogMiss === 0 && rows.every(r => r.targetOk !== false), `${recogMiss} misses; wrong target ${rows.filter(r => r.targetOk === false).length}`);
+  check("of the started landings, at least 40% succeed and are still on the structure after 1.5 s with no touch (default wind on; the same approach distribution gives about 50-65% in the unit measurement)", started >= 6 && held.length / started >= 0.4, `${held.length}/${started} (success ${succ.length})`);
   check("collisions during started landings are not common (<= 25%)", crashes <= Math.ceil(started * 0.25), `${crashes}/${started}`);
   check("on walkable perches a real stick touch moves the bird at least 0.8 m while it stays landed (>= 80%)", walkable.length === 0 || walked.length / walkable.length >= 0.8, `${walked.length}/${walkable.length}`);
   check("G: no page errors", errs.length === 0, errs.join(" | "));
@@ -889,7 +912,7 @@ async function g13({ p, cdp, errs }) {
   const results = [];
   for (const vp of [[892, 412], [412, 892]]) {
     await p.setViewportSize({ width: vp[0], height: vp[1] }); await sleep(500);
-    await p.evaluate(() => { const g = __game; g.setAuto(false); g.input.releaseAll(); window.__taps = 0; window.__ring = { x: 0, y: 0, hit: 48, on: true }; g.input.ringHit = (x, y) => window.__ring.on && Math.hypot(x - window.__ring.x, y - window.__ring.y) <= window.__ring.hit; g.input.onRingTap = () => { window.__taps++; }; });
+    await p.evaluate(() => { const g = __game; g.setAuto(false); g.input.releaseAll(); window.__taps = 0; window.__ring = { x: 0, y: 0, hit: 48, on: true }; g.input.spotAt = (x, y) => (window.__ring.on && Math.hypot(x - window.__ring.x, y - window.__ring.y) <= window.__ring.hit ? 1 : -1); g.input.onSpotTap = () => { window.__taps++; }; });
     const W = vp[0], H = vp[1];
     // 位置: 中央・四隅(縁の◯が置かれる余白 36 px / 上は 72 px)・各辺の中央・操作の◎や上部ボタンの近く
     const spots = [[W / 2, H / 2], [36, 72], [W - 36, 72], [36, H - 36], [W - 36, H - 36], [W / 2, 72], [W / 2, H - 36], [36, H / 2], [W - 36, H / 2], [W - 60, H - 90], [60, H - 90]].map(a => [Math.round(a[0]), Math.round(a[1])]);

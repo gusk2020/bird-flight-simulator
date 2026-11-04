@@ -1,7 +1,8 @@
-import { h2LandTests, h2RingTests, h5WindTests } from "./h2land";
+import { h2LandTests, h5WindTests } from "./h2land";
 import { h3LifeTests } from "./h3life";
 import { h2WalkTests } from "./h2walk";
 import { h8SteerTests } from "./h8steer";
+import { h8SpotTests } from "./h8spots";
 import { finish } from "./harness";
 import { physicsTests } from "./physics";
 import { cameraTests } from "./camera";
@@ -29,7 +30,7 @@ import { h1ProxTests } from "./h1prox";
 import { f34Tests } from "./f34";
 physicsTests(); cameraTests(); gameTests(); envTests(); stageBTests(); speedFxTests(); walkTests(); perchTests(); npcTests(); oneHandTests(); autopilotTests(); autoViewTests(); cameraStableTests(); perchAssistTests(); structureTests(); forageTests(); seasonTests(); f1WalkTests(); f2LandingTests(); f34Tests(); g1LightsTests(); g1WallTests(); g1LandTests(); h1ProxTests();
 h2LandTests();
-h2RingTests();
+h8SpotTests();
 h5WindTests();
 h2WalkTests(); h8SteerTests();
 h3LifeTests();

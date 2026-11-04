@@ -11,7 +11,7 @@ export class Input {
   state: FlightInput = { x: 0, y: 0, flapHeld: false, flapTap: false, brake: false };
   onReset = () => {}; onCamera = () => {}; onTime = () => {}; onPause = () => {};
   /** G1-5: 画面の座標が着地候補の◯の上か(main が毎フレーム、◯の画面位置から判定する)と、◯がタップされたとき */
-  ringHit: (x: number, y: number) => boolean = () => false; onRingTap = () => {};
+  spotAt: (x: number, y: number) => number = () => -1; onSpotTap: (id: number) => void = () => {}; /** 押していた候補の選択を解くとき(離した・動かした・取消) */ onSpotEnd: () => void = () => {};
   /** テスト用の計数: ◯タップになった回数 / 片手操作のタップ(=羽ばたき)になった回数 */
   stats = { ringTaps: 0, gestureTaps: 0 };
   /** 診断: ◯タップの判定の内訳(押した→離した→数えた)。取りこぼしの原因を、どの段階で落ちたかで見分ける */
@@ -39,7 +39,7 @@ export class Input {
   /** 近接◎の配置(片手操作のとき)。画面の大きさと左右から決まる */
   layout(): PadLayout | null { return this.mode === "both" ? null : padLayout(innerWidth, innerHeight, this.mode); }
   private steerTapSeq = 0;
-  private ringCand = new Map<number, { x: number; y: number; t: number }>(); private ringFired = new Set<number>();
+  private ringCand = new Map<number, { x: number; y: number; t: number; id: number }>(); private ringFired = new Set<number>();
   private out: FlightInput = { x: 0, y: 0, flapHeld: false, flapTap: false, brake: false };
   mode: ControlMode = "both"; readonly gesture = new OneHandGesture();
   /** H8-A: 単一◎の操縦方式(off=従来)。片手操作のときだけ使う。入力の読み取り(steer)と、その結果の操舵(main の SteerLayer)は別 */
@@ -61,17 +61,18 @@ export class Input {
       this.ringFired.delete(e.pointerId); // 前に使った指番号の取り残しを消す
       this.ringDiag.down++;
       const el = e.target as Element | null; if (el && el.closest && el.closest("button,.btn,#overlay")) return;
-      if (this.ringHit(e.clientX, e.clientY)) { this.ringCand.set(e.pointerId, { x: e.clientX, y: e.clientY, t: e.timeStamp }); this.ringDiag.downHit++; this.ringDiag.last = `down#${e.pointerId}@${Math.round(e.timeStamp)}`; }
+      const sid = this.spotAt(e.clientX, e.clientY); if (sid >= 0) { this.ringCand.set(e.pointerId, { x: e.clientX, y: e.clientY, t: e.timeStamp, id: sid }); this.ringDiag.downHit++; this.ringDiag.last = `down#${e.pointerId}@${Math.round(e.timeStamp)}`; }
     }, true);
-    document.addEventListener("pointermove", e => { const c = this.ringCand.get(e.pointerId); if (c && Math.hypot(e.clientX - c.x, e.clientY - c.y) > RING_SLOP_PX) { this.ringCand.delete(e.pointerId); this.ringDiag.moveDrop++; } }, true);
+    document.addEventListener("pointermove", e => { const c = this.ringCand.get(e.pointerId); if (c && Math.hypot(e.clientX - c.x, e.clientY - c.y) > RING_SLOP_PX) { this.ringCand.delete(e.pointerId); this.ringDiag.moveDrop++; this.onSpotEnd(); } }, true);
     document.addEventListener("pointerup", e => {
       const c = this.ringCand.get(e.pointerId); this.ringCand.delete(e.pointerId); const D = this.ringDiag; D.up++;
       const dur = c ? this.tapMs(c.t, e.timeStamp) : 0, near = c ? Math.hypot(e.clientX - c.x, e.clientY - c.y) <= RING_SLOP_PX : false;
       if (!c) D.upNoCand++; else if (!(dur < this.tapLimit())) { D.upSlow++; D.last += ` slow dt=${Math.round(e.timeStamp - c.t)} eff=${Math.round(dur)}`; } else if (!near) { D.upFar++; D.last += ` far`; } else D.upOk++;
       if (c && dur < this.tapLimit() && near) { // 押した時点で◯の当たり判定の中だったことは確かめ済み(◯は飛びながら動く・消えることがあるので、離した時点では確かめ直さない)。長さは、描画が固まっていた分を引いて測る
-         this.ringFired.add(e.pointerId); this.stats.ringTaps++; this.onRingTap(); }
+         this.ringFired.add(e.pointerId); this.stats.ringTaps++; this.onSpotTap(c.id); }
+      if (c) this.onSpotEnd();
     }, true);
-    document.addEventListener("pointercancel", e => { this.ringDiag.cancel++; this.ringCand.delete(e.pointerId); this.ringFired.delete(e.pointerId); }, true);
+    document.addEventListener("pointercancel", e => { this.ringDiag.cancel++; if (this.ringCand.delete(e.pointerId)) this.onSpotEnd(); this.ringFired.delete(e.pointerId); }, true);
     zone.addEventListener("pointerdown", e => {
       if (this.steerOn) { // H8-A: 単一◎。どの方式でも、触れた指を SteerPad へ渡す(◯タップになった指は、離したとき羽ばたきにしない)
         if (this.steer.down(e.pointerId, e.clientX, e.clientY, e.timeStamp, this.steerRect(), this.getYaw(), performance.now())) { try { zone.setPointerCapture(e.pointerId); } catch { /* 合成イベントなど */ } this.proxVisual.on = true; this.proxVisual.x = e.clientX; this.proxVisual.y = e.clientY; }

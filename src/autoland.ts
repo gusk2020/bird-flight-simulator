@@ -42,6 +42,7 @@ export class AutoLand {
   /** 直近に開始を断った理由(表示・診断用) */
   lastRefusal = "";
   stats = { starts: 0, refused: 0, success: 0, ended: { user: 0, danger: 0, lost: 0, timeout: 0, crash: 0, fail: 0 } as Record<string, number>, time: 0 };
+  /** 最後に始めた自動着地の目的地の ID(終わって target が空になったあとも残る。診断・テスト用) */ lastTargetId = -1;
   dbg = ""; /** 風上から進入するための中継点(追い風で小さな足場へ来たときだけ) */ wp: { x: number; z: number } | null = null; private wpT = 0; private tries = 0; private d0 = 0; private c0 = 0; private danger = 0; private lastFlap = -9; private under: Surface[] = [];
   private get all() { return this.idx.all; }
   constructor(private idx: SurfaceIndex, private pa: PerchAssist, private heightAt: (x: number, z: number) => number) {}
@@ -91,7 +92,7 @@ export class AutoLand {
   start(f: Flight, s0: Surface): boolean {
     const s = AUTOLAND.railForBalcony ? this.retarget(f, s0) : s0, c = this.check(f, s);
     if (!c.ok) { this.stats.refused++; this.end = ""; this.lastRefusal = c.why; return false; }
-    this.active = true; this.target = s; this.t = 0; this.end = ""; this.d0 = this.dist(f, s); this.c0 = f.crashes; this.danger = 0; this.lastFlap = f.clock - 9;
+    this.active = true; this.target = s; this.lastTargetId = s.id; this.t = 0; this.end = ""; this.d0 = this.dist(f, s); this.c0 = f.crashes; this.danger = 0; this.lastFlap = f.clock - 9;
     this.pa.forced = s; this.stats.starts++; this.wp = null; this.wpT = 0; this.tries = 0;
     // 追い風で小さな足場へ向かうとき: 追い風のままでは、失速しない対気速度を保つと対地速度が高すぎて止まれない。足場の風下側の点を回ってから、風上(向かい風)へ向けて進入する。回り込む道に建物があるときはやらない
     if (f.wind) f.wind.at(f.pos.x, f.pos.y, f.pos.z, f.clock, f.windVec);

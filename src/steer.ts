@@ -122,8 +122,9 @@ export class SteerLayer {
   samples: SteerSample[] = []; private acc = { n: 0, speed: 0, yaw: 0, cam: 0, brake: false, finger: false, t: 0 };
   resetStats() { this.stats = { taps: 0, chains: 0, capped: 0, brakeFrames: 0, courseSets: 0, climbFlaps: 0, maxYawRate: 0, maxCamRate: 0, speedJumps: 0 }; }
   stats = { taps: 0, chains: 0, capped: 0, brakeFrames: 0, courseSets: 0, climbFlaps: 0, maxYawRate: 0, maxCamRate: 0, speedJumps: 0 };
-  reset() { this.yawT = this.pitchT = null; this.lx = this.ly = 0; this.chain.length = 0; this.holdUntil = -1; this.wasUp = false; }
-  camSample(rate: number) { this.acc.cam = Math.max(this.acc.cam, rate); this.stats.maxCamRate = Math.max(this.stats.maxCamRate, rate); }
+  private skip = 0; // リセット(開始位置へ戻す・向きを変える)直後の数フレームは、角速度・速さの変化を測らない(瞬間移動を「急な動き」と誤って数えないため)
+  reset() { this.skip = 4; this.yawT = this.pitchT = null; this.lx = this.ly = 0; this.chain.length = 0; this.holdUntil = -1; this.wasUp = false; }
+  camSample(rate: number) { if (this.skip > 0) return; this.acc.cam = Math.max(this.acc.cam, rate); this.stats.maxCamRate = Math.max(this.stats.maxCamRate, rate); }
   /** 物理ステップごと。raw は Input.read() の結果(キーボード分を含む)。f.clock は秒 */
   apply(f: Flight, raw: FlightInput, pad: SteerPad, dt: number, autoLandActive: boolean, now: number): FlightInput {
     const v = pad.vec(), act = pad.active, t = f.clock;
@@ -166,6 +167,7 @@ export class SteerLayer {
     this.record(f, dt, raw, act); return raw;
   }
   private record(f: Flight, dt: number, raw: FlightInput, finger: boolean) {
+    if (this.skip > 0) { this.skip--; this.prevYaw = f.yaw; this.prevSpeed = f.speed; return; }
     const yr = Math.abs(wrap(f.yaw - this.prevYaw)) / Math.max(dt, 1e-3); this.prevYaw = f.yaw;
     if (this.prevSpeed > 0 && Math.abs(f.speed - this.prevSpeed) / Math.max(dt, 1e-3) > 90) this.stats.speedJumps++; this.prevSpeed = f.speed; // 1 ステップで 90 m/s² を超える速さの変化(ワープ・急停止の検出)
     this.stats.maxYawRate = Math.max(this.stats.maxYawRate, yr);

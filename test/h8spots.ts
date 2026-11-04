@@ -105,3 +105,37 @@ export function h8cTests() {
     const fast = new Flight({ colliders: [], heightAt: () => 0, perchAt: () => null, perchPoint: () => null, wireDir: () => null, waterAt: () => false } as never); fast.pos.set(0, 10, 0); fast.vel.set(0, 0, -13); fast.yaw = 0; fast.speed = 13; const rb = { x: 0, y: 0, flapHeld: false, flapTap: false, brake: false }; ap.steer(fast, rb, { ...s, minX: 0, maxX: 0.4, minZ: -30, maxZ: -29.6, top: 8 } as typeof s, 1 / 60);
     check("fast and within 40 m: the ordinary brake input is used (speed above the limit)", rb.brake === true); }
 }
+
+import { SpotConfirm, CONFIRM } from "../src/spotconfirm";
+export function h8dTests() {
+  suite("H8-D: confirmation only when a tap could be mistaken for another candidate");
+  const mk = (specs: [string, number, number, number, number, number][], steps = 40) => { const idx = mkIdx(specs); const sp = new LandSpots(idx); for (let i = 0; i < steps; i++) sp.update({ ...frame(0, 8, -i * 0.01, 0, i / 60), speed: 8 }, true); return sp; };
+  // 孤立した目印: 近くに別の目印がなく、1 タップで始まる(確認なし)
+  { const sp = mk([["bench", 0, -14, 0.4, 0.8, 0.5], ["pole", 12, -40, 0.2, 0.2, 6]]); const a = sp.list.find(q => q.kind === "bench")!;
+    check("an isolated marker is not risky: one tap, no confirmation", !sp.assess(a.dx, a.dy, a).risky && sp.assess(a.dx, a.dy, a).neighbors === 0); }
+  const mv = (specs: [string, number, number, number, number, number][], v: number) => { const idx = mkIdx(specs); const sp = new LandSpots(idx); for (let i = 0; i < 60; i++) sp.update({ ...frame(0, 8, -i * v / 60, 0, i / 60), speed: v }, true); return sp; };
+  // 遠い(35 m 超)密集: H8-B のずらしでも 30 px 前後までしか離せないので、止まっていても確認を求める
+  { const far = mv([["bench", 0, -40, 0.4, 0.8, 0.5], ["wall", 0.3, -42, 0.4, 2, 0.5], ["rock", -0.2, -44, 0.6, 0.6, 0.5]], 0.001);
+    check("a far (> 35 m) stack of three markers is risky even when nothing moves (they cannot be spread beyond ~30 px)", far.list.length === 3 && far.list.every(q => far.assess(q.dx, q.dy, q).risky), far.list.map(q => q.kind + ":" + q.d.toFixed(0)).join(" ")); }
+  // 近くて、ある程度離れている目印: 動いていても確認なし(過剰な確認を避ける)
+  { const near = mv([["bench", 0, -20, 0.4, 0.8, 0.5], ["pole", 9, -26, 0.2, 0.2, 5]], 12); const a = near.list.find(q => q.kind === "bench")!;
+    check("two well-separated close markers are not risky even in fast flight (no needless confirmation)", near.list.length === 2 && !near.assess(a.dx, a.dy, a).risky, `gap ${Math.hypot(near.list[0].dx - near.list[1].dx, near.list[0].dy - near.list[1].dy).toFixed(0)} px`); }
+  // 確認の時間が残らない目印は確認を求めない(押しても確認前に消える): 遠く正面で落ち着いた目印は去らない、鳥の真横に迫った目印は去る
+  { const calm = mv([["bench", 0, -40, 0.4, 0.8, 0.5]], 9), c = calm.list[0]; const soon = mv([["bench", 0, -8, 0.4, 0.8, 0.5]], 12), sn = soon.list[0];
+    check("a calm marker far ahead does not leave within the confirm window; one about to pass the bird does", !!c && !calm.leavesSoon(c) && (!sn || soon.leavesSoon(sn)), `calm ${c ? calm.leavesSoon(c) : "-"} soon ${sn ? soon.leavesSoon(sn) : "none(already gone)"}`); }
+  // assess() が、独立に計算した規則(触れた点の近くに別の候補の現在位置/軌跡があるか)と、街の実データの無数の押し方で一致する
+  { const idx = buildSurfaces(L), sp = new LandSpots(idx); let agree = 0, tot = 0, risky = 0;
+    for (const [x, z, yaw, v] of [[30, 0, Math.PI / 2, 9], [0, 40, 0, 12], [-30, 20, Math.PI, 7]] as const) { for (let i = 0; i < 40; i++) sp.update({ ...frame(x, 14, z - i * v / 60 * Math.cos(yaw), yaw, i / 60, world.heightAt), speed: v }, true);
+      for (const q of sp.list) for (const [ox, oy] of [[0, 0], [10, 6], [-20, 12], [30, -8]]) { const tx = q.dx + ox, ty = q.dy + oy; const r = sp.assess(tx, ty, q); risky += r.risky ? 1 : 0; tot++;
+        const tr = q.trail, last = tr[tr.length - 1]; let dr = 0; if (last) for (const p of tr) if (last.t - p.t <= SPOTS.driftS + 1e-6) dr = Math.max(dr, Math.hypot(last.x - p.x, last.y - p.y));
+        let n = 0; for (const j of sp.list) { if (j.id === q.id) continue; const dn = Math.hypot(tx - j.dx, ty - j.dy); let dj = dn; for (const p of j.trail) dj = Math.min(dj, Math.hypot(tx - p.x, ty - p.y)); const fe = q.d > SPOTS.farM || j.d > SPOTS.farM ? SPOTS.riskFarPx : 0; if (dn <= SPOTS.staticPx + fe * 0.5 || (dr >= SPOTS.driftPx && dj <= SPOTS.riskPx + fe)) n++; }
+        if ((n > 0 && !sp.leavesSoon(q)) === r.risky) agree++; } }
+    check("assess() agrees with an independent computation of the rule on real-town touches", tot > 40 && agree === tot, `${agree}/${tot} agree; ${risky} risky`); }
+  // 仮選択の状態管理
+  { const c = new SpotConfirm(); c.ask(3, 0); check("ask pre-selects an id", c.active && c.id === 3 && c.stats.asked === 1);
+    c.ask(5, 100); check("asking another id re-selects (counted), only one pre-selection exists", c.id === 5 && c.stats.reselected === 1);
+    check("the pre-selection expires after the timeout", c.update(100 + CONFIRM.timeoutMs + 1, true, null) && !c.active && c.stats.timeout === 1);
+    c.ask(7, 0); check("a candidate that left the view releases it with the reason recorded", c.update(10, false, "behind") && !c.active && c.stats.goneBy.behind === 1);
+    c.ask(8, 0); c.clear("off"); c.ask(9, 0); c.clear("manual"); c.ask(10, 0); c.clear("mode"); c.ask(11, 0); c.clear("confirmed"); c.ask(12, 0); c.clear("cancelled");
+    check("OFF / manual input / mode change / confirmation / cancel are counted separately", c.stats.off === 1 && c.stats.manual === 1 && c.stats.mode === 1 && c.stats.confirmed === 1 && c.stats.cancelled === 1); }
+}

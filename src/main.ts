@@ -28,6 +28,7 @@ import { SeasonClock, seasonBias, seasonLook, type SeasonSpeed } from "./season"
 import { PerchAssist, PERCH } from "./perchassist";
 import { AutoLand, AUTOLAND } from "./autoland";
 import { Approach } from "./approach";
+import { SpotConfirm } from "./spotconfirm";
 import { CruiseGuard } from "./avoid";
 import type { AutoPolicy } from "./settings";
 import { SpeedLines, Streaks, speedIntensity } from "./speedfx";
@@ -102,28 +103,56 @@ const cruiseGuard = new CruiseGuard();
 // 自動ついばみ(草地・土・あぜ道で、数歩ごとに止まって頭を下げる)。手動もオートも同じ仕組みで、強い入力(羽ばたき・大きなスティック)があれば中断する
 const forage = new Forage(world.groundAt, (Date.now() & 0xffff) + 11);
 // H8-B: 着地点マーカー。視界の中の着地できる足場を、すべて個別に示す(landspots.ts)。タップした候補に対して自動着地を始める(安全かどうかは、押した時にあらためて検査する)
-const approach = new Approach(), spots = new LandSpots(surfaces), spotCv = document.getElementById("spots") as HTMLCanvasElement, spotCtx = spotCv.getContext("2d")!;
+const approach = new Approach(), spotConfirm = new SpotConfirm(), spots = new LandSpots(surfaces), spotCv = document.getElementById("spots") as HTMLCanvasElement, spotCtx = spotCv.getContext("2d")!;
 const spotProj = new THREE.Vector3(); let uiRects: { x0: number; y0: number; x1: number; y1: number }[] = [], uiRectsT = 0;
 const refreshUiRects = () => { uiRects = []; document.querySelectorAll<HTMLElement>("button,.btn,.panel,#top").forEach(e => { if (e.offsetParent === null && getComputedStyle(e).position !== "fixed") return; const r = e.getBoundingClientRect(); if (r.width > 4 && r.height > 4 && getComputedStyle(e).display !== "none") uiRects.push({ x0: r.left - 4, y0: r.top - 4, x1: r.right + 4, y1: r.bottom + 4 }); }); };
 function sizeSpotCanvas() { const dpr = Math.min(2, devicePixelRatio || 1); spotCv.width = Math.round(innerWidth * dpr); spotCv.height = Math.round(innerHeight * dpr); spotCv.style.width = innerWidth + "px"; spotCv.style.height = innerHeight + "px"; spotCtx.setTransform(dpr, 0, 0, dpr, 0, 0); }
 sizeSpotCanvas(); addEventListener("resize", () => { sizeSpotCanvas(); uiRectsT = 0; });
 const proxLand = new ProxLand(perchAssist, autoLand);
 const autolandBar = document.getElementById("autoland")!;
-/** 押した瞬間に狙われた候補の ID を決める(以後、押している間に目印が動いても入れ替わらない)。オート飛行中・自動着地中は選べない */
-input.spotAt = (x, y) => { if (autopilot.enabled || autoLand.active) return -1; const sp = spots.pick(x, y); spots.pressedId = sp ? sp.id : -1; return spots.pressedId; };
+/** 押した瞬間に狙われた候補の ID を決める(以後、押している間に目印が動いても入れ替わらない)。オート飛行中・自動着地中は選べない。
+ *  H8-D: そのとき、別の候補と取り違え得る押し方か(LandSpots.assess)も、押した瞬間の画面で判定して覚える */
+let pressRisk = { id: -1, risky: false };
+input.spotAt = (x, y) => { if (autopilot.enabled || autoLand.active) return -1; const sp = spots.pick(x, y); spots.pressedId = sp ? sp.id : -1; pressRisk = { id: spots.pressedId, risky: sp ? spots.assess(x, y, sp).risky : false }; return spots.pressedId; };
 input.onSpotEnd = () => { spots.pressedId = -1; };
 const REFUSE_WHY: Record<string, string> = { "too far": "遠すぎます", "too high": "高すぎます", "dangerous path": "途中に建物があります", "unreachable (below)": "足場より低い位置です" }; // 開始を断った理由を短く知らせる
-input.onSpotTap = (id) => {
-  if (autopilot.enabled) return;
-  // 押してから離すまでに候補が視界から去った(通り過ぎた・画面の外)なら、古い候補へは降りない。拒否として数え、理由を示す(タップの取りこぼしとは別)
-  const sp = spots.get(id);
-  if (!spots.valid(id, flight.clock)) { spots.stats.gone++; autoLand.stats.refused++; autoLand.lastRefusal = "candidate gone"; toast("その場所は通り過ぎました"); return; }
-  const s = sp ? sp.s : surfaces.all[id]; if (!s) { autoLand.stats.refused++; autoLand.lastRefusal = "no candidate"; return; }
+/** 目印の足場への自動着地(18 m 以内)または接近先の選択(18 m 超)。1 タップで始める場合と、確認ボタンを押した場合の、共通の実行部分。開始の可否は AutoLand が毎回検査する。 */
+function activateSpot(id: number) {
+  const sp = spots.get(id), s = sp ? sp.s : surfaces.all[id]; if (!s) { autoLand.stats.refused++; autoLand.lastRefusal = "no candidate"; return; }
   // H8-C: 自動着地の届く範囲(18 m)より遠い目印は、断らずに「接近先」に選ぶ(向きを合わせて近づき、届く範囲に入ったら既存の自動着地を安全検査つきで始める)。もう一度押すと取り消す
   if (sp && sp.d > AUTOLAND.maxRange && !autoLand.active) { if (approach.id === id) { approach.clear("cancelled"); toast("接近をやめました"); } else { approach.select(id, flight.clock); toast("接近して着地します"); } return; }
   if (autoLand.start(flight, s)) { spots.targetId = s.id; toast("自動着地"); return; }
   toast("ここへは安全に降りられません" + (REFUSE_WHY[autoLand.lastRefusal] ? "(" + REFUSE_WHY[autoLand.lastRefusal] + ")" : ""));
+}
+input.onSpotTap = (id) => {
+  if (autopilot.enabled) return;
+  // 押してから離すまでに候補が視界から去った(通り過ぎた・画面の外)なら、古い候補へは降りない。拒否として数え、理由を示す(タップの取りこぼしとは別)
+  if (!spots.valid(id, flight.clock)) { spots.stats.gone++; autoLand.stats.refused++; autoLand.lastRefusal = "candidate gone"; spotConfirm.clear("gone:" + (spots.goneWhy(id) ?? "other")); toast("その場所は通り過ぎました"); return; }
+  // H8-D: 他の候補と取り違え得る押し方(密集・交差・動く小さな目印)のときだけ、仮選択にして確認を求める。孤立した目印はこれまでどおり 1 タップで始める。仮選択した候補をもう一度押したときは確認とみなす
+  const again = spotConfirm.id === id;
+  if (pressRisk.id === id && pressRisk.risky && !again) { spotConfirm.ask(id, performance.now()); return; }
+  if (spotConfirm.active) spotConfirm.clear(again ? "confirmed" : "cancelled");
+  activateSpot(id);
 };
+/** 確認ボタン「ここへ接近」: 確認する瞬間に、候補の ID・可視性・状態をあらためて確かめてから実行する(安全検査は AutoLand / Approach がこれまでどおり行う) */
+function confirmSpot() {
+  if (!spotConfirm.active) return; const id = spotConfirm.id, sp = spots.get(id);
+  if (autopilot.enabled || autoLand.active || flight.mode !== "air" || !spots.enabled) { spotConfirm.clear("mode"); return; }
+  if (!sp || !spots.valid(id, flight.clock)) { spotConfirm.clear("gone:" + (spots.goneWhy(id) ?? "other")); spots.stats.gone++; toast("その場所は見えなくなりました"); return; }
+  spotConfirm.clear("confirmed"); activateSpot(id);
+}
+const askBox = document.getElementById("spotAsk")!, askGo = document.getElementById("spotGo")!, askSub = document.getElementById("spotGoSub")!, askNo = document.getElementById("spotNo")!;
+for (const [el, fn] of [[askGo, confirmSpot], [askNo, () => spotConfirm.clear("cancelled")]] as const) el.addEventListener("pointerdown", e => { e.preventDefault(); e.stopPropagation(); fn(); });
+let askPlacedT = 0, askKey = "";
+/** 確認ボタンの置き場所: 単一◎では◎の真上(同じ側の親指が届く)。それ以外の片手では、使っていない側の中央寄り(◎・巡航/近接パッドと重ならない)。両手では画面の下の中央 */
+function placeAsk() {
+  const w = innerWidth, h = innerHeight, bw = 122 + 6 + 54; let left: number, top: number;
+  if (input.steerOn) { const r = input.steerRect(); left = r.cx - bw / 2; top = r.cy - r.r - 8 - 54; }
+  else if (input.mode !== "both") { const L = input.layout()!; left = input.mode === "right" ? L.zoneLeft - bw - 6 : L.zoneRight + 6; top = h - 54 - 14; }
+  else { left = (w - bw) / 2; top = h - 54 - 14; }
+  left = Math.min(w - bw - 4, Math.max(4, left)); top = Math.min(h - 54 - 4, Math.max(64, top));
+  askBox.style.left = left + "px"; askBox.style.top = top + "px";
+}
 let spotsDrawn = false, apWhy = "";
 /** 着地点マーカーの描画(2D キャンバス)。目印は半透明の輪。重なったものは名前を添え、ずらした目印は本来の位置と細い線で結ぶ。自動着地中は目的地だけ緑 */
 function drawSpots(now: number) {
@@ -135,6 +164,7 @@ function drawSpots(now: number) {
   for (const sp of list) {
     const a = sp.alpha * (sp.near ? 0.95 : 0.42), pressed = sp.id === spots.pressedId;
     if (Math.hypot(sp.dx - sp.x, sp.dy - sp.y) > 6) { c.globalAlpha = a * 0.7; c.strokeStyle = "rgba(255,241,176,.8)"; c.lineWidth = 1.5; c.beginPath(); c.moveTo(sp.x, sp.y); c.lineTo(sp.dx, sp.dy); c.stroke(); c.fillStyle = "rgba(255,241,176,.9)"; c.beginPath(); c.arc(sp.x, sp.y, 2.5, 0, 6.2832); c.fill(); }
+    const asked = sp.id === spotConfirm.id; if (asked) { const r2 = askBox.getBoundingClientRect(); c.globalAlpha = 0.85; c.strokeStyle = "#ffb347"; c.lineWidth = 2; c.setLineDash([5, 4]); c.beginPath(); c.moveTo(sp.dx, sp.dy); c.lineTo(r2.left + r2.width / 2, r2.top + r2.height / 2); c.stroke(); c.setLineDash([]); ring(sp.dx, sp.dy, SPOTS.radiusPx * 1.7 * pulse, "#ffb347", 1, 4.5); c.globalAlpha = 1; c.font = "bold 12px sans-serif"; c.textAlign = "center"; const lb = spotLabel(sp.kind) + " " + Math.round(sp.d) + " m"; c.lineWidth = 3.5; c.strokeStyle = "rgba(0,0,0,.75)"; c.strokeText(lb, sp.dx, sp.dy - SPOTS.radiusPx * 1.7 - 8); c.fillStyle = "#ffd9a0"; c.fillText(lb, sp.dx, sp.dy - SPOTS.radiusPx * 1.7 - 8); }
     const pend = sp.id === approach.id; if (pend) ring(sp.dx, sp.dy, SPOTS.radiusPx * 1.45 * pulse, "#5ec8ff", 0.95, 3.5);
     const sc = sp.d > 35 ? 0.72 : sp.d > 18 ? 0.88 : 1; // 遠い目印は小さく(混み合いを減らす。近づくと大きくなる)
     ring(sp.dx, sp.dy, SPOTS.radiusPx * sc * (pressed ? 1.3 : pulse), pressed || pend ? "#8fe3ff" : "#fff1b0", pend ? 0.95 : a, sc < 1 ? 2.4 : 3);
@@ -159,7 +189,8 @@ const steerLayer = new SteerLayer(), camDir0 = new THREE.Vector3(), camDir1 = ne
 function applyControl() {
   const m = settings.ctl as ControlMode;
   input.setMode(m); assist.enabled = m !== "both"; assist.reset();
-  { const on = settings.lm === "1"; spots.setEnabled(on); if (prefs.landmarks !== on) { prefs.landmarks = on; savePrefs(prefs); } } // H8-B: 着地点マーカーの表示/非表示(保存)。OFF にすると目印と選択を消す(進行中の自動着地は止めない)
+  { const on = settings.lm === "1"; spots.setEnabled(on); if (!on) { spotConfirm.clear("off"); approach.clear("cancelled"); } if (prefs.landmarks !== on) { prefs.landmarks = on; savePrefs(prefs); } } // H8-B: 着地点マーカーの表示/非表示(保存)。OFF にすると目印と選択を消す(進行中の自動着地は止めない)
+  spotConfirm.clear("mode"); // 操作モード・操縦方式を変えたら仮選択は解く
   { const sm = settings.steer as SteerMode; input.setSteer(sm); steerLayer.reset(); document.body.dataset.steer = m !== "both" ? sm : "off"; // H8-A: 単一◎の操縦方式。両手操作では使わない(従来のスティック)
     document.getElementById("btnSteer")!.textContent = "操縦 " + STEER_SHORT[sm]; const tag = document.getElementById("steerTag")!; tag.textContent = m !== "both" && sm !== "off" ? "◎ " + STEER_NAMES[sm] : ""; if (prefs.steer !== sm) { prefs.steer = sm; savePrefs(prefs); } }
   document.body.dataset.ctl = m; document.getElementById("btnCtl")!.textContent = CTL_NAMES[m]; layoutPads();
@@ -232,6 +263,7 @@ const readInput = () => {
   if (autopilot.enabled) { autoIn.flapTap = false; autoIn.flapHeld = false; autoIn.brake = false; autopilot.busy = forage.active; const ao = autopilot.drive(flight, autoIn, 1 / 60); if (autopilot.state === "cruise" && flight.mode === "air" && !flight.hopping && flight.stun <= 0) cruiseGuard.apply(world, flight, ao); /* H4: 巡航中だけ、手動と同じ衝突予測の減速・引き起こしを共有(着陸進入・離陸は自分の目標を優先) */ return forage.apply(ao, flight, false); }
   const raw = input.read();
   if (input.steerOn) steerLayer.apply(flight, raw, input.steer, 1 / 60, autoLand.active, performance.now()); // H8-A: 単一◎の指示を操舵の入力にする(物理・補助・回避はこの後も従来どおり)
+  if (spotConfirm.active && (Math.abs(raw.x) > 0.45 || Math.abs(raw.y) > 0.45)) spotConfirm.clear("manual"); // H8-D: 大きなスティック/◎の操作で仮選択を解く
   if (approach.active && !autoLand.active) { const sp = spots.get(approach.id); if (sp) approach.steer(flight, raw, sp.s, 1 / 60); } // H8-C: 接近先へ向きを合わせる(手動の操作があれば足さない)
   if (!autoLand.active && proxLand.update(flight, 1 / 60, !!raw.prox)) toast("自動着地");
   if (autoLand.active) raw.prox = undefined; // 自動着地中は近接機動の指示を使わない
@@ -359,6 +391,12 @@ function frame(now: number) {
         if (r === "cleared" && approach.lastReason.startsWith("refused")) { autoLand.stats.refused++; autoLand.lastRefusal = approach.lastReason.slice(8); toast("ここへは安全に降りられません" + (REFUSE_WHY[autoLand.lastRefusal] ? "(" + REFUSE_WHY[autoLand.lastRefusal] + ")" : "")); }
         else if (r === "cleared" && approach.lastReason.startsWith("gone")) toast("接近先が見えなくなりました"); }
     }
+    { // H8-D: 仮選択(確認待ち)の更新。候補が去った・期限切れ・OFF・オート・自動着地・空中でなくなったら解く。確認ボタンの表示と置き場所
+      const q = spotConfirm.active ? spots.get(spotConfirm.id) : null;
+      if (spotConfirm.active) { if (!air || autoLand.active || !spots.enabled) spotConfirm.clear(!spots.enabled ? "off" : "mode"); else spotConfirm.update(performance.now(), !!q, spots.goneWhy(spotConfirm.id)); }
+      const show = spotConfirm.active && !!q; if (askBox.hidden === show) askBox.hidden = !show;
+      if (show && q) { const sub = spotLabel(q.kind) + " " + Math.round(q.d) + " m" + (q.d > AUTOLAND.maxRange ? "(接近)" : ""); if (askSub.textContent !== sub) askSub.textContent = sub; const key = innerWidth + "x" + innerHeight + input.mode + input.steerMode; if (key !== askKey || now - askPlacedT > 400) { placeAsk(); askKey = key; askPlacedT = now; } }
+    }
     drawSpots(now);
     stats.spotMs += (performance.now() - t0 - stats.spotMs) * 0.05;
     const lbl = autoLand.active ? "自動着地中(操作でやめる)" : "", el = autolandBar; if (el.textContent !== lbl) { el.textContent = lbl; el.style.opacity = lbl ? "0.8" : "0"; }
@@ -384,4 +422,4 @@ function updateHud(dt: number, now: number) {
 }
 renderer.setAnimationLoop(frame);
 // テスト・デバッグ用
-(window as unknown as Record<string, unknown>).__game = { approach, spots, steerLayer, steerTestStart, game, flight, world, input, cam, camera, renderer, scene, frame, env: () => envAt(hour), stats, npc, lines, streaks, speedIntensity, setHour: (h: number) => { hour = h; targetHour = null; applyEnv(); }, settings, applySettings, assist, prefs, autopilot, setAuto, season, applySeasonLook, saveSeason, forage, perchAssist, autoLand, proxLand, puddles, puddleView, life, surfaces, cruiseGuard, npcView, npcUpdate: () => npcView.update(npc, camera.position, 220, world.lightsLevel()), hour: () => hour, director, drift, uiHider, wxLevel: () => wxLevel, wind, rain, quality };
+(window as unknown as Record<string, unknown>).__game = { spotConfirm, approach, spots, steerLayer, steerTestStart, game, flight, world, input, cam, camera, renderer, scene, frame, env: () => envAt(hour), stats, npc, lines, streaks, speedIntensity, setHour: (h: number) => { hour = h; targetHour = null; applyEnv(); }, settings, applySettings, assist, prefs, autopilot, setAuto, season, applySeasonLook, saveSeason, forage, perchAssist, autoLand, proxLand, puddles, puddleView, life, surfaces, cruiseGuard, npcView, npcUpdate: () => npcView.update(npc, camera.position, 220, world.lightsLevel()), hour: () => hour, director, drift, uiHider, wxLevel: () => wxLevel, wind, rain, quality };

@@ -88,7 +88,7 @@ export class SteerPad {
   }
   up(id: number, t: number) {
     if (id !== this.id || this.phase === "idle") return;
-    if (this.phase === "pending" && !this.moved && this.tapStall(this.tDown, t) < STEER.tapMs) this.tapSeq++; // 短く離した = タップ(長押し成立後・動かしたあとは羽ばたかない)
+    if ((this.phase === "pending" || this.phase === "brake") && !this.moved && this.tapStall(this.tDown, t) < STEER.tapMs) this.tapSeq++; // ブレーキが早く入ってしまっても、指を離したときのイベントの時刻で見て短ければタップ(描画が遅れて「離した」の到着が遅れた場合の救済) // 短く離した = タップ(長押し成立後・動かしたあとは羽ばたかない)
     if (this.mode === "A" && this.moved) { const v = this.vec(); if (v.mag > 0) { this.course = { yaw: wrap(this.refYaw + v.yawOff), pitch: v.pitch }; this.courseSeq++; } } // スワイプして離した: 進路を確定
     this.reset();
   }

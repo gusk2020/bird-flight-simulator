@@ -78,6 +78,12 @@ export function h8SteerTests() {
     { const r = sim("C", [{ t: 0, k: "down", ...centre(0.8, 0) }, { t: 400, k: "move", ...centre(0, 0) }, { t: 1500, k: "up" }], 2.5, air()); check("C: moving into the centre and staying brakes", r.brakeSeen); }
     { const e: Ev[] = [{ t: 0, k: "down", ...centre(0, 0) }, { t: 500, k: "move", ...centre(0.8, 0) }, { t: 1500, k: "up" }]; const r = sim("C", e, 2.5, air()); check("C: leaving the centre releases the brake and steers", r.layer.stats.brakeFrames < 45 && wrap(r.ys[149]) < -0.2, `brake frames ${r.layer.stats.brakeFrames}`); }
   }
+  // 描画が遅れて「離した」の到着が遅れ、先にブレーキが入ってしまっても、イベントの時刻で短ければタップ(長ければ長押し)
+  for (const m of ["A", "B", "C"] as SteerMode[]) {
+    const quick = new SteerPad(), slow = new SteerPad(); quick.mode = slow.mode = m;
+    for (const [pad, upT] of [[quick, 1060], [slow, 1900]] as const) { pad.down(1, RECT.cx, RECT.cy, 1000, RECT, 0); pad.poll(1700); /* 処理が遅れて、先に 0.7 秒ぶん進んだ */ pad.up(1, upT); }
+    check(`${m}: a late-delivered release still counts as a tap when its own timestamp says 60 ms (and a real 0.9 s press is not a tap)`, quick.tapSeq === 1 && slow.tapSeq === 0, `quick ${quick.tapSeq} slow ${slow.tapSeq}`);
+  }
   // 地上: 同じ◎で向き直って前進歩行(後退しない)、上=小ジャンプ、タップ=羽ばたき(小ジャンプ)
   { const gnd = () => { const f = at(0, 0.5, 0, 0, 0); f.pos.y = world.heightAt(0, 0) + 0.32; f.mode = "landed"; f.vel.set(0, 0, 0); f.walkV = 0; f.prevPos.copy(f.pos); return f; };
     for (const m of ["A", "B", "C"] as SteerMode[]) {

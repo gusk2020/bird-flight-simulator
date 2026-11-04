@@ -880,6 +880,7 @@ async function g12({ p, cdp, errs }) {
 // 着地の可否(安全判定)はここでは見ない。見るのは「押した瞬間に◯の当たりの中なら必ず1回、外・長押し・動かしたときは0回」だけ。
 async function g13({ p, cdp, errs }) {
   console.log("\n# ring tap recognition, deterministic input sequences (H6)");
+  if (process.env.G13_THROTTLE) await cdp.send("Emulation.setCPUThrottlingRate", { rate: Number(process.env.G13_THROTTLE) }); // 診断用: CI のように CPU が足りない状況を作る
   const tp = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
   await p.evaluate(() => { if (!document.getElementById("overlay").hidden) document.getElementById("ovGo").click(); }); await sleep(300);
   { const r = await p.evaluate(() => { const I = __game.input, keep = I.stalls.slice(); I.stalls = [{ s: 100, e: 1000 }]; const o = { tapStalled: I.tapMs(50, 1010), none: I.tapMs(2000, 2060), cap: (I.stalls = [{ s: 0, e: 9000 }], I.tapMs(0, 8000)) }; I.stalls = keep; return o; });
@@ -912,7 +913,8 @@ async function g13({ p, cdp, errs }) {
         await sleep(100);
         const n = await p.evaluate(() => window.__taps); if (n === want) ok++; else bad.push(`${x},${y}->${n}`);
       }
-      check(`${vp.join("x")} ${name}: ${want ? "recognised exactly once" : "never recognised"} at every spot not covered by a button (${ok} spots)`, ok >= 3 && bad.length === 0, bad.join(" "));
+      const rd = bad.length ? JSON.stringify(await p.evaluate(() => ({ ...__game.input.ringDiag, stalls: __game.input.stalls.length, fps: Math.round(1000 / (performance.now() - __game.input.frameAt + 1)) }))) : "";
+      check(`${vp.join("x")} ${name}: ${want ? "recognised exactly once" : "never recognised"} at every spot not covered by a button (${ok} spots)`, ok >= 3 && bad.length === 0, bad.join(" ") + " " + rd);
     }
   }
   check("G13: no page errors", errs.length === 0, errs.join(" | "));

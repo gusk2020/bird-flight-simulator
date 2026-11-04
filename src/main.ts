@@ -26,7 +26,8 @@ import { buildSurfaces, type Surface } from "./perches";
 import { Forage } from "./forage";
 import { SeasonClock, seasonBias, seasonLook, type SeasonSpeed } from "./season";
 import { PerchAssist, PERCH } from "./perchassist";
-import { AutoLand } from "./autoland";
+import { AutoLand, AUTOLAND } from "./autoland";
+import { Approach } from "./approach";
 import { CruiseGuard } from "./avoid";
 import type { AutoPolicy } from "./settings";
 import { SpeedLines, Streaks, speedIntensity } from "./speedfx";
@@ -101,7 +102,7 @@ const cruiseGuard = new CruiseGuard();
 // 自動ついばみ(草地・土・あぜ道で、数歩ごとに止まって頭を下げる)。手動もオートも同じ仕組みで、強い入力(羽ばたき・大きなスティック)があれば中断する
 const forage = new Forage(world.groundAt, (Date.now() & 0xffff) + 11);
 // H8-B: 着地点マーカー。視界の中の着地できる足場を、すべて個別に示す(landspots.ts)。タップした候補に対して自動着地を始める(安全かどうかは、押した時にあらためて検査する)
-const spots = new LandSpots(surfaces), spotCv = document.getElementById("spots") as HTMLCanvasElement, spotCtx = spotCv.getContext("2d")!;
+const approach = new Approach(), spots = new LandSpots(surfaces), spotCv = document.getElementById("spots") as HTMLCanvasElement, spotCtx = spotCv.getContext("2d")!;
 const spotProj = new THREE.Vector3(); let uiRects: { x0: number; y0: number; x1: number; y1: number }[] = [], uiRectsT = 0;
 const refreshUiRects = () => { uiRects = []; document.querySelectorAll<HTMLElement>("button,.btn,.panel,#top").forEach(e => { if (e.offsetParent === null && getComputedStyle(e).position !== "fixed") return; const r = e.getBoundingClientRect(); if (r.width > 4 && r.height > 4 && getComputedStyle(e).display !== "none") uiRects.push({ x0: r.left - 4, y0: r.top - 4, x1: r.right + 4, y1: r.bottom + 4 }); }); };
 function sizeSpotCanvas() { const dpr = Math.min(2, devicePixelRatio || 1); spotCv.width = Math.round(innerWidth * dpr); spotCv.height = Math.round(innerHeight * dpr); spotCv.style.width = innerWidth + "px"; spotCv.style.height = innerHeight + "px"; spotCtx.setTransform(dpr, 0, 0, dpr, 0, 0); }
@@ -118,10 +119,12 @@ input.onSpotTap = (id) => {
   const sp = spots.get(id);
   if (!spots.valid(id, flight.clock)) { spots.stats.gone++; autoLand.stats.refused++; autoLand.lastRefusal = "candidate gone"; toast("その場所は通り過ぎました"); return; }
   const s = sp ? sp.s : surfaces.all[id]; if (!s) { autoLand.stats.refused++; autoLand.lastRefusal = "no candidate"; return; }
+  // H8-C: 自動着地の届く範囲(18 m)より遠い目印は、断らずに「接近先」に選ぶ(向きを合わせて近づき、届く範囲に入ったら既存の自動着地を安全検査つきで始める)。もう一度押すと取り消す
+  if (sp && sp.d > AUTOLAND.maxRange && !autoLand.active) { if (approach.id === id) { approach.clear("cancelled"); toast("接近をやめました"); } else { approach.select(id, flight.clock); toast("接近して着地します"); } return; }
   if (autoLand.start(flight, s)) { spots.targetId = s.id; toast("自動着地"); return; }
   toast("ここへは安全に降りられません" + (REFUSE_WHY[autoLand.lastRefusal] ? "(" + REFUSE_WHY[autoLand.lastRefusal] + ")" : ""));
 };
-let spotsDrawn = false;
+let spotsDrawn = false, apWhy = "";
 /** 着地点マーカーの描画(2D キャンバス)。目印は半透明の輪。重なったものは名前を添え、ずらした目印は本来の位置と細い線で結ぶ。自動着地中は目的地だけ緑 */
 function drawSpots(now: number) {
   const c = spotCtx, td = performance.now(); const list = spots.enabled ? spots.list : [], tgt = spots.enabled && autoLand.active ? autoLand.target : null;
@@ -132,8 +135,11 @@ function drawSpots(now: number) {
   for (const sp of list) {
     const a = sp.alpha * (sp.near ? 0.95 : 0.42), pressed = sp.id === spots.pressedId;
     if (Math.hypot(sp.dx - sp.x, sp.dy - sp.y) > 6) { c.globalAlpha = a * 0.7; c.strokeStyle = "rgba(255,241,176,.8)"; c.lineWidth = 1.5; c.beginPath(); c.moveTo(sp.x, sp.y); c.lineTo(sp.dx, sp.dy); c.stroke(); c.fillStyle = "rgba(255,241,176,.9)"; c.beginPath(); c.arc(sp.x, sp.y, 2.5, 0, 6.2832); c.fill(); }
-    ring(sp.dx, sp.dy, SPOTS.radiusPx * (pressed ? 1.3 : pulse), pressed ? "#8fe3ff" : "#fff1b0", a);
+    const pend = sp.id === approach.id; if (pend) ring(sp.dx, sp.dy, SPOTS.radiusPx * 1.45 * pulse, "#5ec8ff", 0.95, 3.5);
+    const sc = sp.d > 35 ? 0.72 : sp.d > 18 ? 0.88 : 1; // 遠い目印は小さく(混み合いを減らす。近づくと大きくなる)
+    ring(sp.dx, sp.dy, SPOTS.radiusPx * sc * (pressed ? 1.3 : pulse), pressed || pend ? "#8fe3ff" : "#fff1b0", pend ? 0.95 : a, sc < 1 ? 2.4 : 3);
     c.globalAlpha = a; c.fillStyle = pressed ? "#8fe3ff" : "#fff1b0"; c.beginPath(); c.arc(sp.dx, sp.dy, 3.5, 0, 6.2832); c.fill();
+    if (pend) { c.globalAlpha = 0.95; c.font = "bold 11px sans-serif"; c.textAlign = "center"; c.lineWidth = 3; c.strokeStyle = "rgba(0,0,0,.65)"; c.strokeText("接近中", sp.dx, sp.dy - SPOTS.radiusPx - 10); c.fillStyle = "#bfe9ff"; c.fillText("接近中", sp.dx, sp.dy - SPOTS.radiusPx - 10); }
     if (sp.stacked) { c.globalAlpha = a; c.font = "bold 11px sans-serif"; c.textAlign = "center"; const tx = spotLabel(sp.kind); c.lineWidth = 3; c.strokeStyle = "rgba(0,0,0,.65)"; c.strokeText(tx, sp.dx, sp.dy + SPOTS.radiusPx + 12); c.fillStyle = "#fff"; c.fillText(tx, sp.dx, sp.dy + SPOTS.radiusPx + 12); }
   }
   if (tgt) { spotProj.set((tgt.minX + tgt.maxX) / 2, tgt.top + 0.05, (tgt.minZ + tgt.maxZ) / 2).project(camera); if (spotProj.z < 1 && Math.abs(spotProj.x) < 1.05 && Math.abs(spotProj.y) < 1.05) ring((spotProj.x * 0.5 + 0.5) * innerWidth, (-spotProj.y * 0.5 + 0.5) * innerHeight, SPOTS.radiusPx * 1.1, "#9be8b0", 0.95); }
@@ -226,6 +232,7 @@ const readInput = () => {
   if (autopilot.enabled) { autoIn.flapTap = false; autoIn.flapHeld = false; autoIn.brake = false; autopilot.busy = forage.active; const ao = autopilot.drive(flight, autoIn, 1 / 60); if (autopilot.state === "cruise" && flight.mode === "air" && !flight.hopping && flight.stun <= 0) cruiseGuard.apply(world, flight, ao); /* H4: 巡航中だけ、手動と同じ衝突予測の減速・引き起こしを共有(着陸進入・離陸は自分の目標を優先) */ return forage.apply(ao, flight, false); }
   const raw = input.read();
   if (input.steerOn) steerLayer.apply(flight, raw, input.steer, 1 / 60, autoLand.active, performance.now()); // H8-A: 単一◎の指示を操舵の入力にする(物理・補助・回避はこの後も従来どおり)
+  if (approach.active && !autoLand.active) { const sp = spots.get(approach.id); if (sp) approach.steer(flight, raw, sp.s, 1 / 60); } // H8-C: 接近先へ向きを合わせる(手動の操作があれば足さない)
   if (!autoLand.active && proxLand.update(flight, 1 / 60, !!raw.prox)) toast("自動着地");
   if (autoLand.active) raw.prox = undefined; // 自動着地中は近接機動の指示を使わない
   if (flight.mode === "air" && !flight.prox.on && !flight.hopping && flight.stun <= 0 && !autoLand.active) cruiseGuard.apply(world, flight, raw);
@@ -343,9 +350,15 @@ function frame(now: number) {
     if (now - uiRectsT > 500) { refreshUiRects(); uiRectsT = now; }
     const air = flight.mode === "air" && !flight.hopping && flight.stun <= 0 && !autopilot.enabled;
     const hs = Math.hypot(flight.vel.x, flight.vel.z), fx = hs > 2 ? flight.vel.x / hs : -Math.sin(flight.yaw), fz = hs > 2 ? flight.vel.z / hs : -Math.cos(flight.yaw);
-    const F: SpotFrame = { bx: flight.pos.x, by: flight.pos.y, bz: flight.pos.z, fx, fz, feetY: flight.pos.y - PHYS.feetOffset, cx: camera.position.x, cy: camera.position.y, cz: camera.position.z, w: innerWidth, h: innerHeight, t: flight.clock, ui: uiRects, heightAt: world.heightAt,
+    const F: SpotFrame = { bx: flight.pos.x, by: flight.pos.y, bz: flight.pos.z, fx, fz, feetY: flight.pos.y - PHYS.feetOffset, cx: camera.position.x, cy: camera.position.y, cz: camera.position.z, w: innerWidth, h: innerHeight, t: flight.clock, speed: hs, ui: uiRects, heightAt: world.heightAt,
       project: (x, y, z, out) => { spotProj.set(x, y, z).project(camera); out.x = spotProj.x; out.y = spotProj.y; out.z = spotProj.z; } };
     if (autoLand.active) { spots.update(F, false); if (!autoLand.target) spots.targetId = -1; } else { spots.targetId = -1; spots.update(F, air); }
+    { // H8-C: 接近先の更新(目印が去ったら解除。届く範囲に入ったら安全検査をして自動着地を始める)
+      if (approach.id >= 0 && (!air || autoLand.active || !spots.enabled)) approach.clear("cancelled");
+      if (approach.id >= 0) { const ap = spots.get(approach.id); const r = approach.update(flight.clock, ap ? { s: ap.s, d: ap.d, near: ap.near, ready: approach.ready(flight, ap.s) } : null, spots.goneWhy(approach.id), sf => { const c = autoLand.check(flight, sf); apWhy = c.why; if (!c.ok) return false; if (autoLand.start(flight, sf)) { spots.targetId = sf.id; toast("自動着地"); return true; } return false; }, () => apWhy);
+        if (r === "cleared" && approach.lastReason.startsWith("refused")) { autoLand.stats.refused++; autoLand.lastRefusal = approach.lastReason.slice(8); toast("ここへは安全に降りられません" + (REFUSE_WHY[autoLand.lastRefusal] ? "(" + REFUSE_WHY[autoLand.lastRefusal] + ")" : "")); }
+        else if (r === "cleared" && approach.lastReason.startsWith("gone")) toast("接近先が見えなくなりました"); }
+    }
     drawSpots(now);
     stats.spotMs += (performance.now() - t0 - stats.spotMs) * 0.05;
     const lbl = autoLand.active ? "自動着地中(操作でやめる)" : "", el = autolandBar; if (el.textContent !== lbl) { el.textContent = lbl; el.style.opacity = lbl ? "0.8" : "0"; }
@@ -371,4 +384,4 @@ function updateHud(dt: number, now: number) {
 }
 renderer.setAnimationLoop(frame);
 // テスト・デバッグ用
-(window as unknown as Record<string, unknown>).__game = { spots, steerLayer, steerTestStart, game, flight, world, input, cam, camera, renderer, scene, frame, env: () => envAt(hour), stats, npc, lines, streaks, speedIntensity, setHour: (h: number) => { hour = h; targetHour = null; applyEnv(); }, settings, applySettings, assist, prefs, autopilot, setAuto, season, applySeasonLook, saveSeason, forage, perchAssist, autoLand, proxLand, puddles, puddleView, life, surfaces, cruiseGuard, npcView, npcUpdate: () => npcView.update(npc, camera.position, 220, world.lightsLevel()), hour: () => hour, director, drift, uiHider, wxLevel: () => wxLevel, wind, rain, quality };
+(window as unknown as Record<string, unknown>).__game = { approach, spots, steerLayer, steerTestStart, game, flight, world, input, cam, camera, renderer, scene, frame, env: () => envAt(hour), stats, npc, lines, streaks, speedIntensity, setHour: (h: number) => { hour = h; targetHour = null; applyEnv(); }, settings, applySettings, assist, prefs, autopilot, setAuto, season, applySeasonLook, saveSeason, forage, perchAssist, autoLand, proxLand, puddles, puddleView, life, surfaces, cruiseGuard, npcView, npcUpdate: () => npcView.update(npc, camera.position, 220, world.lightsLevel()), hour: () => hour, director, drift, uiHider, wxLevel: () => wxLevel, wind, rain, quality };

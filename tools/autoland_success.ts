@@ -24,11 +24,11 @@ export function trial(s: Surface, i: number, trace?: Record<string, number | str
   const apt = (s.kind === "balcony" || s.kind === "rail") ? L.apts.find(a => Math.abs((s.minX + s.maxX) / 2 - a.x) < a.w / 2 + 0.1 && Math.abs((s.minZ + s.maxZ) / 2 - a.z) < a.d / 2 + 1.5) : undefined;
   const cx = (s.minX + s.maxX) / 2, cz = (s.minZ + s.maxZ) / 2;
   const ang = apt ? ((s.minZ + s.maxZ) / 2 > apt.z ? Math.PI / 2 : -Math.PI / 2) + (rnd() - 0.5) * 1.6 : rnd() * Math.PI * 2;
-  const dist = 6 + rnd() * 10, h0 = s.top + 0.8 + rnd() * 4.2;
+  const dist = 6 + rnd() * Number(process.env.DSPAN ?? 10), h0 = s.top + 0.8 + rnd() * 4.2;
   // dist は足場の縁からの距離(大きな屋根では中心からの距離にすると、屋根の真上から始まってしまう)
   const dxs = Math.cos(ang), dzs = Math.sin(ang), hx = (s.maxX - s.minX) / 2, hz = (s.maxZ - s.minZ) / 2, tExit = Math.min(hx / Math.max(Math.abs(dxs), 1e-6), hz / Math.max(Math.abs(dzs), 1e-6));
   f.pos.set(cx + dxs * (tExit + dist), h0, cz + dzs * (tExit + dist)); f.prevPos.copy(f.pos);
-  const toward = Math.atan2(-(cx - f.pos.x), -(cz - f.pos.z)); f.yaw = toward + (rnd() - 0.5) * 1.57; const v0 = 6 + rnd() * 5;
+  const toward = Math.atan2(-(cx - f.pos.x), -(cz - f.pos.z)); f.yaw = toward + (rnd() - 0.5) * 1.57; const v0 = 6 + rnd() * Number(process.env.VSPAN ?? 5);
   f.vel.set(-Math.sin(f.yaw) * v0, -0.5, -Math.cos(f.yaw) * v0);
   let tail = 0; if (f.wind) { const wv = new (f.windVec.constructor as any)(); f.wind.at(f.pos.x, f.pos.y, f.pos.z, 0, wv); const hv = Math.hypot(f.vel.x, f.vel.z) || 1; tail = (wv.x * f.vel.x + wv.z * f.vel.z) / hv; }
   const out: Result = { tail, v0, kind: s.kind, refused: false, why: "", ok: false, crash: false, secs: 0, walked: false };

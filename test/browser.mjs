@@ -1273,11 +1273,68 @@ async function g16({ p, cdp, errs }) {
   check("no page errors", errs.length === 0, errs.slice(0, 3).join(" | "));
 }
 
+// ---- g17: H9 着地点マーカーの青/緑(安全判定との整合、描画色)、動かした◎の位置での実際のタッチ、縦画面の飛行ガイド
+async function g17({ p, cdp, errs }) {
+  console.log("\n# H9: blue/green markers, moved pads, portrait guide");
+  const tp = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
+  const sleepG = ms => sleep(ms);
+  await p.evaluate(() => { if (!document.getElementById("overlay").hidden) document.getElementById("ovGo").click(); }); await sleep(300);
+  const setCtl = async m => { for (let i = 0; i < 3; i++) { if ((await p.evaluate(() => document.body.dataset.ctl)) === m) return; await p.evaluate(() => document.getElementById("btnCtl").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }))); await sleep(250); } };
+  await p.setViewportSize({ width: 892, height: 412 }); await sleep(500); await setCtl("right");
+  const hover = (x, z, yaw, y = 14) => p.evaluate(([x, z, yaw, y]) => { const g = __game, f = g.flight; clearInterval(window.__hv); g.setAuto?.(false); g.input.releaseAll(); g.autoLand.cancel("user"); g.approach.clear("cancelled"); g.spotConfirm.clear("cancelled"); f.reset(); f.pos.set(x, y, z); f.prevPos.copy(f.pos); f.yaw = yaw; f.vel.set(0, 0, 0); f.speedScale = 1; g.cam.snap(); window.__hv = setInterval(() => { f.pos.set(x, y, z); f.vel.set(0, 0, 0); }, 8); }, [x, z, yaw, y]);
+  const unhover = () => p.evaluate(() => clearInterval(window.__hv));
+  // ---- (A) 色: 緑 ⇔ いま自動着地が始められる(AutoLand.canStart)。描いた輪の色も同じ
+  await hover(30, 0, Math.PI / 2); await sleep(1200);
+  const cls = await p.evaluate(() => { const g = __game, cv = document.getElementById("spots"), ctx = cv.getContext("2d"), dpr = cv.width / innerWidth; const out = [];
+    for (const q of g.spots.list) { if (q.d > 60) continue; const lan = g.spotLanding(q), can = g.autoLand.canStart(g.flight, q.s); const sc = q.d > 35 ? 0.72 : q.d > 18 ? 0.88 : 1, R = 22 * sc; let gr = 0, bl = 0;
+      for (const k of [0.9, 1, 1.1]) for (let a = 0; a < 24; a++) { const x = Math.round((q.dx + Math.cos(a / 24 * 6.2832) * R * k) * dpr), y = Math.round((q.dy + Math.sin(a / 24 * 6.2832) * R * k) * dpr); if (x < 0 || y < 0 || x >= cv.width || y >= cv.height) continue; const d = ctx.getImageData(x, y, 1, 1).data; if (d[3] < 100) continue; if (d[1] > d[0] + 40 && d[1] > d[2] + 15) gr++; else if (d[2] > d[0] + 40 && d[2] > d[1] + 10) bl++; }
+      out.push({ id: q.id, kind: q.kind, d: Math.round(q.d), green: lan.ok, canStart: can.ok, px: gr > bl ? "green" : bl > gr ? "blue" : "none", gr, bl, onScreen: q.dx > 30 && q.dx < innerWidth - 30 && q.dy > 30 && q.dy < innerHeight - 30 }); }
+    return out; });
+  const vis = cls.filter(c => c.onScreen);
+  check("markers: green exactly when AutoLand.canStart passes right now (never green for an unsafe target)", vis.length >= 6 && vis.every(c => c.green === c.canStart) && vis.every(c => !(c.green && !c.canStart)), JSON.stringify(vis.map(c => [c.kind, c.d, c.green, c.canStart])));
+  check("markers: both a green and a blue marker are in the town test view", vis.some(c => c.green) && vis.some(c => !c.green), JSON.stringify({ g: vis.filter(c => c.green).length, b: vis.filter(c => !c.green).length }));
+  const mism = vis.filter(c => c.px !== "none" && ((c.px === "green") !== c.green));
+  check("markers: the drawn ring colour (pixels) matches the state - green rings green, blue rings blue", mism.length === 0 && vis.filter(c => c.px !== "none").length >= 4, JSON.stringify({ mism, read: vis.filter(c => c.px !== "none").length }));
+  // ---- (B) 押した結果: 緑は着地開始、遠い青は接近先、届く範囲の青(安全でない)は理由つきで断る
+  const tapSpot = id => p.evaluate(id => { const g = __game, q = g.spots.get(id); if (!q) return null; const x = Math.round(q.dx), y = Math.round(q.dy), pk = g.spots.pick(x, y); if (!pk || pk.id !== id || g.spots.assess(x, y, q).risky) return { skip: true }; const b = { starts: g.autoLand.stats.starts, refused: g.autoLand.stats.refused, ap: g.approach.id }; const el = document.elementFromPoint(x, y) || document.body, o = { bubbles: true, pointerId: 88, clientX: x, clientY: y, pointerType: "touch" }; el.dispatchEvent(new PointerEvent("pointerdown", o)); el.dispatchEvent(new PointerEvent("pointerup", o)); return { b, after: { starts: g.autoLand.stats.starts, refused: g.autoLand.stats.refused, ap: g.approach.id } }; }, id);
+  const out = { green: [0, 0], far: [0, 0], nearBlue: [0, 0] };
+  for (const c of vis) {
+    await hover(30, 0, Math.PI / 2); await sleep(700);
+    const cur = await p.evaluate(id => { const g = __game, q = g.spots.get(id); return q ? { green: g.spotLanding(q).ok, d: q.d } : null; }, c.id); if (!cur) continue;
+    const r = await tapSpot(c.id); if (!r || r.skip) continue;
+    if (cur.green) { out.green[1]++; if (r.after.starts > r.b.starts) out.green[0]++; }
+    else if (cur.d > 18) { out.far[1]++; if (r.after.ap === c.id) out.far[0]++; }
+    else { out.nearBlue[1]++; if (r.after.starts === r.b.starts && r.after.refused > r.b.refused) out.nearBlue[0]++; }
+  }
+  check("tapping a green marker starts the automatic landing (>= 90%; the state is frozen so the colour and the tap-time check agree)", out.green[1] >= 3 && out.green[0] / out.green[1] >= 0.9, JSON.stringify(out));
+  check("tapping a far blue marker selects it as the approach target; tapping a near-but-unsafe blue marker is refused (never starts)", (out.far[1] === 0 || out.far[0] / out.far[1] >= 0.9) && (out.nearBlue[1] === 0 || out.nearBlue[0] === out.nearBlue[1]) && out.far[1] + out.nearBlue[1] >= 2, JSON.stringify(out));
+  await unhover();
+  // ---- (C) 動かした◎の位置で、実際のタッチが正しい◎に届く
+  await hover(30, 0, Math.PI / 2, 40); await sleep(500); await unhover();
+  const pads = await p.evaluate(() => { const g = __game; g.input.pads.land = { prox: { fx: 0.62, fy: 0.55 }, cruise: { fx: 0.88, fy: 0.45 } }; const L = g.input.layout(); return { prox: { ...L.prox }, cruise: { ...L.cruise } }; });
+  const probe = async (pt) => { await tp("touchStart", [{ x: pt.cx, y: pt.cy, id: 5 }]); await sleep(150); const r = await p.evaluate(() => ({ prox: __game.input.prox.active, stick: __game.input.gesture.active })); await tp("touchEnd", []); await sleep(200); return r; };
+  const onProx = await probe(pads.prox), onCruise = await probe(pads.cruise);
+  check("with moved pads, a touch on the moved proximity ◎ drives the proximity pad and a touch on the moved cruise ◎ drives the cruise pad", onProx.prox && !onProx.stick && onCruise.stick && !onCruise.prox, JSON.stringify({ pads, onProx, onCruise }));
+  await p.evaluate(() => { __game.input.pads.land = null; });
+  // ---- (D) 縦画面の飛行ガイド: どのモードでも◎・ボタンと重ならない
+  await p.setViewportSize({ width: 412, height: 892 }); await sleep(600);
+  for (const mode of ["gauge", "hud"]) {
+    for (const hand of ["right", "left"]) {
+      await setCtl(hand); await p.evaluate(m => { document.querySelector(`[data-set=guide][data-val=${m}]`).click(); }, mode); await sleep(600);
+      const bad = await p.evaluate(() => { const rect = e => { const r = e.getBoundingClientRect(); return { l: r.left, t: r.top, r: r.right, b: r.bottom }; }; const hit = (a, b) => a.l < b.r && a.r > b.l && a.t < b.b && a.b > b.t; const fields = [...document.querySelectorAll("#guide .gv")].map(rect), L = __game.input.layout(); const pads = L ? [L.cruise, L.prox].map(r => ({ l: r.cx - r.r, t: r.cy - r.r, r: r.cx + r.r, b: r.cy + r.r })) : []; const top = rect(document.getElementById("top")), bad = []; fields.forEach((f, i) => { if (f.r - f.l < 1) return; if (hit(f, top)) bad.push("top#" + i); pads.forEach((q, k) => { if (hit(f, q)) bad.push("pad" + k + "#" + i); }); if (f.l < -1 || f.r > innerWidth + 1 || f.t < -1 || f.b > innerHeight + 1) bad.push("off#" + i); }); return bad; });
+      check(`portrait ${mode} guide / ${hand} hand: no field overlaps a ◎ or the top buttons and all stay on screen`, bad.length === 0, JSON.stringify(bad));
+    }
+  }
+  await p.evaluate(() => { document.querySelector("[data-set=guide][data-val=off]").click(); }); await setCtl("right");
+  await p.setViewportSize({ width: 892, height: 412 }); await sleep(400);
+  check("no page errors", errs.length === 0, errs.slice(0, 3).join(" | "));
+}
+
 const GROUPS = [
-  ["g1", g1, false], ["g2", g2, true], ["g3", g3, true], ["g4", g4, true], ["g5", g5, false], ["g6", g6, true], ["g7", g7, true], ["g8", g8, true], ["g9", g9, true], ["g10", g10, true], ["g11", g11, true], ["g12", g12, true], ["g13", g13, true], ["g14", g14, true], ["g15", g15, true], ["g16", g16, false],
+  ["g1", g1, false], ["g2", g2, true], ["g3", g3, true], ["g4", g4, true], ["g5", g5, false], ["g6", g6, true], ["g7", g7, true], ["g8", g8, true], ["g9", g9, true], ["g10", g10, true], ["g11", g11, true], ["g12", g12, true], ["g13", g13, true], ["g14", g14, true], ["g15", g15, true], ["g16", g16, false], ["g17", g17, true],
 ];
 // CIの5分割(各シャードの所要時間がほぼ等しくなるように)
-const SHARD_PLAN = [["g1", "g3"], ["g2", "g5"], ["g4", "g8"], ["g6", "g9", "g11"], ["g7", "g10", "g12"], ["g13"], ["g14"], ["g15"], ["g16"]];
+const SHARD_PLAN = [["g1", "g3"], ["g2", "g5"], ["g4", "g8"], ["g6", "g9", "g11"], ["g7", "g10", "g12"], ["g13"], ["g14"], ["g15"], ["g16"], ["g17"]];
 
 let want = GROUPS.map(g => g[0]);
 const only = arg("--only"), shard = arg("--shard");

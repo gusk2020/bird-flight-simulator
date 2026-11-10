@@ -3,6 +3,10 @@ import { at, inp } from "./common";
 import { Flight } from "./../src/flight";
 import { FlapAssist } from "../src/assist";
 import { CRUISE, CruiseGovernor } from "../src/cruise";
+import { AutoLand } from "../src/autoland";
+import { PerchAssist } from "../src/perchassist";
+import { buildSurfaces } from "../src/perches";
+import { L } from "./common";
 
 /** 手動の巡航を想定した飛行。tapEvery 秒ごとに羽ばたきをタップ(0=触れない)、chain=連打、assist=片手の補助 */
 function fly(secs: number, o: { tapEvery: number; chain?: boolean; assist?: boolean; governor: boolean; v0?: number }) {
@@ -43,5 +47,18 @@ export function h9Tests() {
   { CRUISE.enabled = true; const f = at(28, 25, 150, 0, 10), g = new CruiseGovernor(); g.reset(f); const s0 = f.speedScale; for (let k = 0; k < 600; k++) { g.update(f, inp({ flapHeld: true }), 1 / 60, false, true); f.step(1 / 60, inp()); }
     check("during an automatic landing (hold) the aerodynamics are not changed even if flaps are pressed", f.speedScale === s0, `${f.speedScale} vs ${s0}`); }
   { const f = new Flight(at(0, 0, 0).world as never); f.speedScale = 0.5; f.vel.set(0, 0, -5); f.speed = 5; check("speedN reads a slow-cruise speed as the equivalent old-physics speed", Math.abs(f.speedN - 10) < 1e-9); }
+
+  suite("H9 landing markers: green = a landing can start now");
+  { const idx = buildSurfaces(L); let n = 0, agree = 0, greens = 0, blues = 0, seed = 11; const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+    const ss = idx.all.filter(s => ["bench", "wall", "fence", "rail", "balcony", "sign", "branch", "pole", "rock", "roof"].includes(s.kind));
+    for (let i = 0; i < 300; i++) { const s = ss[Math.floor(rnd() * ss.length)], cx = (s.minX + s.maxX) / 2, cz = (s.minZ + s.maxZ) / 2, a = rnd() * 6.283, d = 4 + rnd() * 20;
+      const f = at(cx + Math.cos(a) * d, s.top + 0.5 + rnd() * 6, cz + Math.sin(a) * d, Math.atan2(Math.cos(a), Math.sin(a)) + (rnd() - 0.5), (4 + rnd() * 6) * CRUISE.scale0 * 2);
+      f.step(1 / 60, inp()); const al = new AutoLand(idx, new PerchAssist(idx), L.heightAt);
+      const before = JSON.stringify([f.pos.x, f.pos.y, f.pos.z, f.vel.x, f.vel.y, f.vel.z]), can = al.canStart(f, s);
+      check_(JSON.stringify([f.pos.x, f.pos.y, f.pos.z, f.vel.x, f.vel.y, f.vel.z]) === before && !al.active);
+      const started = al.start(f, s); n++; if (started === can.ok) agree++; if (can.ok) greens++; else blues++; }
+    check("canStart (the marker colour) agrees with whether start() really begins a landing, in 300 random states", agree === n, `${agree}/${n} agree; ${greens} green ${blues} not`);
+    check("the sample has both landable and not-landable states (the test is not vacuous)", greens > 20 && blues > 20, `${greens}/${blues}`); }
   Object.assign(CRUISE, keep);
 }
+function check_(ok: boolean) { if (!ok) check("canStart must not change state", false); }

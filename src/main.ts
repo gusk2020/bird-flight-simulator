@@ -162,6 +162,13 @@ function placeAsk() {
   left = Math.min(w - bw - 4, Math.max(4, left)); top = Math.min(h - 54 - 4, Math.max(64, top));
   askBox.style.left = left + "px"; askBox.style.top = top + "px";
 }
+// H9: 着地点マーカーの色。緑=いま押せば自動着地が始まる(AutoLand.canStart が通る)。青=それ以外(遠ければ押すと接近先に選ばれる。届く範囲でも安全でなければ薄く示し、押すと理由を知らせる)
+const spotSafe = new Map<number, { ok: boolean; why: string; t: number }>(); const SAFE_REFRESH_S = 0.1;
+function spotLanding(sp: { id: number; d: number; s: Surface }): { ok: boolean; why: string } {
+  if (sp.d > AUTOLAND.maxRange) return { ok: false, why: "too far" };
+  const c = spotSafe.get(sp.id); if (c && flight.clock - c.t < SAFE_REFRESH_S && flight.clock >= c.t) return c;
+  const r = autoLand.canStart(flight, sp.s), e = { ok: r.ok, why: r.why, t: flight.clock }; spotSafe.set(sp.id, e); return e;
+}
 let spotsDrawn = false, apWhy = "";
 /** 着地点マーカーの描画(2D キャンバス)。目印は半透明の輪。重なったものは名前を添え、ずらした目印は本来の位置と細い線で結ぶ。自動着地中は目的地だけ緑 */
 function drawSpots(now: number) {
@@ -171,13 +178,16 @@ function drawSpots(now: number) {
   const ring = (x: number, y: number, r: number, col: string, a: number, w = 3) => { c.globalAlpha = a; c.lineWidth = w + 2.5; c.strokeStyle = "rgba(0,0,0,.55)"; c.beginPath(); c.arc(x, y, r, 0, 6.2832); c.stroke(); c.lineWidth = w; c.strokeStyle = col; c.beginPath(); c.arc(x, y, r, 0, 6.2832); c.stroke(); };
   const pulse = 1 + 0.06 * Math.sin(now * 0.006);
   for (const sp of list) {
-    const a = sp.alpha * (sp.near ? 0.95 : 0.42), pressed = sp.id === spots.pressedId;
+    const green = spotLanding(sp).ok, a = sp.alpha * (green ? 0.95 : sp.d > AUTOLAND.maxRange ? 0.8 : 0.45), pressed = sp.id === spots.pressedId;
     if (Math.hypot(sp.dx - sp.x, sp.dy - sp.y) > 6) { c.globalAlpha = a * 0.7; c.strokeStyle = "rgba(255,241,176,.8)"; c.lineWidth = 1.5; c.beginPath(); c.moveTo(sp.x, sp.y); c.lineTo(sp.dx, sp.dy); c.stroke(); c.fillStyle = "rgba(255,241,176,.9)"; c.beginPath(); c.arc(sp.x, sp.y, 2.5, 0, 6.2832); c.fill(); }
     const asked = sp.id === spotConfirm.id; if (asked) { const r2 = askBox.getBoundingClientRect(); c.globalAlpha = 0.85; c.strokeStyle = "#ffb347"; c.lineWidth = 2; c.setLineDash([5, 4]); c.beginPath(); c.moveTo(sp.dx, sp.dy); c.lineTo(r2.left + r2.width / 2, r2.top + r2.height / 2); c.stroke(); c.setLineDash([]); ring(sp.dx, sp.dy, SPOTS.radiusPx * 1.7 * pulse, "#ffb347", 1, 4.5); c.globalAlpha = 1; c.font = "bold 12px sans-serif"; c.textAlign = "center"; const lb = spotLabel(sp.kind) + " " + Math.round(sp.d) + " m"; c.lineWidth = 3.5; c.strokeStyle = "rgba(0,0,0,.75)"; c.strokeText(lb, sp.dx, sp.dy - SPOTS.radiusPx * 1.7 - 8); c.fillStyle = "#ffd9a0"; c.fillText(lb, sp.dx, sp.dy - SPOTS.radiusPx * 1.7 - 8); }
     const pend = sp.id === approach.id; if (pend) ring(sp.dx, sp.dy, SPOTS.radiusPx * 1.45 * pulse, "#5ec8ff", 0.95, 3.5);
     const sc = sp.d > 35 ? 0.72 : sp.d > 18 ? 0.88 : 1; // 遠い目印は小さく(混み合いを減らす。近づくと大きくなる)
-    ring(sp.dx, sp.dy, SPOTS.radiusPx * sc * (pressed ? 1.3 : pulse), pressed || pend ? "#8fe3ff" : "#fff1b0", pend ? 0.95 : a, sc < 1 ? 2.4 : 3);
-    c.globalAlpha = a; c.fillStyle = pressed ? "#8fe3ff" : "#fff1b0"; c.beginPath(); c.arc(sp.dx, sp.dy, 3.5, 0, 6.2832); c.fill();
+    const col = green ? "#46e08a" : "#6db7ff"; // 緑=いま着地を始められる / 青=それ以外。色だけに頼らず形も変える(緑: 実線の輪+中心が塗りつぶし、青: 破線の輪+中心が中空)
+    if (!green) c.setLineDash([sc < 1 ? 5 : 7, 4]);
+    ring(sp.dx, sp.dy, SPOTS.radiusPx * sc * (pressed ? 1.3 : pulse), pressed || pend ? "#d6f0ff" : col, pend ? 0.95 : a, sc < 1 ? 2.4 : 3);
+    c.setLineDash([]);
+    c.globalAlpha = a; c.fillStyle = col; c.strokeStyle = col; c.lineWidth = 2; c.beginPath(); c.arc(sp.dx, sp.dy, 3.5, 0, 6.2832); if (green) c.fill(); else c.stroke();
     if (pend) { c.globalAlpha = 0.95; c.font = "bold 11px sans-serif"; c.textAlign = "center"; c.lineWidth = 3; c.strokeStyle = "rgba(0,0,0,.65)"; c.strokeText("接近中", sp.dx, sp.dy - SPOTS.radiusPx - 10); c.fillStyle = "#bfe9ff"; c.fillText("接近中", sp.dx, sp.dy - SPOTS.radiusPx - 10); }
     if (sp.stacked) { c.globalAlpha = a; c.font = "bold 11px sans-serif"; c.textAlign = "center"; const tx = spotLabel(sp.kind); c.lineWidth = 3; c.strokeStyle = "rgba(0,0,0,.65)"; c.strokeText(tx, sp.dx, sp.dy + SPOTS.radiusPx + 12); c.fillStyle = "#fff"; c.fillText(tx, sp.dx, sp.dy + SPOTS.radiusPx + 12); }
   }

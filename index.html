@@ -55,26 +55,54 @@ body[data-ctl=right] #flap,body[data-ctl=right] #brake,body[data-ctl=left] #flap
 #spotGo{min-width:122px;height:54px;padding:4px 12px;border-radius:14px;background:rgba(255,160,60,.92);color:#1b1206;border:2px solid #fff;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1.15;font-size:15px}#spotGo b{font-size:16px}#spotGo span{font-size:12px;opacity:.85}
 #spotNo{width:54px;height:54px;border-radius:14px;font-size:20px;padding:0;background:rgba(30,36,48,.85);color:#fff;border:2px solid #fff8}
 #toast{position:fixed;left:50%;top:58px;transform:translateX(-50%);padding:6px 14px;border-radius:14px;background:rgba(20,26,36,.72);color:#fff;font-size:13px;z-index:7;opacity:0;transition:opacity .3s;pointer-events:none}
+
+#overlay h2{margin:0;font-size:17px;text-align:center}
+.page{display:flex;flex-direction:column;align-items:center;gap:12px;width:100%;max-width:520px;padding:0 12px;box-sizing:border-box}.page[hidden]{display:none}
+.pgnav{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}.pgnav[hidden]{display:none}
+#overlay .pgnav button{font-size:16px;padding:10px 18px;min-height:46px}
+#overlay .pgstart button{font-size:18px}
+#ovGo{background:#fff6!important}
+#startSummary{font-size:12px;opacity:.85;text-align:center;line-height:1.5}
+#padSetup{display:flex;flex-direction:column;align-items:center;gap:6px;font-size:12px}#padNote{opacity:.85;text-align:center}
+#padPreview{position:relative;border:2px solid #fffa;border-radius:10px;background:#1a2a3acc;overflow:hidden;touch-action:none}
+#padBand{position:absolute;left:0;right:0;top:0;background:#ffffff22;pointer-events:none}
+.pv{position:absolute;border-radius:50%;box-sizing:border-box;border:2px solid #fffd;background:#ffffff33;color:#fff;font-size:11px;display:flex;align-items:center;justify-content:center;touch-action:none;cursor:grab;transform:translate(-50%,-50%)}
+#pvProx{border-color:#9fe4ff}
+#padSetup[hidden]{display:none}
+#overlay #padReset{font-size:13px;padding:6px 14px}
 </style></head><body>
 <div id="toast"></div><canvas id="spots"></canvas><div id="spotAsk" hidden><button class="btn" id="spotGo"><b>ここへ接近</b><span id="spotGoSub"></span></button><button class="btn" id="spotNo" aria-label="やめる">✕</button></div><div id="autoland"></div><div id="vig"></div><canvas id="fx"></canvas><div id="hud"></div><div id="msg">左:ドラッグで旋回・上下　右:羽ばたき(押し続けで連続)・減速　着地中に羽ばたくと離陸</div>
 <div id="stick"></div><div class="pad" id="padCruise"><b>巡航</b></div><div class="pad" id="padProx"><b>近接</b></div><div id="padDot"></div><div id="steerTag"></div><div id="stickBase"></div><div id="stickKnob"></div>
 <div id="top"><button class="btn" id="btnPause">⏸</button><button class="btn" id="btnSteer">操縦 従来</button><button class="btn" id="btnCtl">両手</button><button class="btn" id="btnTime">昼</button><button class="btn" id="btnSeason">春</button><button class="btn" id="btnCam">三人称</button><button class="btn" id="btnReset">リセット</button></div>
 <div id="autoBar"><button class="btn" id="btnAutoOff" hidden>オート解除</button><button class="btn" id="btnPol" hidden>おまかせ</button><button class="btn" id="btnTs" hidden>時間 標準</button></div>
 <button class="btn" id="brake">減速</button><button class="btn" id="flap">羽ばたき</button>
-<div id="overlay"><h1 id="ovTitle"></h1><p>左:ドラッグで旋回・上下　右:羽ばたき(押し続けで連続)・減速<br>着地中: 歩く(押し続け)・羽ばたき短押しで小ジャンプ・長押しで離陸　⏸で一時停止<br>片手: スライド=旋回/上下　タップ=羽ばたき　長押し=減速(地上は歩く)</p><div class="set" id="settings">
-<div>着地点マーカー <button data-set="lm" data-val="1">表示</button><button data-set="lm" data-val="0">非表示</button></div>
-<div>操縦(片手) <button data-set="steer" data-val="off">従来</button><button data-set="steer" data-val="A">A</button><button data-set="steer" data-val="B">B</button><button data-set="steer" data-val="C">C</button> <button id="btnSteerStart">同じ位置から開始</button></div>
-<div>操作 <button data-set="ctl" data-val="both">両手</button><button data-set="ctl" data-val="right">右手</button><button data-set="ctl" data-val="left">左手</button></div>
-<div>行動 <button data-set="apol" data-val="life">自然生活</button><button data-set="apol" data-val="scenic">景色</button><button data-set="apol" data-val="adventure">冒険</button><button data-set="apol" data-val="random">おまかせ</button></div>
-<div>オート時間 <button data-set="ats" data-val="slow">ゆったり</button><button data-set="ats" data-val="normal">標準</button><button data-set="ats" data-val="fast">高速</button></div>
-<div>オート中UI隠す <button data-set="ahide" data-val="1">する</button><button data-set="ahide" data-val="0">しない</button></div>
-<div>季節の速さ <button data-set="ss" data-val="slow">ゆったり</button><button data-set="ss" data-val="normal">標準</button><button data-set="ss" data-val="fast">高速</button></div>
+<div id="overlay"><h1 id="ovTitle"></h1>
+<section class="page" id="pgEnv" hidden><h2>① 環境設定</h2><div class="set">
 <div>天気 <button data-set="weather" data-val="clear">晴</button><button data-set="weather" data-val="cloudy">曇</button><button data-set="weather" data-val="rain">雨</button></div>
 <div>風 <button data-set="wind" data-val="0">なし</button><button data-set="wind" data-val="1">弱</button><button data-set="wind" data-val="2">強</button></div>
 <div id="rowBearing">風向 <button data-set="bearing" data-val="0">北</button><button data-set="bearing" data-val="90">東</button><button data-set="bearing" data-val="180">南</button><button data-set="bearing" data-val="270">西</button></div>
-<div>速度演出 <button data-set="fx" data-val="0">なし</button><button data-set="fx" data-val="1">弱</button><button data-set="fx" data-val="2">標準</button><button data-set="fx" data-val="3">強</button></div>
+<div>時間 <button data-set="time" data-val="0">停止</button><button data-set="time" data-val="1">等速</button><button data-set="time" data-val="2">高速</button></div>
+<div>季節の速さ <button data-set="ss" data-val="slow">ゆったり</button><button data-set="ss" data-val="normal">標準</button><button data-set="ss" data-val="fast">高速</button></div>
 <div>街の動き <button data-set="npc" data-val="0">なし</button><button data-set="npc" data-val="1">少</button><button data-set="npc" data-val="2">標準</button><button data-set="npc" data-val="3">多</button></div>
 <div>画質 <button data-set="gfx" data-val="0">自動</button><button data-set="gfx" data-val="1">高</button><button data-set="gfx" data-val="2">中</button><button data-set="gfx" data-val="3">低</button></div>
-<div>時間 <button data-set="time" data-val="0">停止</button><button data-set="time" data-val="1">等速</button><button data-set="time" data-val="2">高速</button></div></div>
-<button id="ovGo"></button><button id="ovAuto">オートで飛ぶ</button><button id="ovReset" hidden>リセット</button></div>
+</div><nav class="pgnav"><button id="envBack" hidden>もどる</button><button id="envNext">次へ: 操作UI設定 →</button></nav></section>
+<section class="page" id="pgCtl" hidden><h2>② 操作UI設定</h2><div class="set">
+<div>操作 <button data-set="ctl" data-val="both">両手</button><button data-set="ctl" data-val="right">右手</button><button data-set="ctl" data-val="left">左手</button></div>
+<div>操縦(片手) <button data-set="steer" data-val="off">従来</button><button data-set="steer" data-val="A">A</button><button data-set="steer" data-val="B">B</button><button data-set="steer" data-val="C">C</button> <button id="btnSteerStart">同じ位置から開始</button></div>
+<div>飛行ガイド <button data-set="guide" data-val="off">非表示</button><button data-set="guide" data-val="gauge">計器</button><button data-set="guide" data-val="hud">HUD</button></div>
+<div>着地点マーカー <button data-set="lm" data-val="1">表示</button><button data-set="lm" data-val="0">非表示</button></div>
+<div>速度演出 <button data-set="fx" data-val="0">なし</button><button data-set="fx" data-val="1">弱</button><button data-set="fx" data-val="2">標準</button><button data-set="fx" data-val="3">強</button></div>
+<div>オートの行動 <button data-set="apol" data-val="life">自然生活</button><button data-set="apol" data-val="scenic">景色</button><button data-set="apol" data-val="adventure">冒険</button><button data-set="apol" data-val="random">おまかせ</button></div>
+<div>オート時間 <button data-set="ats" data-val="slow">ゆったり</button><button data-set="ats" data-val="normal">標準</button><button data-set="ats" data-val="fast">高速</button></div>
+<div>オート中UI隠す <button data-set="ahide" data-val="1">する</button><button data-set="ahide" data-val="0">しない</button></div>
+</div>
+<div id="padSetup"><div id="padNote"></div><div id="padPreview"><div id="padBand"></div><div class="pv" id="pvCruise">巡航</div><div class="pv" id="pvProx">◎</div></div><button id="padReset">◎を初期位置へ戻す</button></div>
+<nav class="pgnav"><button id="ctlBack">← 環境設定</button><button id="ctlNext">次へ: 開始 →</button></nav></section>
+<section class="page" id="pgStart" hidden><h2>③ 開始</h2>
+<p>左:ドラッグで旋回・上下　右:羽ばたき(押し続けで連続)・減速<br>着地中: 歩く(押し続け)・羽ばたき短押しで小ジャンプ・長押しで離陸　⏸で一時停止<br>片手: スライド=旋回/上下　タップ=羽ばたき(連打で加速)　長押し=減速(地上は歩く)</p>
+<div id="startSummary"></div>
+</section>
+<section class="page" id="pgPause" hidden><nav class="pgnav"><button id="ovEnv">環境設定</button><button id="ovCtl">操作UI設定</button></nav></section>
+<nav class="pgnav pgstart" id="ovFoot" hidden><button id="ovBack">← 設定に戻る</button><button id="ovAuto">オート</button><button id="ovReset" hidden>リセット</button><button id="ovGo"></button></nav>
+</div>
 <script type="module" src="/src/main.ts"></script></body></html>

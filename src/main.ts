@@ -31,6 +31,7 @@ import { Approach } from "./approach";
 import { SpotConfirm } from "./spotconfirm";
 import { CruiseGuard } from "./avoid";
 import { CruiseGovernor } from "./cruise";
+import { SetupUi } from "./setupui";
 import type { AutoPolicy } from "./settings";
 import { SpeedLines, Streaks, speedIntensity } from "./speedfx";
 import { NpcWorld } from "./npc";
@@ -69,7 +70,7 @@ sky.renderOrder = -1; scene.add(sky);
 const cloudMat = (world.clouds.children[0] as THREE.Mesh).material as THREE.MeshBasicMaterial;
 let hour: number = TIME_PRESETS[1].hour, preset = 1, targetHour: number | null = null;
 const prefs = loadPrefs(); // 前回の操作方式など(壊れていれば既定値)。ゲーム自体は必ず開始待ちで始まる
-const settings = { weather: "clear" as Weather, wind: 1, bearing: 270, time: 0, fx: 2, npc: 2, gfx: 0, ctl: prefs.control as string, apol: prefs.autoPolicy as string, ats: prefs.autoTimeSpeed as string, ahide: prefs.autoHideUi ? "1" : "0", ss: prefs.seasonSpeed as string, steer: prefs.steer as string, lm: prefs.landmarks ? "1" : "0" };
+const settings = { weather: "clear" as Weather, wind: 1, bearing: 270, time: 0, fx: 2, npc: 2, gfx: 0, ctl: prefs.control as string, apol: prefs.autoPolicy as string, ats: prefs.autoTimeSpeed as string, ahide: prefs.autoHideUi ? "1" : "0", ss: prefs.seasonSpeed as string, steer: prefs.steer as string, guide: prefs.guide as string, lm: prefs.landmarks ? "1" : "0" };
 const WX_INDEX: Record<Weather, number> = { clear: 0, cloudy: 1, rain: 2 }, WX_NAMES: Weather[] = ["clear", "cloudy", "rain"];
 // 天気の連続値(0晴/1曇/2雨)。手動ではボタンの値、オート中はゆっくり移り変わる
 let wxLevel = 0, appliedWeather: Weather = "clear";
@@ -112,6 +113,11 @@ const refreshUiRects = () => { uiRects = []; document.querySelectorAll<HTMLEleme
 function sizeSpotCanvas() { const dpr = Math.min(2, devicePixelRatio || 1); spotCv.width = Math.round(innerWidth * dpr); spotCv.height = Math.round(innerHeight * dpr); spotCv.style.width = innerWidth + "px"; spotCv.style.height = innerHeight + "px"; spotCtx.setTransform(dpr, 0, 0, dpr, 0, 0); }
 sizeSpotCanvas(); addEventListener("resize", () => { sizeSpotCanvas(); uiRectsT = 0; });
 const proxLand = new ProxLand(perchAssist, autoLand);
+// H9: ◎の位置(保存値)と安全領域(ノッチ・ジェスチャーバー)。安全領域は CSS の env() を、見えない要素の padding として読む
+input.pads = prefs.pads;
+const safeProbe = document.createElement("div"); safeProbe.style.cssText = "position:fixed;visibility:hidden;pointer-events:none;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)"; document.body.appendChild(safeProbe);
+function readInsets() { const cs = getComputedStyle(safeProbe); input.insets = { t: parseFloat(cs.paddingTop) || 0, r: parseFloat(cs.paddingRight) || 0, b: parseFloat(cs.paddingBottom) || 0, l: parseFloat(cs.paddingLeft) || 0 }; }
+readInsets(); addEventListener("resize", readInsets);
 const autolandBar = document.getElementById("autoland")!;
 /** 押した瞬間に狙われた候補の ID を決める(以後、押している間に目印が動いても入れ替わらない)。オート飛行中・自動着地中は選べない。
  *  H8-D: そのとき、別の候補と取り違え得る押し方か(LandSpots.assess)も、押した瞬間の画面で判定して覚える */
@@ -224,6 +230,7 @@ function applySettings() {
   applyControl(); syncWeatherLevel();
   const ts = settings.ats as TimeSpeed, hide = settings.ahide === "1";
   if (prefs.autoTimeSpeed !== ts || prefs.autoHideUi !== hide) { prefs.autoTimeSpeed = ts; prefs.autoHideUi = hide; savePrefs(prefs); }
+  if (prefs.guide !== settings.guide) { prefs.guide = settings.guide as typeof prefs.guide; savePrefs(prefs); }
   if (season.speed !== settings.ss) { season.setSpeed(settings.ss as SeasonSpeed); saveSeason(); updateSeasonButton(); }
   const wd = weatherAtLevel(wxLevel);
   wind.set(settings.bearing, Math.min(12, WIND_SPEED[settings.wind] * wd.windMul), WIND_GUST[settings.wind]);
@@ -233,7 +240,7 @@ function applySettings() {
   document.getElementById("rowBearing")!.hidden = settings.wind === 0;
 }
 document.querySelectorAll<HTMLElement>("[data-set]").forEach(b => b.addEventListener("click", () => {
-  (settings as Record<string, unknown>)[b.dataset.set!] = b.dataset.set === "weather" || b.dataset.set === "ctl" || b.dataset.set === "apol" || b.dataset.set === "ats" || b.dataset.set === "ahide" || b.dataset.set === "ss" || b.dataset.set === "steer" || b.dataset.set === "lm" ? b.dataset.val : Number(b.dataset.val); applySettings();
+  (settings as Record<string, unknown>)[b.dataset.set!] = b.dataset.set === "weather" || b.dataset.set === "ctl" || b.dataset.set === "apol" || b.dataset.set === "ats" || b.dataset.set === "ahide" || b.dataset.set === "ss" || b.dataset.set === "steer" || b.dataset.set === "guide" || b.dataset.set === "lm" ? b.dataset.val : Number(b.dataset.val); applySettings();
 }));
 applyEnv();
 input.onTime = () => {
@@ -303,12 +310,14 @@ addEventListener("pointerdown", () => { if (uiHider.hidden) { uiHider.touch(); d
 document.getElementById("btnAutoOff")!.addEventListener("pointerdown", e => { e.preventDefault(); e.stopPropagation(); setAuto(false); });
 document.getElementById("btnPol")!.addEventListener("pointerdown", e => { e.preventDefault(); e.stopPropagation(); setPolicy(POLS[(POLS.indexOf(autopilot.policy) + 1) % 4]); });
 document.getElementById("btnCtl")!.addEventListener("pointerdown", e => { e.preventDefault(); const order: ControlMode[] = ["both", "right", "left"]; settings.ctl = order[(order.indexOf(settings.ctl as ControlMode) + 1) % 3]; applySettings(); });
-const overlay = document.getElementById("overlay")!, ovTitle = document.getElementById("ovTitle")!, ovGo = document.getElementById("ovGo")!, ovReset = document.getElementById("ovReset")!;
+const overlay = document.getElementById("overlay")!, ovGo = document.getElementById("ovGo")!, ovReset = document.getElementById("ovReset")!;
+// H9: 起動時は ①環境設定 → ②操作UI設定 → ③開始(設定に戻る/オート/自分で操作)。③で押すまで始まらない。一時停止中は 再開/リセット と、設定の出し入れ
+const setupUi = new SetupUi({ input, prefs, save: () => savePrefs(prefs), getCtl: () => settings.ctl as ControlMode, getSteer: () => settings.steer as string, relayout: () => layoutPads() });
 function showOverlay() {
   const ready = game.state === "ready";
   overlay.hidden = game.state === "running";
-  ovTitle.textContent = ready ? "Vind Ving" : "一時停止中";
-  ovGo.textContent = ready ? "開始" : "再開"; ovReset.hidden = ready;
+  ovGo.textContent = ready ? "自分で操作" : "再開"; document.getElementById("ovAuto")!.textContent = ready ? "オート" : "オートで飛ぶ";
+  if (!overlay.hidden) setupUi.sync(ready);
 }
 game.onPause = () => input.releaseAll();
 const go = () => { if (game.state === "ready") game.start(); else game.resume(); input.releaseAll(); showOverlay(); };
@@ -426,4 +435,5 @@ function updateHud(dt: number, now: number) {
 }
 renderer.setAnimationLoop(frame);
 // テスト・デバッグ用
+(window as unknown as Record<string, unknown>).__ui = setupUi;
 (window as unknown as Record<string, unknown>).__game = { spotConfirm, approach, spots, steerLayer, steerTestStart, game, flight, world, input, cam, camera, renderer, scene, frame, env: () => envAt(hour), stats, npc, lines, streaks, speedIntensity, setHour: (h: number) => { hour = h; targetHour = null; applyEnv(); }, settings, applySettings, assist, prefs, autopilot, setAuto, season, applySeasonLook, saveSeason, forage, perchAssist, autoLand, proxLand, puddles, puddleView, life, surfaces, cruiseGuard, npcView, npcUpdate: () => npcView.update(npc, camera.position, 220, world.lightsLevel()), hour: () => hour, director, drift, uiHider, wxLevel: () => wxLevel, wind, rain, quality };

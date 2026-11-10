@@ -18,6 +18,7 @@ export const CRUISE = {
   slewUp: 0.9,        // speedScale の変化の速さの上限(1/s)。空力が急に変わって機体が跳ねないように
   slewDown: 0.12,
   brakeDecay: 0.5,    // ブレーキ中は boost が速く減る
+  maxN: 16,           // 速さ/speedScale がこれ(従来の釣り合う滑空速度)を超える状態にはしない。急降下の速さ・開始時の速さのまま空力だけ強くすると、揚力が大きすぎて機体が跳ね上がるため、速いうちは speedScale を速さに合わせて持ち上げ、減速に合わせて徐々に下げる
 };
 
 export class CruiseGovernor {
@@ -35,7 +36,9 @@ export class CruiseGovernor {
     if (f.clock - this.last > CRUISE.grace) this.boost = Math.max(0, this.boost - (inp.brake ? CRUISE.brakeDecay : CRUISE.decay) * dt);
     else if (inp.brake) this.boost = Math.max(0, this.boost - CRUISE.brakeDecay * dt);
     const target = full || !air ? 1 : CRUISE.scale0 + (1 - CRUISE.scale0) * this.boost;
-    const d = target - f.speedScale, r = d > 0 ? CRUISE.slewUp : CRUISE.slewDown;
+    const floor = Math.min(1, Math.max(CRUISE.scale0, f.speed / CRUISE.maxN)); // 速さに対する下限(これより下げない)
+    if (f.speedScale < floor) f.speedScale = floor;
+    const d = Math.max(target, floor) - f.speedScale, r = d > 0 ? CRUISE.slewUp : CRUISE.slewDown;
     f.speedScale += Math.max(-r * dt, Math.min(r * dt, d));
   }
 }

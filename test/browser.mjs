@@ -18,6 +18,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function open(b, start) {
   const ctx = await b.newContext({ viewport: { width: 892, height: 412 }, hasTouch: true, deviceScaleFactor: 1 });
   const p = await ctx.newPage();
+  { const orig = p.click.bind(p); p.click = async (sel, o) => { await p.evaluate(s => window.__ui?.revealFor(s), sel).catch(() => {}); return orig(sel, o); }; } // H9: 設定は 3 画面に分かれた。押す前に、その要素のあるページを開く(画面の流れそのものは g16 で別に確かめる)
   const errs = []; p.on("pageerror", e => errs.push(e.message)); p.on("console", m => { if (m.type() === "error") errs.push(m.text()); });
   await p.goto(`http://localhost:${PORT}/`); await p.waitForFunction(() => window.__game, null, { timeout: 30000 }); await sleep(1500);
   const cdp = await ctx.newCDPSession(p);

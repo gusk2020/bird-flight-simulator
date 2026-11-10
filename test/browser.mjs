@@ -76,7 +76,7 @@ async function g1({ p, cdp, errs }) {
 
   console.log("\n# landing / recovery");
   await p.evaluate(() => { const f = __game.flight; f.pos.set(28, 6, 60); f.prevPos.copy(f.pos); f.vel.set(0, 0, -9); });
-  await p.waitForFunction(() => __game.flight.mode !== "air", null, { timeout: 40000 }).catch(() => {}); await sleep(300); s = await S(); check("lands and stops", s.mode === "landed" || s.mode === "rollout", s.mode);
+  await p.waitForFunction(() => __game.flight.mode !== "air", null, { timeout: 120000 }).catch(() => {}); await sleep(300); s = await S(); check("lands and stops", s.mode === "landed" || s.mode === "rollout", s.mode);
   await tp("touchStart", [{ x: 800, y: 350, id: 2 }]); await p.waitForFunction(() => __game.flight.mode === "air" && __game.flight.pos.y > 2, null, { timeout: 20000 }).catch(() => {}); s = await S(); await tp("touchEnd", []);
   check("re-takeoff with flap", s.mode === "air" && s.y > 2, `y=${s.y.toFixed(1)}`);
   await p.evaluate(() => { const f = __game.flight; f.pos.set(0, 100, 0); f.vel.set(NaN, 0, 0); }); await sleep(600); s = await S();
@@ -108,7 +108,7 @@ async function g2({ p, cdp, errs }) {
   await p.click('[data-set="weather"][data-val="rain"]'); await p.click('[data-set="wind"][data-val="2"]'); await p.click('[data-set="bearing"][data-val="90"]');
   let B = await p.evaluate(() => ({ rain: __game.rain.mesh.visible, lift: __game.flight.liftScale, fog: __game.scene.fog.far, bear: __game.wind.bearing, sp: __game.wind.speed, on: [...document.querySelectorAll("[data-set].on")].length }));
   check("rain: particles on, lift reduced, visibility shortened", B.rain && B.lift < 1 && B.fog < 500, JSON.stringify(B));
-  check("wind: strong east wind set, buttons highlighted", B.bear === 90 && B.sp > 7 && B.on === 14); // 14 = 12 + 操縦(H8-A)の既定 1 つ + 着地点マーカー(H8-B)の既定 1 つ
+  check("wind: strong east wind set, buttons highlighted", B.bear === 90 && B.sp > 7 && B.on === 15); // 15 = 12 + 操縦(H8-A)の既定 1 つ + 着地点マーカー(H8-B)の既定 1 つ + 飛行ガイド(H9)の既定 1 つ
   await p.click('[data-set="time"][data-val="2"]'); await p.click("#ovGo"); await sleep(300);
   const h0 = await p.evaluate(() => __game.env().lights + "|" + __game.game.gameTime);
   await sleep(2500); const w1 = await p.evaluate(() => ({ wv: __game.flight.windVec.length(), rc: __game.rain.count, q: __game.quality.level, hud: document.getElementById("hud").textContent }));

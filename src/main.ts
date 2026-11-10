@@ -32,6 +32,8 @@ import { SpotConfirm } from "./spotconfirm";
 import { CruiseGuard } from "./avoid";
 import { CruiseGovernor } from "./cruise";
 import { SetupUi } from "./setupui";
+import { guideValues } from "./guide";
+import { GuideView } from "./guideui";
 import type { AutoPolicy } from "./settings";
 import { SpeedLines, Streaks, speedIntensity } from "./speedfx";
 import { NpcWorld } from "./npc";
@@ -113,6 +115,7 @@ const refreshUiRects = () => { uiRects = []; document.querySelectorAll<HTMLEleme
 function sizeSpotCanvas() { const dpr = Math.min(2, devicePixelRatio || 1); spotCv.width = Math.round(innerWidth * dpr); spotCv.height = Math.round(innerHeight * dpr); spotCv.style.width = innerWidth + "px"; spotCv.style.height = innerHeight + "px"; spotCtx.setTransform(dpr, 0, 0, dpr, 0, 0); }
 sizeSpotCanvas(); addEventListener("resize", () => { sizeSpotCanvas(); uiRectsT = 0; });
 const proxLand = new ProxLand(perchAssist, autoLand);
+const guideView = new GuideView(); guideView.setMode(prefs.guide);
 // H9: ◎の位置(保存値)と安全領域(ノッチ・ジェスチャーバー)。安全領域は CSS の env() を、見えない要素の padding として読む
 input.pads = prefs.pads;
 const safeProbe = document.createElement("div"); safeProbe.style.cssText = "position:fixed;visibility:hidden;pointer-events:none;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)"; document.body.appendChild(safeProbe);
@@ -241,6 +244,7 @@ function applySettings() {
   const ts = settings.ats as TimeSpeed, hide = settings.ahide === "1";
   if (prefs.autoTimeSpeed !== ts || prefs.autoHideUi !== hide) { prefs.autoTimeSpeed = ts; prefs.autoHideUi = hide; savePrefs(prefs); }
   if (prefs.guide !== settings.guide) { prefs.guide = settings.guide as typeof prefs.guide; savePrefs(prefs); }
+  if (guideView.mode !== settings.guide) guideView.setMode(settings.guide as typeof prefs.guide);
   if (season.speed !== settings.ss) { season.setSpeed(settings.ss as SeasonSpeed); saveSeason(); updateSeasonButton(); }
   const wd = weatherAtLevel(wxLevel);
   wind.set(settings.bearing, Math.min(12, WIND_SPEED[settings.wind] * wd.windMul), WIND_GUST[settings.wind]);
@@ -420,6 +424,7 @@ function frame(now: number) {
       const show = spotConfirm.active && !!q; if (askBox.hidden === show) askBox.hidden = !show;
       if (show && q) { const sub = spotLabel(q.kind) + " " + Math.round(q.d) + " m" + (q.d > AUTOLAND.maxRange ? "(接近)" : ""); if (askSub.textContent !== sub) askSub.textContent = sub; const key = innerWidth + "x" + innerHeight + input.mode + input.steerMode; if (key !== askKey || now - askPlacedT > 400) { placeAsk(); askKey = key; askPlacedT = now; } }
     }
+    guideView.update(dt, () => guideValues(flight, wind));
     drawSpots(now);
     stats.spotMs += (performance.now() - t0 - stats.spotMs) * 0.05;
     const lbl = autoLand.active ? "自動着地中(操作でやめる)" : "", el = autolandBar; if (el.textContent !== lbl) { el.textContent = lbl; el.style.opacity = lbl ? "0.8" : "0"; }
@@ -445,5 +450,5 @@ function updateHud(dt: number, now: number) {
 }
 renderer.setAnimationLoop(frame);
 // テスト・デバッグ用
-(window as unknown as Record<string, unknown>).__ui = setupUi;
+(window as unknown as Record<string, unknown>).__ui = setupUi; (window as unknown as Record<string, unknown>).__guide = guideView;
 (window as unknown as Record<string, unknown>).__game = { spotConfirm, approach, spots, steerLayer, steerTestStart, game, flight, world, input, cam, camera, renderer, scene, frame, env: () => envAt(hour), stats, npc, lines, streaks, speedIntensity, setHour: (h: number) => { hour = h; targetHour = null; applyEnv(); }, settings, applySettings, assist, prefs, autopilot, setAuto, season, applySeasonLook, saveSeason, forage, perchAssist, autoLand, proxLand, puddles, puddleView, life, surfaces, cruiseGuard, npcView, npcUpdate: () => npcView.update(npc, camera.position, 220, world.lightsLevel()), hour: () => hour, director, drift, uiHider, wxLevel: () => wxLevel, wind, rain, quality };

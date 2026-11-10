@@ -153,8 +153,8 @@ async function g3({ p, cdp, errs }) {
 
   console.log("\n# walking / hop / dawn lights (C2)");
   await p.evaluate(() => { const g = __game, f = g.flight; f.pos.set(28, 6, 60); f.prevPos.copy(f.pos); f.vel.set(0, 0, -9); });
-  await p.waitForFunction(() => __game.flight.mode !== "air", null, { timeout: 40000 }).catch(() => {});
-  await p.waitForFunction(() => __game.flight.mode === "landed", null, { timeout: 15000 }).catch(() => {}); await sleep(300);
+  await p.waitForFunction(() => __game.flight.mode !== "air", null, { timeout: 120000 }).catch(() => {}); // H9: 低速巡航で、同じ高さからの着地までの飛行時間が約3倍(待つ上限だけ延ばす。条件は同じ)
+  await p.waitForFunction(() => __game.flight.mode === "landed", null, { timeout: 40000 }).catch(() => {}); await sleep(300);
   check("landed: brake button becomes 歩く", (await p.textContent("#brake")) === "歩く" && (await S()).mode === "landed");
   await p.evaluate(() => { const g = __game, f = g.flight; let best = f.yaw, bd = -1; for (let k = 0; k < 16; k++) { const y = k * Math.PI / 8; let d = 0; while (d < 6 && g.world.heightAt(f.pos.x - Math.sin(y) * (d + 1), f.pos.z - Math.cos(y) * (d + 1)) < 0.3 && (Math.abs(f.pos.x - Math.sin(y) * (d + 1)) < 203 || Math.abs(f.pos.x - Math.sin(y) * (d + 1)) < Math.abs(f.pos.x)) && (Math.abs(f.pos.z - Math.cos(y) * (d + 1)) < 203 || Math.abs(f.pos.z - Math.cos(y) * (d + 1)) < Math.abs(f.pos.z))) d++; /* 世界の端(±205)も行き止まり(端にいるときは内向きの歩みだけを開けた向きとみなす) */ if (d > bd) { bd = d; best = y; } } f.yaw = best; }); await sleep(100); // 目の前が開けた向きにしてから歩く
   const wA = await S(); await tp("touchStart", [{ x: 740, y: 350, id: 3 }]); await sleep(1100); const wB = await S(); const wk = await p.evaluate(() => ({ w: __game.flight.walkV, hud: document.getElementById("hud").textContent })); await tp("touchEnd", []);

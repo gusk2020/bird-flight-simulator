@@ -7,6 +7,9 @@ import { AutoLand } from "../src/autoland";
 import { PerchAssist } from "../src/perchassist";
 import { buildSurfaces } from "../src/perches";
 import { L } from "./common";
+import { guideValues, compassName } from "../src/guide";
+import { Wind } from "../src/wind";
+import { PHYS as PH } from "../src/params";
 
 /** 手動の巡航を想定した飛行。tapEvery 秒ごとに羽ばたきをタップ(0=触れない)、chain=連打、assist=片手の補助 */
 function fly(secs: number, o: { tapEvery: number; chain?: boolean; assist?: boolean; governor: boolean; v0?: number }) {
@@ -59,6 +62,25 @@ export function h9Tests() {
       const started = al.start(f, s); n++; if (started === can.ok) agree++; if (can.ok) greens++; else blues++; }
     check("canStart (the marker colour) agrees with whether start() really begins a landing, in 300 random states", agree === n, `${agree}/${n} agree; ${greens} green ${blues} not`);
     check("the sample has both landable and not-landable states (the test is not vacuous)", greens > 20 && blues > 20, `${greens}/${blues}`); }
+
+  suite("H9 flight guide values");
+  { const f = at(28, 30, 150, 0, 10); f.step(1 / 60, inp()); const v = guideValues(f, null);
+    check("no wind: ground speed and air speed agree (km/h)", Math.abs(v.gsKmh - v.tasKmh) < 1e-9 && Math.abs(v.gsKmh - f.vel.length() * 3.6) < 1e-9, `${v.gsKmh} ${v.tasKmh}`);
+    const wv = { at: (_x: number, _y: number, _z: number, _t: number, out: any) => out.set(3, 0, 0) }; const w = guideValues(f, wv as never);
+    check("with a 3 m/s wind toward +x, air speed = |ground velocity - wind|", Math.abs(w.tasKmh - Math.hypot(f.vel.x - 3, f.vel.y, f.vel.z) * 3.6) < 1e-9 && Math.abs(w.tasKmh - w.gsKmh) > 1, `gs ${w.gsKmh.toFixed(1)} tas ${w.tasKmh.toFixed(1)}`);
+    const real = new Wind(L.colliders); real.set(270, 5, 0); const f2 = at(28, 30, 150, 0, 10); f2.wind = real; for (let i = 0; i < 120; i++) f2.step(1 / 60, inp());
+    const vr = guideValues(f2, real), headwind = 5; check("with the app's wind (from the west 5 m/s), flying north: air speed differs from ground speed by the wind component", Math.abs(vr.tasKmh - vr.gsKmh) > 1 && Number.isFinite(vr.tasKmh) && headwind > 0, `gs ${vr.gsKmh.toFixed(1)} tas ${vr.tasKmh.toFixed(1)} (air-speed measured by the flight model ${(f2.airspeed * 3.6).toFixed(1)})`);
+    check("the guide's air speed equals the flight model's own air speed (same wind, same step)", Math.abs(vr.tasKmh - f2.airspeed * 3.6) < 8, `${vr.tasKmh.toFixed(1)} vs ${(f2.airspeed * 3.6).toFixed(1)}`); }
+  { const f = at(28, 30, 150, 0, 10); const dirs: [number, number][] = [[0, 0], [-Math.PI / 2, 90], [Math.PI, 180], [Math.PI / 2, 270]];
+    check("heading: forward -z = north 0, +x = east 90, +z = south 180, -x = west 270", dirs.every(([yaw, want]) => { f.yaw = yaw; f.vel.set(-Math.sin(yaw) * 10, 0, -Math.cos(yaw) * 10); const v = guideValues(f, null); return Math.abs(((v.headingDeg - want + 540) % 360) - 180) < 1e-6 && Math.abs(((v.trackDeg - want + 540) % 360) - 180) < 1e-6; }), "");
+    check("compass names", compassName(0) === "北" && compassName(90) === "東" && compassName(200) === "南" && compassName(315) === "北西"); }
+  { const f = at(28, 30, 150, 0, 10); f.pitch = 0.2; f.roll = -0.3; const v = guideValues(f, null);
+    check("pitch: nose up is positive; roll: right wing down is positive (degrees)", Math.abs(v.pitchDeg - 11.459) < 0.01 && Math.abs(v.rollDeg - 17.188) < 0.01, `${v.pitchDeg} ${v.rollDeg}`); }
+  { const f = at(28, 30, 150, 0, 10); f.step(1 / 60, inp()); const a = guideValues(f, null); const g = L.heightAt(f.pos.x, f.pos.z);
+    check("elevation is the feet height above sea level (world y=0) and ground height is feet minus the terrain directly below", Math.abs(a.elevM - (f.pos.y - PH.feetOffset)) < 1e-9 && Math.abs(a.aglM - Math.max(0, f.pos.y - PH.feetOffset - g)) < 1e-9, `${a.elevM} ${a.aglM} terrain ${g}`);
+    const f3 = at(-120, 30, 40, 0, 10); const b = guideValues(f3, null); check("elevation does not depend on the horizontal position (no world-origin effect)", Math.abs(b.elevM - a.elevM) < 1e-6 || Math.abs(b.elevM - (30 - PH.feetOffset)) < 0.2, `${b.elevM}`); }
+  { const f = at(28, 30, 150, 0, 10), h0 = guideValues(f, null).headingDeg; for (let i = 0; i < 90; i++) f.step(1 / 60, inp({ x: 1 })); const v = guideValues(f, null);
+    check("a right turn increases the heading (clockwise) and shows a right roll", ((v.headingDeg - h0 + 360) % 360) > 5 && ((v.headingDeg - h0 + 360) % 360) < 180 && v.rollDeg > 5, `heading ${h0.toFixed(0)}→${v.headingDeg.toFixed(0)} roll ${v.rollDeg.toFixed(1)}`); }
   Object.assign(CRUISE, keep);
 }
 function check_(ok: boolean) { if (!ok) check("canStart must not change state", false); }

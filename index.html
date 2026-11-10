@@ -70,6 +70,29 @@ body[data-ctl=right] #flap,body[data-ctl=right] #brake,body[data-ctl=left] #flap
 #pvProx{border-color:#9fe4ff}
 #padSetup[hidden]{display:none}
 #overlay #padReset{font-size:13px;padding:6px 14px}
+
+/* H9: 飛行ガイド(数値は DOM のテキスト。タッチは受けない。◎のある下の隅と右上のボタン列には置かない) */
+#guide{position:fixed;display:none;z-index:2;pointer-events:none;color:#fff;font:12px/1.25 sans-serif;text-shadow:0 0 3px #000,0 0 3px #000}
+#guide .gv{white-space:nowrap}#guide .gl{opacity:.75;margin-right:4px;font-size:10px}#guide b{font-weight:600;font-variant-numeric:tabular-nums}
+#gvHorizon{position:relative;overflow:hidden;border-radius:50%;width:54px;height:54px;border:2px solid #fffa;background:linear-gradient(#5aa7e8 50%,#8a6a3c 50%);display:none}
+#gvLine{position:absolute;left:-30px;right:-30px;top:50%;height:2px;margin-top:-1px;background:#fff;transform-origin:50% 50%}
+#guide[data-mode=gauge]{left:max(8px,env(safe-area-inset-left));top:calc(max(8px,env(safe-area-inset-top)) + 22px);padding:6px 8px;border-radius:10px;background:rgba(10,18,30,.55);display:grid;grid-template-columns:54px auto auto;gap:1px 8px;align-items:center;max-width:300px}
+#guide[data-mode=gauge] #gvHorizon{display:block;grid-row:1 / span 4;grid-column:1}
+#guide[data-mode=gauge] .gv-elev,#guide[data-mode=gauge] .gv-agl,#guide[data-mode=gauge] .gv-hdg,#guide[data-mode=gauge] .gv-trk{grid-column:2}
+#guide[data-mode=gauge] .gv-pit,#guide[data-mode=gauge] .gv-rol,#guide[data-mode=gauge] .gv-gs,#guide[data-mode=gauge] .gv-tas{grid-column:3}
+#guide[data-mode=hud]{inset:0}
+#guide[data-mode=hud] .gv{position:absolute;font-size:13px}
+#guide[data-mode=hud] .gv-hdg{left:50%;top:calc(max(8px,env(safe-area-inset-top)) + 40px);transform:translateX(-50%)}
+#guide[data-mode=hud] .gv-trk{left:50%;top:calc(max(8px,env(safe-area-inset-top)) + 58px);transform:translateX(-50%);font-size:11px}
+#guide[data-mode=hud] .gv-gs{left:max(10px,env(safe-area-inset-left));top:38%}
+#guide[data-mode=hud] .gv-tas{left:max(10px,env(safe-area-inset-left));top:calc(38% + 18px)}
+#guide[data-mode=hud] .gv-elev{right:max(10px,env(safe-area-inset-right));top:38%;text-align:right}
+#guide[data-mode=hud] .gv-agl{right:max(10px,env(safe-area-inset-right));top:calc(38% + 18px);text-align:right}
+#guide[data-mode=hud] .gv-pit{left:calc(50% - 70px);top:50%;transform:translateY(-50%)}
+#guide[data-mode=hud] .gv-rol{left:calc(50% + 28px);top:50%;transform:translateY(-50%)}
+#guide[data-mode=hud] #gvHorizon{display:block;position:absolute;left:50%;top:50%;width:0;height:0;border:0;background:none;overflow:visible;margin:0}
+#guide[data-mode=hud] #gvSky{display:none}
+#guide[data-mode=hud] #gvLine{left:-60px;right:auto;width:120px;top:0;background:#7dffb0;opacity:.8}
 </style></head><body>
 <div id="toast"></div><canvas id="spots"></canvas><div id="spotAsk" hidden><button class="btn" id="spotGo"><b>ここへ接近</b><span id="spotGoSub"></span></button><button class="btn" id="spotNo" aria-label="やめる">✕</button></div><div id="autoland"></div><div id="vig"></div><canvas id="fx"></canvas><div id="hud"></div><div id="msg">左:ドラッグで旋回・上下　右:羽ばたき(押し続けで連続)・減速　着地中に羽ばたくと離陸</div>
 <div id="stick"></div><div class="pad" id="padCruise"><b>巡航</b></div><div class="pad" id="padProx"><b>近接</b></div><div id="padDot"></div><div id="steerTag"></div><div id="stickBase"></div><div id="stickKnob"></div>

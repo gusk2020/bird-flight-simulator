@@ -33,7 +33,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -41,7 +41,7 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npx playwright install --only-shell chromium   # headless shellだけ(約4秒)。キャッシュするより速くて単純
-      - run: node test/browser.mjs --shard ${{ matrix.shard }}/8   # 開始/停止/入力解除/着地/復帰/視点安定/片手操作/オート/季節
+      - run: node test/browser.mjs --shard ${{ matrix.shard }}/9   # 開始/停止/入力解除/着地/復帰/視点安定/片手操作/オート/季節
 
   endurance:
     if: github.event_name != 'pull_request'

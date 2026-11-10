@@ -1161,11 +1161,123 @@ async function g15({ p, cdp, errs }) {
   check("H8-D: no page errors", errs.length === 0, errs.join(" | "));
 }
 
+// ---- g16: H9 起動 3 画面・設定の保存・◎の配置(プレビューのドラッグ)・飛行ガイド・青緑の目印・低速巡航
+async function g16({ p, cdp, errs }) {
+  console.log("\n# H9: startup pages / pads / guide / markers / slow cruise");
+  const tp = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
+  const st = () => p.evaluate(() => ({ state: __game.game.state, auto: document.body.dataset.auto, page: __ui.page, ovHidden: document.getElementById("overlay").hidden }));
+  const vis = id => p.evaluate(id => { const e = document.getElementById(id); if (!e || e.hidden) return false; const r = e.getBoundingClientRect(); const cs = getComputedStyle(e); return r.width > 0 && r.height > 0 && cs.display !== "none" && cs.visibility !== "hidden"; }, id);
+  // ---- (A) 3 画面の流れ: ①→②→③。③で押すまで始まらない
+  let s0 = await st();
+  check("startup: page ① 環境設定 is shown first, the game is waiting, nothing can start yet", s0.state === "ready" && s0.page === "env" && (await vis("pgEnv")) && !(await vis("pgCtl")) && !(await vis("ovGo")) && !(await vis("ovAuto")), JSON.stringify(s0));
+  check("page ① holds the environment settings (weather, wind, time, season, town, quality) and not the control settings", await p.evaluate(() => { const q = s => !!document.querySelector("#pgEnv " + s); return q('[data-set=weather]') && q('[data-set=wind]') && q('[data-set=time]') && q('[data-set=ss]') && q('[data-set=npc]') && q('[data-set=gfx]') && !q('[data-set=ctl]') && !q('[data-set=steer]'); }));
+  await p.click("#envNext"); await sleep(150); s0 = await st();
+  check("② 操作UI設定 holds controls, ◎ placement, flight guide, markers, speed effect and the auto options; the game is still waiting", s0.page === "ctl" && s0.state === "ready" && await p.evaluate(() => { const q = s => !!document.querySelector("#pgCtl " + s); return q('[data-set=ctl]') && q('[data-set=steer]') && q('[data-set=guide]') && q('[data-set=lm]') && q('[data-set=fx]') && q('[data-set=apol]') && q('[data-set=ats]') && q('[data-set=ahide]') && !!document.getElementById("padPreview"); }));
+  await p.click("#ctlBack"); await sleep(100); check("② → ① back works (settings kept)", (await st()).page === "env");
+  await p.click("#envNext"); await p.click("#ctlNext"); await sleep(150); s0 = await st();
+  check("③ 開始 offers 設定に戻る / オート / 自分で操作, and the game still has not started", s0.page === "start" && s0.state === "ready" && (await vis("ovBack")) && (await vis("ovAuto")) && (await vis("ovGo")) && (await p.textContent("#ovGo")) === "自分で操作");
+  await p.click("#ovBack"); await sleep(100); check("設定に戻る goes back to the settings (②), not into the game", (await st()).page === "ctl" && (await st()).state === "ready");
+  await p.click("#ctlNext"); await sleep(100);
+  // ---- (B) 保存: 操作・操縦・飛行ガイドを選び、再読み込みしても残る
+  await p.click("#ovBack"); await p.click('[data-set="ctl"][data-val="right"]'); await p.click('[data-set="steer"][data-val="B"]'); await p.click('[data-set="guide"][data-val="hud"]'); await sleep(200);
+  await p.reload(); await p.waitForFunction(() => window.__game, null, { timeout: 30000 }); await sleep(1200);
+  let pr = await p.evaluate(() => ({ ctl: document.body.dataset.ctl, steer: __game.input.steerMode, guide: __guide.mode, saved: JSON.parse(localStorage.getItem("vindving.prefs.v1") || "{}") }));
+  check("settings persist across a reload (hand, steering mode, flight guide)", pr.ctl === "right" && pr.steer === "B" && pr.guide === "hud" && pr.saved.guide === "hud", JSON.stringify(pr));
+  check("after a reload the startup flow begins again at ① (the game never auto-starts)", (await st()).page === "env" && (await st()).state === "ready");
+  // ---- (C) ◎の配置プレビュー: ドラッグ、保存、操縦としては扱わない
+  await p.click("#envNext"); await p.click('[data-set="steer"][data-val="off"]'); await sleep(200);
+  const base = await p.evaluate(() => { const L = __game.input.layout(); return { prox: { ...L.prox }, cruise: { ...L.cruise }, w: innerWidth, h: innerHeight }; });
+  check("default ◎ positions are nearer the screen centre than before (right hand: x < 75% of the width) and the two ◎ are close (gap <= 8 px)", base.prox.cx < base.w * 0.70 && base.prox.cx > base.w * 0.5 && Math.hypot(base.cruise.cx - base.prox.cx, base.cruise.cy - base.prox.cy) - base.prox.r - base.cruise.r <= 8, JSON.stringify({ px: base.prox.cx / base.w, gap: Math.hypot(base.cruise.cx - base.prox.cx, base.cruise.cy - base.prox.cy) - base.prox.r - base.cruise.r }));
+  const pvBox = async id => p.evaluate(id => { const r = document.getElementById(id).getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }, id);
+  const flightBefore = await p.evaluate(() => ({ yaw: __game.flight.yaw, x: __game.flight.pos.x, auto: document.body.dataset.auto, state: __game.game.state, steerTaps: __game.input.stats.ringTaps }));
+  const pv0 = await pvBox("pvProx"), pvRect = await p.evaluate(() => { const r = document.getElementById("padPreview").getBoundingClientRect(); return { l: r.left, t: r.top, w: r.width, h: r.height }; });
+  await tp("touchStart", [{ x: pv0.x, y: pv0.y, id: 1 }]); await sleep(120);
+  await tp("touchMove", [{ x: pvRect.l + pvRect.w * 0.55, y: pvRect.t + pvRect.h * 0.45, id: 1 }]); await sleep(150); await tp("touchEnd", []); await sleep(250);
+  const moved = await p.evaluate(() => { const L = __game.input.layout(); return { prox: { ...L.prox }, cruise: { ...L.cruise }, saved: JSON.parse(localStorage.getItem("vindving.prefs.v1")).pads }; });
+  check("dragging the proximity ◎ in the preview moves only that ◎ (the cruise ◎ stays), and it is saved for this orientation", Math.abs(moved.prox.cx - base.prox.cx) > 20 && Math.abs(moved.prox.cy - base.prox.cy) > 20 && !!moved.saved.land && !moved.saved.port, JSON.stringify({ from: [base.prox.cx, base.prox.cy], to: [moved.prox.cx, moved.prox.cy], saved: moved.saved }));
+  const fa = await p.evaluate(() => ({ yaw: __game.flight.yaw, x: __game.flight.pos.x, auto: document.body.dataset.auto, state: __game.game.state }));
+  check("dragging in the settings preview is not a flight control (no steering, the game stays waiting, no auto)", fa.state === "ready" && fa.yaw === flightBefore.yaw && fa.x === flightBefore.x && fa.auto !== "1", JSON.stringify(fa));
+  check("the two ◎ never overlap after dragging, and both stay inside the screen and out of the top-button band", await p.evaluate(() => { const L = __game.input.layout(); const d = Math.hypot(L.cruise.cx - L.prox.cx, L.cruise.cy - L.prox.cy); return d >= L.cruise.r + L.prox.r + 1 && [L.cruise, L.prox].every(r => r.cx - r.r >= 0 && r.cx + r.r <= innerWidth && r.cy - r.r >= 0 && r.cy + r.r <= innerHeight); }));
+  // 画面の外までドラッグしても、範囲の中に収まる
+  const pv1 = await pvBox("pvProx"); await tp("touchStart", [{ x: pv1.x, y: pv1.y, id: 1 }]); await sleep(100); await tp("touchMove", [{ x: pvRect.l + pvRect.w + 80, y: pvRect.t + pvRect.h + 80, id: 1 }]); await sleep(150); await tp("touchEnd", []); await sleep(200);
+  check("dragging past the screen edge clamps the ◎ inside the screen", await p.evaluate(() => { const r = __game.input.layout().prox; return r.cx + r.r <= innerWidth + 0.5 && r.cy + r.r <= innerHeight + 0.5; }));
+  // 左右切替: 右手の配置を左右反転して使う
+  const rightProx = await p.evaluate(() => ({ ...__game.input.layout().prox, w: innerWidth }));
+  await p.click('[data-set="ctl"][data-val="left"]'); await sleep(200); const leftProx = await p.evaluate(() => ({ ...__game.input.layout().prox, w: innerWidth }));
+  check("switching to the left hand mirrors the saved position (same distance from the opposite edge)", Math.abs((rightProx.cx) - (leftProx.w - leftProx.cx)) < 2 && Math.abs(rightProx.cy - leftProx.cy) < 2, JSON.stringify({ rightProx, leftProx }));
+  await p.click('[data-set="ctl"][data-val="right"]'); await sleep(150);
+  // 初期位置へ戻す
+  await p.click("#padReset"); await sleep(250); const reset = await p.evaluate(() => ({ prox: { ...__game.input.layout().prox }, saved: JSON.parse(localStorage.getItem("vindving.prefs.v1")).pads }));
+  check("「◎を初期位置へ戻す」 restores the default positions and clears the saved ones", Math.abs(reset.prox.cx - base.prox.cx) < 1 && Math.abs(reset.prox.cy - base.prox.cy) < 1 && reset.saved.land === null, JSON.stringify(reset));
+  // 各◎個別: 巡航◎だけ動かす
+  const cb = await pvBox("pvCruise"), cb0 = await p.evaluate(() => ({ ...__game.input.layout().cruise })); await tp("touchStart", [{ x: cb.x, y: cb.y, id: 1 }]); await sleep(100); await tp("touchMove", [{ x: cb.x - 30, y: cb.y + 5, id: 1 }]); await sleep(150); await tp("touchEnd", []); await sleep(200);
+  const cb1 = await p.evaluate(() => ({ cruise: { ...__game.input.layout().cruise }, prox: { ...__game.input.layout().prox } }));
+  check("each ◎ moves on its own: dragging the cruise ◎ leaves the proximity ◎ where it was", Math.abs(cb1.cruise.cx - cb0.cx) > 5 && Math.abs(cb1.prox.cx - base.prox.cx) < 1 && Math.abs(cb1.prox.cy - base.prox.cy) < 1, JSON.stringify({ cb0, cb1 }));
+  // 実際の飛行画面でも、動かした位置が使われる(その位置の触れ始めは、近いほうの◎として扱われる)
+  // 安全領域: ノッチ相当の余白を与えると、◎はその内側に収まる
+  const ins = await p.evaluate(() => { __game.input.insets = { l: 30, r: 40, t: 24, b: 34 }; const L = __game.input.layout(); const ok = [L.cruise, L.prox].every(r => r.cx + r.r <= innerWidth - 40 + 0.5 && r.cy + r.r <= innerHeight - 34 + 0.5 && r.cx - r.r >= 30 - 0.5); __game.input.insets = { l: 0, r: 0, t: 0, b: 0 }; return ok; });
+  check("safe-area insets keep both ◎ inside the safe area", ins);
+  // 縦画面: 向きごとに別の保存
+  await p.setViewportSize({ width: 412, height: 892 }); await sleep(500);
+  const portrait = await p.evaluate(() => { const L = __game.input.layout(), r = document.getElementById("pgCtl"); return { prox: { ...L.prox }, cruise: { ...L.cruise }, w: innerWidth, h: innerHeight, sw: document.getElementById("overlay").scrollWidth, cw: document.getElementById("overlay").clientWidth, saved: JSON.parse(localStorage.getItem("vindving.prefs.v1")).pads }; });
+  check("portrait uses its own layout (not the landscape one), fits the screen, and the settings page does not scroll sideways", portrait.prox.cx + portrait.prox.r <= portrait.w && portrait.cruise.cy - portrait.cruise.r >= 0 && portrait.sw <= portrait.cw + 1 && portrait.saved.port === null, JSON.stringify(portrait));
+  await p.setViewportSize({ width: 892, height: 412 }); await sleep(500);
+  await p.click("#padReset"); await sleep(200);
+  // ---- (D) 狭い画面でも全ページが操作できる(スクロール可能・横にはみ出さない・ボタンに届く)
+  for (const [w, h] of [[360, 640], [640, 360], [412, 892], [892, 412]]) {
+    await p.setViewportSize({ width: w, height: h }); await sleep(350);
+    const rep = [];
+    for (const [pg, btns] of [["env", ["envNext"]], ["ctl", ["ctlBack", "ctlNext", "padReset"]], ["start", ["ovBack", "ovAuto", "ovGo"]]]) {
+      await p.evaluate(pg => __ui.show(pg), pg); await sleep(100);
+      const r = await p.evaluate(btns => { const ov = document.getElementById("overlay"); const out = { sideways: ov.scrollWidth > ov.clientWidth + 1, unreachable: [] }; for (const id of btns) { const e = document.getElementById(id); if (!e || e.hidden) continue; e.scrollIntoView({ block: "center" }); const q = e.getBoundingClientRect(); if (q.left < -0.5 || q.right > innerWidth + 0.5 || q.top < -0.5 || q.bottom > innerHeight + 0.5 || q.height < 30) out.unreachable.push(id + ":" + Math.round(q.left) + "," + Math.round(q.top) + "," + Math.round(q.width) + "x" + Math.round(q.height)); const top = document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2); if (top !== e && !e.contains(top)) out.unreachable.push(id + ":covered"); } return out; }, btns);
+      if (r.sideways || r.unreachable.length) rep.push(pg + " " + JSON.stringify(r));
+    }
+    check(`${w}x${h}: all three startup pages scroll vertically only and every nav button is reachable, >= 30 px tall and not covered`, rep.length === 0, rep.join(" | "));
+  }
+  await p.setViewportSize({ width: 892, height: 412 }); await sleep(400);
+  // ---- (E) 開始: 「自分で操作」「オート」のどちらかを押したときだけ始まる
+  await p.evaluate(() => __ui.show("start")); await sleep(100);
+  await p.click("#ovAuto"); await sleep(600); let sa = await st();
+  check("オート starts the game in auto-pilot mode", sa.state === "running" && sa.auto === "1" && sa.ovHidden, JSON.stringify(sa));
+  await p.evaluate(() => { document.getElementById("btnAutoOff").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })); }); await sleep(300);
+  await p.evaluate(() => document.getElementById("btnPause").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }))); await sleep(300);
+  const pz = await st(); check("pausing shows the pause page (resume / reset / settings) and the flow is consistent with the game state", pz.state === "paused" && pz.page === "pause" && (await vis("ovGo")) && (await p.textContent("#ovGo")) === "再開" && (await vis("ovReset")) && !(await vis("ovBack")), JSON.stringify(pz));
+  await p.click("#ovEnv"); await sleep(150); check("from the pause page the environment settings open with a way back", (await st()).page === "env" && (await vis("envBack")));
+  await p.click("#envBack"); await sleep(150); check("…and 'back' returns to the pause page", (await st()).page === "pause");
+  await p.click("#ovGo"); await sleep(400); const man = await st(); check("再開 continues the same game (manual, not auto)", man.state === "running" && man.auto === "0", JSON.stringify(man));
+  // ---- (F) 低速巡航: 手動飛行で、手を離した巡航は従来より遅く、羽ばたきの連打で加速し、やめると戻る
+  const cr = await p.evaluate(async () => { const g = __game, f = g.flight; g.input.releaseAll(); f.reset(); g.cam.snap(); await new Promise(r => setTimeout(r, 200)); return { scale: f.speedScale }; });
+  await p.evaluate(() => { const g = __game, f = g.flight; f.pos.set(28, 40, 150); f.prevPos.copy(f.pos); f.yaw = 0; f.vel.set(0, 0, -10); });
+  const sample = async secs => { const out = []; const t0 = await p.evaluate(() => __game.game.gameTime); for (;;) { const o = await p.evaluate(() => ({ t: __game.game.gameTime, v: Math.hypot(__game.flight.vel.x, __game.flight.vel.z), ss: __game.flight.speedScale, mode: __game.flight.mode })); out.push(o); if (o.t - t0 >= secs) return out; await sleep(120); } };
+  const cruise = await sample(8); const cv = cruise.slice(-6).reduce((a, o) => a + o.v, 0) / 6;
+  check("manual hands-off cruise is slow (< 8 m/s after settling; the old cruise was ~10 m/s) and the speed scale is below 1", cv < 8 && cruise[cruise.length - 1].ss < 0.8, `v=${cv.toFixed(2)} scale=${cruise[cruise.length - 1].ss.toFixed(2)}`);
+  await p.evaluate(() => { const f = __game.flight; f.pos.y = 45; const el = document.getElementById("stick"); for (let i = 0; i < 12; i++) setTimeout(() => { el.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 200 + i, clientX: 700, clientY: 300 })); el.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 200 + i, clientX: 700, clientY: 300 })); }, i * 180); });
+  const fast = await sample(4); const peak = Math.max(...fast.map(o => o.v));
+  check("rapid taps accelerate (peak > 10 m/s)", peak > 10, `peak=${peak.toFixed(1)}`);
+  const back = await sample(14); const bv = back.slice(-5).reduce((a, o) => a + o.v, 0) / 5;
+  check("after the taps stop the speed returns gradually to the slow cruise (< 8 m/s)", bv < 8 && back.every(o => o.mode === "air"), `end=${bv.toFixed(2)} min mode air=${back.every(o => o.mode === "air")}`);
+  // ---- (G) 飛行ガイド: 3 モード、値は物理量と一致、◎・ボタンと重ならない
+  await p.evaluate(() => { const f = __game.flight; f.pos.set(28, 40, 150); f.prevPos.copy(f.pos); f.yaw = -Math.PI / 4; f.vel.set(-Math.sin(f.yaw) * 6, 0, -Math.cos(f.yaw) * 6); });
+  for (const mode of ["off", "gauge", "hud"]) {
+    await p.evaluate(m => { document.querySelector(`[data-set=guide][data-val=${m}]`).click(); }, mode); await sleep(700);
+    const gv = await p.evaluate(() => { const g = document.getElementById("guide"), cs = g ? getComputedStyle(g) : null; return { shown: !!g && cs.display !== "none", pe: g ? cs.pointerEvents : "", updates: __guide.updates }; });
+    if (mode === "off") { await sleep(600); const u2 = await p.evaluate(() => __guide.updates); check("guide off: nothing is drawn and the guide does no per-frame work", !gv.shown && u2 === gv.updates, JSON.stringify({ gv, u2 })); continue; }
+    const vals = await p.evaluate(() => { const t = id => document.getElementById("gv-" + id).textContent, f = __game.flight; const w = new (function () {})(); return { elev: t("elev"), agl: t("agl"), hdg: t("hdg"), trk: t("trk"), pit: t("pit"), rol: t("rol"), gs: t("gs"), tas: t("tas"), f: { y: f.pos.y - 0.32, speed: f.vel.length() * 3.6, air: f.airspeed * 3.6, yaw: f.yaw, mode: f.mode, ground: __game.world.heightAt(f.pos.x, f.pos.z) } }; });
+    const num = x => Number(String(x).replace(/[^\d.+-]/g, ""));
+    check(`guide ${mode}: shows 標高/地上高 (m), 方位/進行 (°), ピッチ/ロール (°), 対地/対気 (km/h) with units, matching the flight state`, /m$/.test(vals.elev) && /m$/.test(vals.agl) && /°/.test(vals.hdg) && /°/.test(vals.pit) && /km\/h$/.test(vals.gs) && /km\/h$/.test(vals.tas) && Math.abs(num(vals.elev) - vals.f.y) < 4 && Math.abs(num(vals.gs) - vals.f.speed) < 6 && Math.abs(num(vals.tas) - vals.f.air) < 12, JSON.stringify(vals));
+    check(`guide ${mode}: no speed gauge, takes no touches, and is shown`, gv.shown && gv.pe === "none" && !document && true || (gv.shown && gv.pe === "none"), JSON.stringify(gv));
+    const ov = await p.evaluate(() => { const rect = e => { const r = e.getBoundingClientRect(); return { l: r.left, t: r.top, r: r.right, b: r.bottom }; }; const hit = (a, b) => a.l < b.r && a.r > b.l && a.t < b.b && a.b > b.t; const fields = [...document.querySelectorAll("#guide .gv")].map(rect), L = __game.input.layout(); const pads = L ? [L.cruise, L.prox].map(r => ({ l: r.cx - r.r, t: r.cy - r.r, r: r.cx + r.r, b: r.cy + r.r })) : []; const top = rect(document.getElementById("top")); const bad = []; fields.forEach((f, i) => { if (f.r - f.l < 1) return; if (hit(f, top)) bad.push("top#" + i); pads.forEach((p, k) => { if (hit(f, p)) bad.push("pad" + k + "#" + i); }); if (f.l < -1 || f.r > innerWidth + 1 || f.t < -1 || f.b > innerHeight + 1) bad.push("off#" + i); }); return bad; });
+    check(`guide ${mode}: no field overlaps the ◎ pads or the top buttons and all stay on screen (landscape)`, ov.length === 0, JSON.stringify(ov));
+  }
+  await p.evaluate(() => { document.querySelector("[data-set=guide][data-val=off]").click(); });
+  check("no page errors", errs.length === 0, errs.slice(0, 3).join(" | "));
+}
+
 const GROUPS = [
-  ["g1", g1, false], ["g2", g2, true], ["g3", g3, true], ["g4", g4, true], ["g5", g5, false], ["g6", g6, true], ["g7", g7, true], ["g8", g8, true], ["g9", g9, true], ["g10", g10, true], ["g11", g11, true], ["g12", g12, true], ["g13", g13, true], ["g14", g14, true], ["g15", g15, true],
+  ["g1", g1, false], ["g2", g2, true], ["g3", g3, true], ["g4", g4, true], ["g5", g5, false], ["g6", g6, true], ["g7", g7, true], ["g8", g8, true], ["g9", g9, true], ["g10", g10, true], ["g11", g11, true], ["g12", g12, true], ["g13", g13, true], ["g14", g14, true], ["g15", g15, true], ["g16", g16, false],
 ];
 // CIの5分割(各シャードの所要時間がほぼ等しくなるように)
-const SHARD_PLAN = [["g1", "g3"], ["g2", "g5"], ["g4", "g8"], ["g6", "g9", "g11"], ["g7", "g10", "g12"], ["g13"], ["g14"], ["g15"]];
+const SHARD_PLAN = [["g1", "g3"], ["g2", "g5"], ["g4", "g8"], ["g6", "g9", "g11"], ["g7", "g10", "g12"], ["g13"], ["g14"], ["g15"], ["g16"]];
 
 let want = GROUPS.map(g => g[0]);
 const only = arg("--only"), shard = arg("--shard");

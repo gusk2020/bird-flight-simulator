@@ -1283,32 +1283,38 @@ async function g17({ p, cdp, errs }) {
   await p.setViewportSize({ width: 892, height: 412 }); await sleep(500); await setCtl("right");
   const hover = (x, z, yaw, y = 14) => p.evaluate(([x, z, yaw, y]) => { const g = __game, f = g.flight; clearInterval(window.__hv); g.setAuto?.(false); g.input.releaseAll(); g.autoLand.cancel("user"); g.approach.clear("cancelled"); g.spotConfirm.clear("cancelled"); f.reset(); f.pos.set(x, y, z); f.prevPos.copy(f.pos); f.yaw = yaw; f.vel.set(0, 0, 0); f.speedScale = 1; g.cam.snap(); window.__hv = setInterval(() => { f.pos.set(x, y, z); f.vel.set(0, 0, 0); }, 8); }, [x, z, yaw, y]);
   const unhover = () => p.evaluate(() => clearInterval(window.__hv));
-  // ---- (A) 色: 緑 ⇔ いま自動着地が始められる(AutoLand.canStart)。描いた輪の色も同じ
-  await hover(30, 0, Math.PI / 2); await sleep(1200);
-  const cls = await p.evaluate(() => { const g = __game, cv = document.getElementById("spots"), ctx = cv.getContext("2d"), dpr = cv.width / innerWidth; const out = [];
+  // ---- (A)(B) 色: 緑 ⇔ いま自動着地が始められる(AutoLand.canStart)。描いた輪の色も同じ。押した結果も確かめる。着地できる位置(足場の縁から 6〜10 m、面の上 1〜4 m)を何通りか作って調べる
+  const scenario = (kind, k) => p.evaluate(([kind, k]) => { const g = __game, f = g.flight, w = g.world; clearInterval(window.__hv); g.input.releaseAll(); g.autoLand.cancel("user"); g.approach.clear("cancelled"); g.spotConfirm.clear("cancelled"); f.reset();
+    const open = s => !w.colliders.some(c => c.maxX - c.minX > 3 && c.maxZ - c.minZ > 3 && c.top > s.top + 0.3 && c.maxX > s.minX - 16 && c.minX < s.maxX + 16 && c.maxZ > s.minZ - 16 && c.minZ < s.maxZ + 16);
+    const all = g.surfaces.all.filter(s => s.kind === kind && open(s) && (kind !== "roof" || ((s.maxX - s.minX) * (s.maxZ - s.minZ) > 40 && s.top < 12))); const t = all[(k * 5 + 1) % Math.max(1, all.length)]; if (!t) return null;
+    const cx = (t.minX + t.maxX) / 2, cz = (t.minZ + t.maxZ) / 2, ang = k * 2.1 + 0.7, dxs = Math.cos(ang), dzs = Math.sin(ang), hx = (t.maxX - t.minX) / 2, hz = (t.maxZ - t.minZ) / 2, tE = Math.min(hx / Math.max(Math.abs(dxs), 1e-6), hz / Math.max(Math.abs(dzs), 1e-6)), x = cx + dxs * (tE + 7), z = cz + dzs * (tE + 7), y = t.top + 2.2;
+    f.pos.set(x, y, z); f.prevPos.copy(f.pos); f.yaw = Math.atan2(-(cx - x), -(cz - z)); f.vel.set(0, 0, 0); f.speedScale = 1; g.cam.snap(); window.__hv = setInterval(() => { f.pos.set(x, y, z); f.vel.set(0, 0, 0); }, 8); return { id: t.id, kind: t.kind }; }, [kind, k]);
+  const classify = () => p.evaluate(() => { const g = __game, cv = document.getElementById("spots"), ctx = cv.getContext("2d"), dpr = cv.width / innerWidth; const out = [];
     for (const q of g.spots.list) { if (q.d > 60) continue; const lan = g.spotLanding(q), can = g.autoLand.canStart(g.flight, q.s); const sc = q.d > 35 ? 0.72 : q.d > 18 ? 0.88 : 1, R = 22 * sc; let gr = 0, bl = 0;
       for (const k of [0.9, 1, 1.1]) for (let a = 0; a < 24; a++) { const x = Math.round((q.dx + Math.cos(a / 24 * 6.2832) * R * k) * dpr), y = Math.round((q.dy + Math.sin(a / 24 * 6.2832) * R * k) * dpr); if (x < 0 || y < 0 || x >= cv.width || y >= cv.height) continue; const d = ctx.getImageData(x, y, 1, 1).data; if (d[3] < 100) continue; if (d[1] > d[0] + 40 && d[1] > d[2] + 15) gr++; else if (d[2] > d[0] + 40 && d[2] > d[1] + 10) bl++; }
-      out.push({ id: q.id, kind: q.kind, d: Math.round(q.d), green: lan.ok, canStart: can.ok, px: gr > bl ? "green" : bl > gr ? "blue" : "none", gr, bl, onScreen: q.dx > 30 && q.dx < innerWidth - 30 && q.dy > 30 && q.dy < innerHeight - 30 }); }
+      out.push({ id: q.id, kind: q.kind, d: Math.round(q.d), green: lan.ok, canStart: can.ok, px: gr > bl ? "green" : bl > gr ? "blue" : "none", onScreen: q.dx > 30 && q.dx < innerWidth - 30 && q.dy > 30 && q.dy < innerHeight - 30 }); }
     return out; });
-  const vis = cls.filter(c => c.onScreen);
-  check("markers: green exactly when AutoLand.canStart passes right now (never green for an unsafe target)", vis.length >= 6 && vis.every(c => c.green === c.canStart) && vis.every(c => !(c.green && !c.canStart)), JSON.stringify(vis.map(c => [c.kind, c.d, c.green, c.canStart])));
-  check("markers: both a green and a blue marker are in the town test view", vis.some(c => c.green) && vis.some(c => !c.green), JSON.stringify({ g: vis.filter(c => c.green).length, b: vis.filter(c => !c.green).length }));
-  const mism = vis.filter(c => c.px !== "none" && ((c.px === "green") !== c.green));
-  check("markers: the drawn ring colour (pixels) matches the state - green rings green, blue rings blue", mism.length === 0 && vis.filter(c => c.px !== "none").length >= 4, JSON.stringify({ mism, read: vis.filter(c => c.px !== "none").length }));
-  // ---- (B) 押した結果: 緑は着地開始、遠い青は接近先、届く範囲の青(安全でない)は理由つきで断る
-  const tapSpot = id => p.evaluate(id => { const g = __game, q = g.spots.get(id); if (!q) return null; const x = Math.round(q.dx), y = Math.round(q.dy), pk = g.spots.pick(x, y); if (!pk || pk.id !== id || g.spots.assess(x, y, q).risky) return { skip: true }; const b = { starts: g.autoLand.stats.starts, refused: g.autoLand.stats.refused, ap: g.approach.id }; const el = document.elementFromPoint(x, y) || document.body, o = { bubbles: true, pointerId: 88, clientX: x, clientY: y, pointerType: "touch" }; el.dispatchEvent(new PointerEvent("pointerdown", o)); el.dispatchEvent(new PointerEvent("pointerup", o)); return { b, after: { starts: g.autoLand.stats.starts, refused: g.autoLand.stats.refused, ap: g.approach.id } }; }, id);
-  const out = { green: [0, 0], far: [0, 0], nearBlue: [0, 0] };
-  for (const c of vis) {
-    await hover(30, 0, Math.PI / 2); await sleep(700);
-    const cur = await p.evaluate(id => { const g = __game, q = g.spots.get(id); return q ? { green: g.spotLanding(q).ok, d: q.d } : null; }, c.id); if (!cur) continue;
-    const r = await tapSpot(c.id); if (!r || r.skip) continue;
-    if (cur.green) { out.green[1]++; if (r.after.starts > r.b.starts) out.green[0]++; }
-    else if (cur.d > 18) { out.far[1]++; if (r.after.ap === c.id) out.far[0]++; }
-    else { out.nearBlue[1]++; if (r.after.starts === r.b.starts && r.after.refused > r.b.refused) out.nearBlue[0]++; }
+  const tapSpot = id => p.evaluate(id => { const g = __game, q = g.spots.get(id); if (!q) return null; const x = Math.round(q.dx), y = Math.round(q.dy), pk = g.spots.pick(x, y); if (!pk || pk.id !== id || g.spots.assess(x, y, q).risky) return { skip: true }; const green = g.spotLanding(q).ok, d = q.d, b = { starts: g.autoLand.stats.starts, refused: g.autoLand.stats.refused, ap: g.approach.id }; const el = document.elementFromPoint(x, y) || document.body, o = { bubbles: true, pointerId: 88, clientX: x, clientY: y, pointerType: "touch" }; el.dispatchEvent(new PointerEvent("pointerdown", o)); el.dispatchEvent(new PointerEvent("pointerup", o)); return { green, d, b, after: { starts: g.autoLand.stats.starts, refused: g.autoLand.stats.refused, ap: g.approach.id } }; }, id);
+  const seen = []; const out = { green: [0, 0], far: [0, 0], nearBlue: [0, 0] }; let scen = 0;
+  for (const [kind, k] of [["rock", 1], ["wall", 2], ["bench", 1], ["roof", 2], ["fence", 1], ["sign", 1], ["rail", 2], ["pole", 2], ["wall", 4], ["rock", 3]]) {
+    const sc = await scenario(kind, k); if (!sc) continue; scen++; await sleep(900);
+    const cl = await classify(); for (const c of cl) if (c.onScreen) seen.push(c);
+    // 押す: この場面の目印を最大 6 つ(場面は押すたびに作り直す)
+    for (const c of cl.filter(c => c.onScreen).slice(0, 6)) {
+      await scenario(kind, k); await sleep(700);
+      const r = await tapSpot(c.id); if (!r || r.skip) continue;
+      if (r.green) { out.green[1]++; if (r.after.starts > r.b.starts) out.green[0]++; }
+      else if (r.d > 18) { out.far[1]++; if (r.after.ap === c.id) out.far[0]++; }
+      else { out.nearBlue[1]++; if (r.after.starts === r.b.starts && r.after.refused > r.b.refused) out.nearBlue[0]++; }
+    }
   }
-  check("tapping a green marker starts the automatic landing (>= 90%; the state is frozen so the colour and the tap-time check agree)", out.green[1] >= 3 && out.green[0] / out.green[1] >= 0.9, JSON.stringify(out));
-  check("tapping a far blue marker selects it as the approach target; tapping a near-but-unsafe blue marker is refused (never starts)", (out.far[1] === 0 || out.far[0] / out.far[1] >= 0.9) && (out.nearBlue[1] === 0 || out.nearBlue[0] === out.nearBlue[1]) && out.far[1] + out.nearBlue[1] >= 2, JSON.stringify(out));
   await unhover();
+  check("markers: green exactly when AutoLand.canStart passes right now (never green for an unsafe target)", seen.length >= 20 && seen.every(c => c.green === c.canStart), JSON.stringify({ n: seen.length, scenarios: scen, bad: seen.filter(c => c.green !== c.canStart).map(c => [c.kind, c.d]) }));
+  check("markers: the sample has both green and blue markers (not vacuous)", seen.some(c => c.green) && seen.some(c => !c.green), JSON.stringify({ g: seen.filter(c => c.green).length, b: seen.filter(c => !c.green).length }));
+  const mism = seen.filter(c => c.px !== "none" && ((c.px === "green") !== c.green));
+  check("markers: the drawn ring colour (pixels) matches the state - green rings green, blue rings blue", mism.length === 0 && seen.filter(c => c.px !== "none").length >= 10, JSON.stringify({ mism, read: seen.filter(c => c.px !== "none").length }));
+  check("tapping a green marker starts the automatic landing (>= 90%; the state is frozen so the colour and the tap-time check agree)", out.green[1] >= 3 && out.green[0] / out.green[1] >= 0.9, JSON.stringify(out));
+  check("tapping a far blue marker selects it as the approach target; tapping a near-but-unsafe blue marker is refused (never starts)", (out.far[1] === 0 || out.far[0] / out.far[1] >= 0.9) && (out.nearBlue[1] === 0 || out.nearBlue[0] === out.nearBlue[1]) && out.far[1] + out.nearBlue[1] >= 3, JSON.stringify(out));
   // ---- (C) 動かした◎の位置で、実際のタッチが正しい◎に届く
   await hover(30, 0, Math.PI / 2, 40); await sleep(500); await unhover();
   const pads = await p.evaluate(() => { const g = __game; g.input.pads.land = { prox: { fx: 0.62, fy: 0.55 }, cruise: { fx: 0.88, fy: 0.45 } }; const L = g.input.layout(); return { prox: { ...L.prox }, cruise: { ...L.cruise } }; });

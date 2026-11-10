@@ -30,6 +30,7 @@ import { AutoLand, AUTOLAND } from "./autoland";
 import { Approach } from "./approach";
 import { SpotConfirm } from "./spotconfirm";
 import { CruiseGuard } from "./avoid";
+import { CruiseGovernor } from "./cruise";
 import type { AutoPolicy } from "./settings";
 import { SpeedLines, Streaks, speedIntensity } from "./speedfx";
 import { NpcWorld } from "./npc";
@@ -100,6 +101,8 @@ const perchAssist = new PerchAssist(surfaces);
 const autoLand = new AutoLand(surfaces, perchAssist, world.heightAt);
 // H1: 巡航中の自動制動(壁・地面へ止まり切れない速さで向かっているとき、ブレーキ・機首上げ・羽ばたき・舵を足す。回避が間に合わない条件の衝突は残る)
 const cruiseGuard = new CruiseGuard();
+// H9: 通常巡航の低速化(手動飛行のみ。オートは従来の物理・速さのまま)
+const cruiseGov = new CruiseGovernor(); cruiseGov.reset(flight);
 // 自動ついばみ(草地・土・あぜ道で、数歩ごとに止まって頭を下げる)。手動もオートも同じ仕組みで、強い入力(羽ばたき・大きなスティック)があれば中断する
 const forage = new Forage(world.groundAt, (Date.now() & 0xffff) + 11);
 // H8-B: 着地点マーカー。視界の中の着地できる足場を、すべて個別に示す(landspots.ts)。タップした候補に対して自動着地を始める(安全かどうかは、押した時にあらためて検査する)
@@ -237,7 +240,7 @@ input.onTime = () => {
   preset = (preset + 1) % TIME_PRESETS.length; targetHour = TIME_PRESETS[preset].hour;
   document.getElementById("btnTime")!.textContent = TIME_PRESETS[preset].name;
 };
-input.onReset = () => { forage.reset(); if (autopilot.enabled) setAuto(false); dirty = true; game.reset(); input.releaseAll(); cam.snap(); };
+input.onReset = () => { cruiseGov.reset(flight); forage.reset(); if (autopilot.enabled) setAuto(false); dirty = true; game.reset(); input.releaseAll(); cam.snap(); };
 input.onCamera = () => {
   dirty = true;
   cam.mode = cam.mode === "third" ? "first" : "third"; bird.setVisible(cam.mode === "third");
@@ -260,9 +263,10 @@ const autoIn = { x: 0, y: 0, flapHeld: false, flapTap: false, brake: false };
 const POL_NAMES: Record<AutoPolicy, string> = { life: "自然生活", scenic: "景色観賞", adventure: "冒険探索", random: "おまかせ" };
 // オート中は手動入力を読まない(スティックやタップは無視)。解除しても飛行状態はそのまま続く
 const readInput = () => {
-  if (autopilot.enabled) { autoIn.flapTap = false; autoIn.flapHeld = false; autoIn.brake = false; autopilot.busy = forage.active; const ao = autopilot.drive(flight, autoIn, 1 / 60); if (autopilot.state === "cruise" && flight.mode === "air" && !flight.hopping && flight.stun <= 0) cruiseGuard.apply(world, flight, ao); /* H4: 巡航中だけ、手動と同じ衝突予測の減速・引き起こしを共有(着陸進入・離陸は自分の目標を優先) */ return forage.apply(ao, flight, false); }
+  if (autopilot.enabled) { cruiseGov.update(flight, autoIn, 1 / 60, true); autoIn.flapTap = false; autoIn.flapHeld = false; autoIn.brake = false; autopilot.busy = forage.active; const ao = autopilot.drive(flight, autoIn, 1 / 60); if (autopilot.state === "cruise" && flight.mode === "air" && !flight.hopping && flight.stun <= 0) cruiseGuard.apply(world, flight, ao); /* H4: 巡航中だけ、手動と同じ衝突予測の減速・引き起こしを共有(着陸進入・離陸は自分の目標を優先) */ return forage.apply(ao, flight, false); }
   const raw = input.read();
   if (input.steerOn) steerLayer.apply(flight, raw, input.steer, 1 / 60, autoLand.active, performance.now()); // H8-A: 単一◎の指示を操舵の入力にする(物理・補助・回避はこの後も従来どおり)
+  cruiseGov.update(flight, raw, 1 / 60, false, autoLand.active || flight.prox.on); // H9: 羽ばたきの操作で加速、離すと徐々に低速巡航へ
   if (spotConfirm.active && (Math.abs(raw.x) > 0.45 || Math.abs(raw.y) > 0.45)) spotConfirm.clear("manual"); // H8-D: 大きなスティック/◎の操作で仮選択を解く
   if (approach.active && !autoLand.active) { const sp = spots.get(approach.id); if (sp) approach.steer(flight, raw, sp.s, 1 / 60); } // H8-C: 接近先へ向きを合わせる(手動の操作があれば足さない)
   if (!autoLand.active && proxLand.update(flight, 1 / 60, !!raw.prox)) toast("自動着地");

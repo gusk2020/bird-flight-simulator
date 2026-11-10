@@ -10,11 +10,11 @@ import type { Flight, FlightInput } from "./flight";
  */
 export const CRUISE = {
   enabled: true,
-  scale0: 0.6,        // 巡航時の speedScale(従来の滑空 約9.5〜10 m/s → 約 6 m/s)
-  tapBoost: 0.3,      // 羽ばたき1回(タップ)で boost に足す量
+  scale0: 0.5,        // 巡航時の speedScale(従来の滑空 約10 m/s → 約 5 m/s)
+  tapBoost: 0.12,     // 羽ばたき1回(タップ)で boost に足す量。約 1.2 秒に 1 回の羽ばたき(高度を保つだけ)では加速せず、それより速い連打で加速する
   holdRate: 0.9,      // 羽ばたきを押し続けている間に boost が増える速さ(1/s)
-  grace: 1.5,         // 最後の羽ばたきから boost が減り始めるまでの秒数
-  decay: 0.14,        // 減る速さ(1/s)。boost 1 → 0 に約 7 秒
+  grace: 0.6,         // 最後の羽ばたきから boost が減り始めるまでの秒数
+  decay: 0.25,        // 減る速さ(1/s)。boost 1 → 0 に約 4 秒(速さが戻るのはさらに空気抵抗でゆっくり)
   slewUp: 0.9,        // speedScale の変化の速さの上限(1/s)。空力が急に変わって機体が跳ねないように
   slewDown: 0.12,
   brakeDecay: 0.5,    // ブレーキ中は boost が速く減る
@@ -22,10 +22,11 @@ export const CRUISE = {
 
 export class CruiseGovernor {
   boost = 0; last = -99; private prevTap = false; taps = 0;
-  reset() { this.boost = 0; this.last = -99; this.prevTap = false; }
+  reset(f?: Flight) { this.boost = 0; this.last = -99; this.prevTap = false; if (f) f.speedScale = CRUISE.enabled ? CRUISE.scale0 : 1; }
   /** 物理 1 ステップごとに呼ぶ。inp は人の操作(補助が足す前)。full=true のときは従来の物理(オート・自動着地・近接機動・地上) */
-  update(f: Flight, inp: FlightInput, dt: number, full: boolean) {
+  update(f: Flight, inp: FlightInput, dt: number, full: boolean, hold = false) {
     if (!CRUISE.enabled) { f.speedScale = 1; return; }
+    if (hold) return; // 自動着地の進入中は、空力を変えない(進入の途中で揚力が変わらないように)
     const air = f.mode === "air";
     const tap = air && (inp.flapTap || inp.flapHeld);
     if (inp.flapTap && !this.prevTap) { this.boost = Math.min(1, this.boost + CRUISE.tapBoost); this.last = f.clock; this.taps++; }

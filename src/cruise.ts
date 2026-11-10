@@ -1,0 +1,40 @@
+import type { Flight, FlightInput } from "./flight";
+
+/**
+ * H9: 通常巡航の低速化と、操作による加速(ブースト)。
+ * 仕組み: 飛行物理の空力を 1/speedScale² 倍にすると、揚力と重力・抗力の釣り合う速さが speedScale 倍になる(Flight.speedScale)。
+ * 手動飛行の speedScale は、巡航のとき scale0(例 0.6)、羽ばたきの操作で boost(0〜1)が上がるほど 1(従来の物理=従来の最高速度)へ近づく。
+ * 操作をやめると boost が少しずつ減り、加速した速さから徐々に低速巡航へ戻る。補助・操舵のしきい値は Flight.speedN(speed/speedScale)で比べるので、
+ * どの boost でも「従来の物理での同じ状態」として扱える(失速・補助羽ばたき・上昇の制限が低速巡航でも従来どおり働く)。
+ * オート周遊・自動着地・近接機動・地上では使わず、speedScale=1(従来の物理)のまま。オートの速さは従来と同じ。
+ */
+export const CRUISE = {
+  enabled: true,
+  scale0: 0.6,        // 巡航時の speedScale(従来の滑空 約9.5〜10 m/s → 約 6 m/s)
+  tapBoost: 0.3,      // 羽ばたき1回(タップ)で boost に足す量
+  holdRate: 0.9,      // 羽ばたきを押し続けている間に boost が増える速さ(1/s)
+  grace: 1.5,         // 最後の羽ばたきから boost が減り始めるまでの秒数
+  decay: 0.14,        // 減る速さ(1/s)。boost 1 → 0 に約 7 秒
+  slewUp: 0.9,        // speedScale の変化の速さの上限(1/s)。空力が急に変わって機体が跳ねないように
+  slewDown: 0.12,
+  brakeDecay: 0.5,    // ブレーキ中は boost が速く減る
+};
+
+export class CruiseGovernor {
+  boost = 0; last = -99; private prevTap = false; taps = 0;
+  reset() { this.boost = 0; this.last = -99; this.prevTap = false; }
+  /** 物理 1 ステップごとに呼ぶ。inp は人の操作(補助が足す前)。full=true のときは従来の物理(オート・自動着地・近接機動・地上) */
+  update(f: Flight, inp: FlightInput, dt: number, full: boolean) {
+    if (!CRUISE.enabled) { f.speedScale = 1; return; }
+    const air = f.mode === "air";
+    const tap = air && (inp.flapTap || inp.flapHeld);
+    if (inp.flapTap && !this.prevTap) { this.boost = Math.min(1, this.boost + CRUISE.tapBoost); this.last = f.clock; this.taps++; }
+    if (air && inp.flapHeld) { this.boost = Math.min(1, this.boost + CRUISE.holdRate * dt); this.last = f.clock; }
+    this.prevTap = !!inp.flapTap && tap;
+    if (f.clock - this.last > CRUISE.grace) this.boost = Math.max(0, this.boost - (inp.brake ? CRUISE.brakeDecay : CRUISE.decay) * dt);
+    else if (inp.brake) this.boost = Math.max(0, this.boost - CRUISE.brakeDecay * dt);
+    const target = full || !air ? 1 : CRUISE.scale0 + (1 - CRUISE.scale0) * this.boost;
+    const d = target - f.speedScale, r = d > 0 ? CRUISE.slewUp : CRUISE.slewDown;
+    f.speedScale += Math.max(-r * dt, Math.min(r * dt, d));
+  }
+}

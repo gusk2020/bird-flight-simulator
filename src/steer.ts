@@ -133,7 +133,7 @@ export class SteerLayer {
     while (this.chain.length && t - this.chain[0] > STEER.chainMs / 1000) this.chain.shift();
     if (this.chain.length >= STEER.chainTaps && this.holdUntil < t) { this.holdUntil = t + STEER.chainHoldS; this.stats.chains++; this.chain.length = 0; }
     if (this.holdUntil > t && f.mode === "air") raw.flapHeld = true;
-    if (f.mode === "air" && f.speed > STEER.speedCap) { if (raw.flapTap || raw.flapHeld) this.stats.capped++; raw.flapTap = false; raw.flapHeld = false; } // 加速には上限(これ以上は羽ばたいても速くならない)
+    if (f.mode === "air" && f.speedN > STEER.speedCap) { if (raw.flapTap || raw.flapHeld) this.stats.capped++; raw.flapTap = false; raw.flapHeld = false; } // 加速には上限(これ以上は羽ばたいても速くならない)
     raw.brake = raw.brake || pad.brake; if (pad.brake) this.stats.brakeFrames++;
     if (autoLandActive) { // 自動着地の進入中: 方向の指示は使わない。指が大きく動いたら手動へ戻れるよう、スティックと同じ形で渡す(取消は AutoLand が判断)
       this.reset(); if (act) { raw.x = v.lateral; raw.y = v.vertical; } this.record(f, dt, raw, act); return raw;
@@ -147,8 +147,8 @@ export class SteerLayer {
       if (this.yawT !== null) { const ex = wrap(this.yawT - f.yaw); if (Math.abs(ex) < STEER.reachYaw && !live) this.yawT = null; else x = -clamp(ex * STEER.turnGain, -1, 1); } // 右へ曲がる = x が正 = yaw が減る
       if (this.pitchT !== null) {
         // 上下は「目標の角度に比例した操舵」(開ループ)。飛行経路角を追いかけるフィードバックにすると、失速ぎみのときに機首を引き上げ続けて失速から出られなくなる(実測)
-        if (this.pitchT > 0.1 && f.speed < STEER.climbFlapV && f.strokeT < 0 && t - this.lastFlap > STEER.climbFlapGap) { raw.flapTap = true; this.lastFlap = t; this.stats.climbFlaps++; } // 上昇には羽ばたきが要る: 速さが足りなければ自動で羽ばたく
-        const pT = this.pitchT > 0 ? Math.min(this.pitchT, STEER.climbMaxRad * clamp((f.speed - STEER.climbV0) / STEER.climbV1, 0, 1)) : this.pitchT; // 遅いときは上昇を弱める
+        if (this.pitchT > 0.1 && f.speedN < STEER.climbFlapV && f.strokeT < 0 && t - this.lastFlap > STEER.climbFlapGap) { raw.flapTap = true; this.lastFlap = t; this.stats.climbFlaps++; } // 上昇には羽ばたきが要る: 速さが足りなければ自動で羽ばたく
+        const pT = this.pitchT > 0 ? Math.min(this.pitchT, STEER.climbMaxRad * clamp((f.speedN - STEER.climbV0) / STEER.climbV1, 0, 1)) : this.pitchT; // 遅いときは上昇を弱める
         y = clamp(pT / STEER.pitchFull, -1, 1);
         if (!live && t - this.tCourse > STEER.pitchHoldS) this.pitchT = null; // 離したあと、上下の指示は少しのあいだだけ保つ(ずっと上がり続けない)
       }

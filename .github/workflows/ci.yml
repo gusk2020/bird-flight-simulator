@@ -4,6 +4,7 @@ name: CI
 #   browser  ブラウザ操作テストを5分割(test/browser.mjs の SHARD_PLAN)。分割しても全項目を実行する
 #   endurance 長時間オート周遊(30分×4方針×3シード)。mainへの統合時と手動実行のときだけ
 # 必須チェック名 "test" は、全部の結果をまとめる最後のジョブとして残してある(名前を変えるとマージできなくなるため)。
+# ランナーは ubuntu-24.04 に固定する: ubuntu-latest が 26.04 になり、Playwright(1.56)が chromium-headless-shell を入れられなくなった(ブラウザ試験が全シャード数秒で失敗する)
 on:
   pull_request:
   push:
@@ -16,7 +17,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   unit:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -28,7 +29,7 @@ jobs:
       - run: npm run build          # tsc型チェック + vite build
 
   browser:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     strategy:
       fail-fast: false
@@ -45,7 +46,7 @@ jobs:
 
   endurance:
     if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -57,7 +58,7 @@ jobs:
   test:
     needs: [unit, browser, endurance]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
       # unit と browser は常に success が必須。endurance は PR のときだけ skipped を許可し、

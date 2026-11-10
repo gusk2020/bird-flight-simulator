@@ -541,10 +541,10 @@ async function g7({ p, cdp, errs }) {
   const r4a = await attempt(async () => {
     const before = await AL(); const r = await ringXY(); if (!r.vis || r.x < r.w / 2 + 20) return { ok: false, why: "ring not in the stick zone " + JSON.stringify(r) };
     const x = Math.round(r.x + 22), y = Math.round(r.y - 20); // 距離 約30 px
-    await realTap(x, y, 50); await sleep(250); const after = await AL();
-    return { ok: after.starts === before.starts + 1 && after.ringTaps === before.ringTaps + 1 && after.flapTaps === before.flapTaps, before, after, x, y };
+    await realTap(x, y, 50); await sleep(250); const after = await AL(); const dbg = await p.evaluate(() => ({ cf: __game.spotConfirm.id, ap: __game.approach.id, gone: __game.spots.stats.gone, list: __game.spots.list.map(q => [q.kind, Math.round(q.d), Math.round(q.dx), Math.round(q.dy), q.near]).slice(0, 6), mode: __game.flight.mode, v: __game.flight.speed, ss: __game.flight.speedScale }));
+    return { ok: after.starts === before.starts + 1 && after.ringTaps === before.ringTaps + 1 && after.flapTaps === before.flapTaps, before, after, x, y, dbg };
   });
-  check("REAL TOUCH 30 px from the ring: the automatic landing starts, counted as a ring tap and not as a flap tap", r4a.ok, `tries ${r4a.tries}; refusal=${r4a.after && r4a.after.refusal}; ringTaps ${r4a.before && r4a.before.ringTaps}->${r4a.after && r4a.after.ringTaps}, flapTaps ${r4a.before && r4a.before.flapTaps}->${r4a.after && r4a.after.flapTaps}${r4a.why ? " " + r4a.why : ""}`);
+  check("REAL TOUCH 30 px from the ring: the automatic landing starts, counted as a ring tap and not as a flap tap", r4a.ok, `tries ${r4a.tries}; refusal=${r4a.after && r4a.after.refusal}; ringTaps ${r4a.before && r4a.before.ringTaps}->${r4a.after && r4a.after.ringTaps}, flapTaps ${r4a.before && r4a.before.flapTaps}->${r4a.after && r4a.after.flapTaps}${r4a.why ? " " + r4a.why : ""} dbg=${JSON.stringify(r4a.dbg)}`);
   await p.waitForFunction(() => !__game.autoLand.active, null, { timeout: 30000 }).catch(() => {});
   // 4b 範囲外(◯から約110 px)の実タッチ: 自動着地は始まらず、ふつうの羽ばたきタップになる
   const r4b = await attempt(async () => {

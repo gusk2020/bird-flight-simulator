@@ -133,7 +133,7 @@ export class SteerLayer {
     while (this.chain.length && t - this.chain[0] > STEER.chainMs / 1000) this.chain.shift();
     if (this.chain.length >= STEER.chainTaps && this.holdUntil < t) { this.holdUntil = t + STEER.chainHoldS; this.stats.chains++; this.chain.length = 0; }
     if (this.holdUntil > t && f.mode === "air") raw.flapHeld = true;
-    if (f.mode === "air" && f.speedN > STEER.speedCap) { if (raw.flapTap || raw.flapHeld) this.stats.capped++; raw.flapTap = false; raw.flapHeld = false; } // 加速には上限(これ以上は羽ばたいても速くならない)
+    if (f.mode === "air" && f.speed > STEER.speedCap) { if (raw.flapTap || raw.flapHeld) this.stats.capped++; raw.flapTap = false; raw.flapHeld = false; } // 加速には上限(これ以上は羽ばたいても速くならない)
     raw.brake = raw.brake || pad.brake; if (pad.brake) this.stats.brakeFrames++;
     if (autoLandActive) { // 自動着地の進入中: 方向の指示は使わない。指が大きく動いたら手動へ戻れるよう、スティックと同じ形で渡す(取消は AutoLand が判断)
       this.reset(); if (act) { raw.x = v.lateral; raw.y = v.vertical; } this.record(f, dt, raw, act); return raw;

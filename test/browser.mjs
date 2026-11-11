@@ -463,10 +463,13 @@ async function g7({ p, cdp, errs }) {
     return await new Promise(res => { const tick = () => { for (const k of g.world.colliders) if (f.pos.x > k.minX && f.pos.x < k.maxX && f.pos.z > k.minZ && f.pos.z < k.maxZ && f.pos.y - 0.32 < k.top - 0.3) inside = true; maxStun = Math.max(maxStun, f.stun);
       if (performance.now() - t0 > 3500) res({ crashes: f.crashes - c0, esc: f.escapes, inside, mode: f.mode, maxStun, away: Math.hypot(f.pos.x - Math.max(c.minX, Math.min(c.maxX, f.pos.x)), f.pos.z - Math.max(c.minZ, Math.min(c.maxZ, f.pos.z))), finite: Number.isFinite(f.pos.x + f.pos.y + f.pos.z) }); else requestAnimationFrame(tick); }; tick(); });
   }, [alt, v, sideAng]);
-  const w1 = await wallRun(20, 14, 0);
+  // H9: 低速巡航では、14 m/s の接近を巡航ガード(自動制動)が壁の手前で止めて衝突にならない。衝突後の復帰を確かめるには、ブースト後の速さ(16 m/s 以上は従来と同じ物理)で突っ込む
+  const w1 = await wallRun(20, 22, 0);
   check("a frontal hit into a tall wall: one crash, then it backs off and flies on, never inside", w1.crashes === 1 && w1.esc >= 1 && !w1.inside && w1.finite && w1.maxStun <= 0.31 && w1.away > 1, JSON.stringify(w1));
-  const w2 = await wallRun(20, 14, 0.7);
+  const w2 = await wallRun(20, 22, 0.7);
   check("a diagonal hit: also recovers (no repeated crash)", w2.crashes <= 1 && !w2.inside && w2.finite, JSON.stringify(w2));
+  const w3 = await wallRun(20, 6, 0);
+  check("H9: at the slow cruise speed a frontal approach never crashes and never gets inside the wall", w3.crashes === 0 && !w3.inside && w3.finite, JSON.stringify(w3));
 
   console.log("\n# tap the ring to land automatically (G1-4 / G1-5)");
   // 一瞬のタップは、ソフトウェア描画の遅いフレームでCDPの2回の送信がずれないよう、同一タスク内の合成イベントで行う版(tapAtXY)と、実際のタッチ入力経路(CDP Input.dispatchTouchEvent。tp)の両方を使う

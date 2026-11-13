@@ -829,8 +829,8 @@ async function g11({ p, cdp, errs }) {
   await p.setViewportSize({ width: 892, height: 412 }); await sleep(400); await setCtl("right"); await setSteer("off");
   const fi = await farSetup(7); const fid2 = fi.id; await waitSpot(fid2); await hover(); await sleep(200);
   const fq = await spotXY(fid2); const fd = await p.evaluate(i => __game.spots.get(i).d, fid2);
-  const bf = await stat(); await realTap(fq.x, fq.y); await sleep(250); const afp = await p.evaluate(() => ({ id: __game.approach.id, sel: __game.approach.stats.selected, active: __game.autoLand.active, refused: __game.autoLand.stats.refused }));
-  check("tapping a marker beyond the auto-landing reach selects it as the approach target (not refused with 'too far')", fd > 25 && afp.id === fid2 && afp.sel >= 1 && !afp.active && afp.refused === bf.refused, JSON.stringify({ fd: Math.round(fd), ...afp }));
+  const bf = await stat(); await realTap(fq.x, fq.y); await sleep(250); const afp = await p.evaluate(() => ({ id: __game.approach.id, sel: __game.approach.stats.selected, active: __game.autoLand.active, refused: __game.autoLand.stats.refused, refusal: __game.autoLand.lastRefusal, log: __game.spotTapLog.slice(-5), has: !!__game.spots.get(window.__target.id), fps: Math.round(__game.stats?.fps ?? -1) }));
+  check("tapping a marker beyond the auto-landing reach selects it as the approach target (not refused with 'too far')", fd > 25 && afp.id === fid2 && afp.sel >= 1 && !afp.active && afp.refused === bf.refused, JSON.stringify({ fd: Math.round(fd), fid2, bfRefused: bf.refused, ...afp }));
   const drawnPending = await p.evaluate(() => { const cv = document.getElementById("spots"), c = cv.getContext("2d"), q = __game.spots.get(__game.approach.id), k = cv.width / innerWidth; if (!q) return -1; const d = c.getImageData(Math.max(0, Math.round((q.dx - 30) * k)), Math.max(0, Math.round((q.dy - 30) * k)), Math.round(60 * k), Math.round(60 * k)).data; let n = 0; for (let i = 0; i < d.length; i += 4) if (d[i + 2] > 200 && d[i] < 200 && d[i + 3] > 100) n++; return n; });
   check("the selected target is drawn in its own colour (blue ring) so the player can see it is armed", drawnPending > 10, `${drawnPending} blue px`);
   await realTap(fq.x, fq.y); await sleep(250); const cancelled = await p.evaluate(() => __game.approach.id);
@@ -1358,7 +1358,7 @@ if (shard) { const [i, n] = shard.split("/").map(Number); want = n === SHARD_PLA
 const srv = spawn("npx", ["vite", "preview", "--port", String(PORT), "--strictPort"], { stdio: "ignore" });
 try {
   for (let i = 0; i < 40; i++) { try { if ((await fetch(`http://localhost:${PORT}/`)).ok) break; } catch {} await sleep(250); }
-  const b = await chromium.launch({ args: ["--use-gl=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"] });
+  const b = await chromium.launch({ executablePath: process.env.CHROME_PATH || undefined, args: ["--use-gl=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"] });
   for (const [id, fn, start] of GROUPS) {
     if (!want.includes(id)) continue;
     const t0 = Date.now(), s = await open(b, start);

@@ -22,6 +22,7 @@ async function open(b, start) {
   const errs = []; p.on("pageerror", e => errs.push(e.message)); p.on("console", m => { if (m.type() === "error") errs.push(m.text()); });
   await p.goto(`http://localhost:${PORT}/`); await p.waitForFunction(() => window.__game, null, { timeout: 30000 }); await sleep(1500);
   const cdp = await ctx.newCDPSession(p);
+  if (process.env.THROTTLE) await cdp.send("Emulation.setCPUThrottlingRate", { rate: Number(process.env.THROTTLE) }); // 診断用: CI のように CPU が足りない状況を作る(全グループ共通)
   if (start) { await p.click("#ovGo"); await sleep(800); }
   return { ctx, p, cdp, errs };
 }

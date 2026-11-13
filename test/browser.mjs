@@ -799,8 +799,8 @@ async function g11({ p, cdp, errs }) {
 
   // (F) 押している間に目印が動いても、押した候補のまま: 飛びながら押して 0.2 秒後に離す
   await setup("rock", 14, 2.6, 7, 0); const fid = await p.evaluate(() => window.__target.id); await waitSpot(fid); await sleep(150);
-  const q0 = await spotXY(fid); const b2 = await stat(); await tp("touchStart", [{ x: Math.round(q0.x), y: Math.round(q0.y), id: 1 }]); await sleep(200); const moved = await spotXY(fid); await tp("touchEnd", []); await sleep(300); const a2 = await stat();
-  check("press on a flying marker, release 0.2 s later: the pressed perch is the one acted on (started for it, or refused with a reason) - even though the marker moved", (q0 && moved ? Math.hypot(moved.x - q0.x, moved.y - q0.y) >= 0 : true) && (a2.active ? a2.tgt === fid : (a2.refused > b2.refused || a2.gone > b2.gone)) && a2.ringTaps === b2.ringTaps + 1, JSON.stringify({ q0, moved, a2: { tgt: a2.tgt, active: a2.active, refusal: a2.refusal, gone: a2.gone } }));
+  const q0 = await spotXY(fid); const b2 = await stat(); await tp("touchStart", [{ x: Math.round(q0.x), y: Math.round(q0.y), id: 1 }]); await sleep(200); const moved = await spotXY(fid); await tp("touchEnd", []); await sleep(300); const a2 = await stat(); const dbgF = await p.evaluate(() => ({ log: __game.spotTapLog.slice(-4), confirm: __game.spotConfirm.active, rd: __game.input.ringDiag, fps: Math.round(__game.input.frameGap) }));
+  check("press on a flying marker, release 0.2 s later: the pressed perch is the one acted on (started for it, or refused with a reason) - even though the marker moved", (q0 && moved ? Math.hypot(moved.x - q0.x, moved.y - q0.y) >= 0 : true) && (a2.active ? a2.tgt === fid : (a2.refused > b2.refused || a2.gone > b2.gone)) && a2.ringTaps === b2.ringTaps + 1, JSON.stringify({ q0, moved, b2: [b2.ringTaps, b2.refused], a2: { tgt: a2.tgt, active: a2.active, refusal: a2.refusal, gone: a2.gone, ringTaps: a2.ringTaps, refused: a2.refused }, dbgF }));
   await p.evaluate(() => __game.autoLand.cancel("user"));
 
   // (G) 画面の大きさ・操作モード・操縦方式別の実タッチ: 目印の中心を押すと自動着地が始まり、羽ばたき・操舵にはならない

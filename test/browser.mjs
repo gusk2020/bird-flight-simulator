@@ -14,6 +14,17 @@ let fails = 0;
 const check = (name, ok, detail = "") => { console.log(`  ${ok ? "ok  " : "FAIL"} ${name}${detail ? "  (" + detail + ")" : ""}`); if (!ok) fails++; };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+
+/** 指の時間を決め打ちにするタッチ送信。CDP の touchStart → sleep → touchEnd は、実行環境が遅いと送信の往復ぶん実時間が延び(CI で 60 ms のつもりが 500〜800 ms)、
+ *  アプリの「タップの長さの上限」を超えて長押し扱いになる。それは端末の遅さではなくテストの時計のずれ。各イベントに「意図した時刻」(sleep の合計)を timestamp として付け、
+ *  指が触れていた時間を実行環境に依らず一定にする(アプリの判定の閾値は変えない)。タップの長さを測らない処理には使わない。 */
+function virtualTouch(cdp) {
+  let vc = 0, base = 0, vstart = 0, down = false, lastReal = 0;
+  const sl = async ms => { vc += ms; await sleep(ms); };
+  const tp = (type, pts) => { const r = Date.now(); if (!down || r - lastReal > 3000) { base = r / 1000; vstart = vc; } lastReal = r; down = type === "touchStart" || type === "touchMove" || (type === "touchEnd" && pts.length > 0); return cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts, timestamp: base + (vc - vstart) / 1000 }); };
+  return { tp, sl };
+}
+
 /** 新しいコンテキスト(保存データ空)でページを開く。start=true なら開始ボタンまで押す(物理が動いている状態) */
 async function open(b, start) {
   const ctx = await b.newContext({ viewport: { width: 892, height: 412 }, hasTouch: true, deviceScaleFactor: 1 });
@@ -741,7 +752,7 @@ async function g11({ p, cdp, errs }) {
   const realTap = (x, y) => cdp.send("Input.synthesizeTapGesture", { x: Math.round(x), y: Math.round(y), duration: 50, tapCount: 1, gestureSourceType: "touch" });
   /* 目印を押す。動いている目印(描画が遅いとき = CI や実機の低 FPS)では、取り違え防止の確認(H8-D)が出ることがある。それは仕様どおりなので、出たら確認ボタンを押して続ける */
   const tapConfirm = async (x, y) => { await realTap(x, y); await sleep(250); const asked = await p.evaluate(() => { if (!__game.spotConfirm.active) return false; document.getElementById("spotGo").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "touch" })); return true; }); if (asked) await sleep(250); return asked; };
-  const tp = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
+  const vt = virtualTouch(cdp), tp = vt.tp, sleep = vt.sl; // 指の時間を決め打ちにする(virtualTouch の説明を参照)
   const setCtl = async (m) => { for (let i = 0; i < 3; i++) { if ((await p.evaluate(() => document.body.dataset.ctl)) === m) return; await p.evaluate(() => document.getElementById("btnCtl").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }))); await sleep(250); } };
   const setSteer = async (m) => { for (let i = 0; i < 5 && (await p.evaluate(() => __game.input.steerMode)) !== m; i++) { await p.evaluate(() => document.getElementById("btnSteer").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }))); await sleep(150); } };
   const setLm = (on) => p.evaluate(on => document.querySelector(`[data-set="lm"][data-val="${on ? 1 : 0}"]`).click(), on);
@@ -801,7 +812,7 @@ async function g11({ p, cdp, errs }) {
 
   // (F) 押している間に目印が動いても、押した候補のまま: 飛びながら押して 0.2 秒後に離す
   await setup("rock", 14, 2.6, 7, 0); const fid = await p.evaluate(() => window.__target.id); await waitSpot(fid); await sleep(150);
-  const q0 = await spotXY(fid); const b2 = await stat(); await tp("touchStart", [{ x: Math.round(q0.x), y: Math.round(q0.y), id: 1 }]); await p.waitForFunction(([i, x, y]) => { const q = __game.spots.get(i); return !q || Math.hypot(q.dx - x, q.dy - y) >= 8; }, [fid, q0.x, q0.y], { timeout: 400, polling: "raf" }).catch(() => {}); await tp("touchEnd", []); const moved = await spotXY(fid) || q0; await sleep(300); const a2 = await stat(); const dbgF = await p.evaluate(() => ({ log: __game.spotTapLog.slice(-4), confirm: __game.spotConfirm.active, cfId: __game.spotConfirm.active ? __game.spotConfirm.id : -1, rd: __game.input.ringDiag, fps: Math.round(__game.input.frameGap) }));
+  const q0 = await spotXY(fid); const b2 = await stat(); await tp("touchStart", [{ x: Math.round(q0.x), y: Math.round(q0.y), id: 1 }]); await sleep(200); const moved = await spotXY(fid); await tp("touchEnd", []); await sleep(300); const a2 = await stat(); const dbgF = await p.evaluate(() => ({ log: __game.spotTapLog.slice(-4), confirm: __game.spotConfirm.active, cfId: __game.spotConfirm.active ? __game.spotConfirm.id : -1, rd: __game.input.ringDiag, fps: Math.round(__game.input.frameGap) }));
   check("press on a flying marker, release 0.2 s later: the pressed perch is the one acted on (started for it, or refused with a reason) - even though the marker moved", (q0 && moved ? Math.hypot(moved.x - q0.x, moved.y - q0.y) >= 0 : true) && (a2.active ? a2.tgt === fid : (a2.refused > b2.refused || a2.gone > b2.gone || dbgF.cfId === fid)) && a2.ringTaps === b2.ringTaps + 1, JSON.stringify({ q0, moved, b2: [b2.ringTaps, b2.refused], a2: { tgt: a2.tgt, active: a2.active, refusal: a2.refusal, gone: a2.gone, ringTaps: a2.ringTaps, refused: a2.refused }, dbgF }));
   await p.evaluate(() => __game.autoLand.cancel("user"));
 
@@ -963,7 +974,7 @@ async function g12({ p, cdp, errs }) {
 async function g13({ p, cdp, errs }) {
   console.log("\n# ring tap recognition, deterministic input sequences (H6)");
   if (process.env.G13_THROTTLE) await cdp.send("Emulation.setCPUThrottlingRate", { rate: Number(process.env.G13_THROTTLE) }); // 診断用: CI のように CPU が足りない状況を作る
-  const tp = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
+  const vt = virtualTouch(cdp), tp = vt.tp, sleep = vt.sl; // 指の時間を決め打ちにする(virtualTouch の説明を参照)
   await p.evaluate(() => { if (!document.getElementById("overlay").hidden) document.getElementById("ovGo").click(); }); await sleep(300);
   { const r = await p.evaluate(() => { const I = __game.input, keep = I.stalls.slice(); I.stalls = [{ s: 100, e: 1000 }]; const o = { tapStalled: I.tapMs(50, 1010), none: I.tapMs(2000, 2060), cap: (I.stalls = [{ s: 0, e: 9000 }], I.tapMs(0, 8000)) }; I.stalls = keep; return o; });
     check("a quick tap that the browser delivered across a frame stall is measured without the stall (960 ms on the clock, 60 ms of finger time)", r.tapStalled === 60 && r.none === 60, JSON.stringify(r));

@@ -752,7 +752,7 @@ async function g11({ p, cdp, errs }) {
   const stat = () => p.evaluate(() => ({ last: __game.autoLand.lastTargetId, starts: __game.autoLand.stats.starts, refused: __game.autoLand.stats.refused, refusal: __game.autoLand.lastRefusal, active: __game.autoLand.active, tgt: __game.autoLand.target ? __game.autoLand.target.id : -1, ringTaps: __game.input.stats.ringTaps, flapTaps: __game.input.stats.gestureTaps, crashes: __game.flight.crashes, gone: __game.spots.stats.gone }));
   const realTap = (x, y) => cdp.send("Input.synthesizeTapGesture", { x: Math.round(x), y: Math.round(y), duration: 50, tapCount: 1, gestureSourceType: "touch" });
   /* 目印を押す。動いている目印(描画が遅いとき = CI や実機の低 FPS)では、取り違え防止の確認(H8-D)が出ることがある。それは仕様どおりなので、出たら確認ボタンを押して続ける */
-  const dbgTap = () => p.evaluate(() => ({ log: __game.spotTapLog.slice(-6), cf: __game.spotConfirm.active ? __game.spotConfirm.id : -1, ap: __game.approach.id, apLast: __game.approach.lastReason, asked: __game.spotConfirm.stats.asked, confirmed: __game.spotConfirm.stats.confirmed, gap: Math.round(__game.input.frameGap) }));
+  const dbgTap = () => p.evaluate(() => ({ log: __game.spotTapLog.slice(-6), cf: __game.spotConfirm.active ? __game.spotConfirm.id : -1, ap: __game.approach.id, apLast: __game.approach.lastReason, asked: __game.spotConfirm.stats.asked, confirmed: __game.spotConfirm.stats.confirmed, gap: Math.round(__game.input.frameGap), rd: __game.input.ringDiag, taps: __game.input.stats.ringTaps }));
   const tapConfirm = async (x, y) => { /* タップの効果(確認の表示・接近先の変化・着地の開始/拒否・見失い)が現れるまで待つ。遅い環境では確認の表示が 250 ms より遅れることがある */
     const b = await p.evaluate(() => { const g = __game; return { ap: g.approach.id, st: g.autoLand.stats.starts, rf: g.autoLand.stats.refused, as: g.spotConfirm.stats.asked, gn: g.spots.stats.gone }; });
     await realTap(x, y);
@@ -852,7 +852,7 @@ async function g11({ p, cdp, errs }) {
   check("tapping a marker beyond the auto-landing reach selects it as the approach target (not refused with 'too far')", fd > 25 && afp.id === fid2 && afp.sel >= 1 && !afp.active && afp.refused === bf.refused, JSON.stringify({ fd: Math.round(fd), fid2, bfRefused: bf.refused, ...afp }));
   const drawnPending = await p.evaluate(() => { const cv = document.getElementById("spots"), c = cv.getContext("2d"), q = __game.spots.get(__game.approach.id), k = cv.width / innerWidth; if (!q) return -1; const d = c.getImageData(Math.max(0, Math.round((q.dx - 30) * k)), Math.max(0, Math.round((q.dy - 30) * k)), Math.round(60 * k), Math.round(60 * k)).data; let n = 0; for (let i = 0; i < d.length; i += 4) if (d[i + 2] > 200 && d[i] < 200 && d[i + 3] > 100) n++; return n; });
   check("the selected target is drawn in its own colour (blue ring) so the player can see it is armed", drawnPending > 10, `${drawnPending} blue px`);
-  await tapConfirm(fq.x, fq.y); const cancelled = await p.evaluate(() => __game.approach.id);
+  const fq2 = await spotXY(fid2) || fq; /* 接近が始まると鳥は目印の方へ向きを変えるので、目印は最初に読んだ位置から動いている。いま見えている位置を押す */ await tapConfirm(fq2.x, fq2.y); const cancelled = await p.evaluate(() => __game.approach.id);
   check("tapping the selected marker again cancels the approach", cancelled === -1, JSON.stringify({ cancelled, dbg: await dbgTap() }));
   await unhover();
   // 実際に近づく: 接近先を選んだら、手を触れずに(鳥は向きを自動で合わせて)届く範囲に入り、その足場へ自動着地が始まる

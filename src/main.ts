@@ -130,19 +130,23 @@ input.onSpotEnd = () => { spots.pressedId = -1; };
 const REFUSE_WHY: Record<string, string> = { "too far": "遠すぎます", "too high": "高すぎます", "dangerous path": "途中に建物があります", "unreachable (below)": "足場より低い位置です" }; // 開始を断った理由を短く知らせる
 /** 目印の足場への自動着地(18 m 以内)または接近先の選択(18 m 超)。1 タップで始める場合と、確認ボタンを押した場合の、共通の実行部分。開始の可否は AutoLand が毎回検査する。 */
 function activateSpot(id: number) {
-  const sp = spots.get(id), s = sp ? sp.s : surfaces.all[id]; if (!s) { autoLand.stats.refused++; autoLand.lastRefusal = "no candidate"; return; }
+  const sp = spots.get(id), s = sp ? sp.s : surfaces.all[id]; tapNote(id, "activateSpot d=" + (sp ? sp.d.toFixed(1) : "none") + " active=" + autoLand.active); if (!s) { autoLand.stats.refused++; autoLand.lastRefusal = "no candidate"; return; }
   // H8-C: 自動着地の届く範囲(18 m)より遠い目印は、断らずに「接近先」に選ぶ(向きを合わせて近づき、届く範囲に入ったら既存の自動着地を安全検査つきで始める)。もう一度押すと取り消す
   if (sp && sp.d > AUTOLAND.maxRange && !autoLand.active) { if (approach.id === id) { approach.clear("cancelled"); toast("接近をやめました"); } else { approach.select(id, flight.clock); toast("接近して着地します"); } return; }
   if (autoLand.start(flight, s)) { spots.targetId = s.id; toast("自動着地"); return; }
   toast("ここへは安全に降りられません" + (REFUSE_WHY[autoLand.lastRefusal] ? "(" + REFUSE_WHY[autoLand.lastRefusal] + ")" : ""));
 }
+/** 直近のタップの処理記録(診断用。どの分岐で何が起きたか): 目印のタップが「何もしなかった」ように見えるときの切り分けに使う */
+const spotTapLog: { t: number; id: number; step: string }[] = []; const tapNote = (id: number, step: string) => { spotTapLog.push({ t: +flight.clock.toFixed(2), id, step }); if (spotTapLog.length > 12) spotTapLog.shift(); };
 input.onSpotTap = (id) => {
-  if (autopilot.enabled) return;
+  tapNote(id, "tap");
+  if (autopilot.enabled) { tapNote(id, "autopilot-ignored"); return; }
   // 押してから離すまでに候補が視界から去った(通り過ぎた・画面の外)なら、古い候補へは降りない。拒否として数え、理由を示す(タップの取りこぼしとは別)
-  if (!spots.valid(id, flight.clock)) { spots.stats.gone++; autoLand.stats.refused++; autoLand.lastRefusal = "candidate gone"; spotConfirm.clear("gone:" + (spots.goneWhy(id) ?? "other")); toast("その場所は通り過ぎました"); return; }
+  if (!spots.valid(id, flight.clock)) { tapNote(id, "invalid:" + (spots.goneWhy(id) ?? "other")); spots.stats.gone++; autoLand.stats.refused++; autoLand.lastRefusal = "candidate gone"; spotConfirm.clear("gone:" + (spots.goneWhy(id) ?? "other")); toast("その場所は通り過ぎました"); return; }
   // H8-D: 他の候補と取り違え得る押し方(密集・交差・動く小さな目印)のときだけ、仮選択にして確認を求める。孤立した目印はこれまでどおり 1 タップで始める。仮選択した候補をもう一度押したときは確認とみなす
   const again = spotConfirm.id === id;
-  if (pressRisk.id === id && pressRisk.risky && !again) { spotConfirm.ask(id, performance.now()); return; }
+  if (pressRisk.id === id && pressRisk.risky && !again) { tapNote(id, "ask"); spotConfirm.ask(id, performance.now()); return; }
+  tapNote(id, again ? "again->activate" : "activate(risk=" + (pressRisk.id === id ? pressRisk.risky : "other-press:" + pressRisk.id) + ")");
   if (spotConfirm.active) spotConfirm.clear(again ? "confirmed" : "cancelled");
   activateSpot(id);
 };
@@ -451,4 +455,4 @@ function updateHud(dt: number, now: number) {
 renderer.setAnimationLoop(frame);
 // テスト・デバッグ用
 (window as unknown as Record<string, unknown>).__ui = setupUi; (window as unknown as Record<string, unknown>).__guide = guideView;
-(window as unknown as Record<string, unknown>).__game = { cruiseGov, spotLanding, spotConfirm, approach, spots, steerLayer, steerTestStart, game, flight, world, input, cam, camera, renderer, scene, frame, env: () => envAt(hour), stats, npc, lines, streaks, speedIntensity, setHour: (h: number) => { hour = h; targetHour = null; applyEnv(); }, settings, applySettings, assist, prefs, autopilot, setAuto, season, applySeasonLook, saveSeason, forage, perchAssist, autoLand, proxLand, puddles, puddleView, life, surfaces, cruiseGuard, npcView, npcUpdate: () => npcView.update(npc, camera.position, 220, world.lightsLevel()), hour: () => hour, director, drift, uiHider, wxLevel: () => wxLevel, wind, rain, quality };
+(window as unknown as Record<string, unknown>).__game = { spotTapLog, cruiseGov, spotLanding, spotConfirm, approach, spots, steerLayer, steerTestStart, game, flight, world, input, cam, camera, renderer, scene, frame, env: () => envAt(hour), stats, npc, lines, streaks, speedIntensity, setHour: (h: number) => { hour = h; targetHour = null; applyEnv(); }, settings, applySettings, assist, prefs, autopilot, setAuto, season, applySeasonLook, saveSeason, forage, perchAssist, autoLand, proxLand, puddles, puddleView, life, surfaces, cruiseGuard, npcView, npcUpdate: () => npcView.update(npc, camera.position, 220, world.lightsLevel()), hour: () => hour, director, drift, uiHider, wxLevel: () => wxLevel, wind, rain, quality };

@@ -752,6 +752,7 @@ async function g11({ p, cdp, errs }) {
   const stat = () => p.evaluate(() => ({ last: __game.autoLand.lastTargetId, starts: __game.autoLand.stats.starts, refused: __game.autoLand.stats.refused, refusal: __game.autoLand.lastRefusal, active: __game.autoLand.active, tgt: __game.autoLand.target ? __game.autoLand.target.id : -1, ringTaps: __game.input.stats.ringTaps, flapTaps: __game.input.stats.gestureTaps, crashes: __game.flight.crashes, gone: __game.spots.stats.gone }));
   const realTap = (x, y) => cdp.send("Input.synthesizeTapGesture", { x: Math.round(x), y: Math.round(y), duration: 50, tapCount: 1, gestureSourceType: "touch" });
   /* 目印を押す。動いている目印(描画が遅いとき = CI や実機の低 FPS)では、取り違え防止の確認(H8-D)が出ることがある。それは仕様どおりなので、出たら確認ボタンを押して続ける */
+  const dbgTap = () => p.evaluate(() => ({ log: __game.spotTapLog.slice(-6), cf: __game.spotConfirm.active ? __game.spotConfirm.id : -1, ap: __game.approach.id, apLast: __game.approach.lastReason, asked: __game.spotConfirm.stats.asked, confirmed: __game.spotConfirm.stats.confirmed, gap: Math.round(__game.input.frameGap) }));
   const tapConfirm = async (x, y) => { /* タップの効果(確認の表示・接近先の変化・着地の開始/拒否・見失い)が現れるまで待つ。遅い環境では確認の表示が 250 ms より遅れることがある */
     const b = await p.evaluate(() => { const g = __game; return { ap: g.approach.id, st: g.autoLand.stats.starts, rf: g.autoLand.stats.refused, as: g.spotConfirm.stats.asked, gn: g.spots.stats.gone }; });
     await realTap(x, y);
@@ -852,14 +853,14 @@ async function g11({ p, cdp, errs }) {
   const drawnPending = await p.evaluate(() => { const cv = document.getElementById("spots"), c = cv.getContext("2d"), q = __game.spots.get(__game.approach.id), k = cv.width / innerWidth; if (!q) return -1; const d = c.getImageData(Math.max(0, Math.round((q.dx - 30) * k)), Math.max(0, Math.round((q.dy - 30) * k)), Math.round(60 * k), Math.round(60 * k)).data; let n = 0; for (let i = 0; i < d.length; i += 4) if (d[i + 2] > 200 && d[i] < 200 && d[i + 3] > 100) n++; return n; });
   check("the selected target is drawn in its own colour (blue ring) so the player can see it is armed", drawnPending > 10, `${drawnPending} blue px`);
   await tapConfirm(fq.x, fq.y); const cancelled = await p.evaluate(() => __game.approach.id);
-  check("tapping the selected marker again cancels the approach", cancelled === -1);
+  check("tapping the selected marker again cancels the approach", cancelled === -1, JSON.stringify({ cancelled, dbg: await dbgTap() }));
   await unhover();
   // 実際に近づく: 接近先を選んだら、手を触れずに(鳥は向きを自動で合わせて)届く範囲に入り、その足場へ自動着地が始まる
   const fi2 = await farSetup(7); await waitSpot(fi2.id); await sleep(150); const q2 = await spotXY(fi2.id);
   await tapConfirm(q2.x, q2.y); const sel2 = await p.evaluate(() => __game.approach.id);
   const starts0 = await p.evaluate(() => __game.autoLand.stats.starts); const startedOk = await p.waitForFunction(([i, n]) => __game.autoLand.lastTargetId === i && __game.autoLand.stats.starts > n, [fi2.id, starts0], { timeout: 90000 }).then(() => true).catch(() => false);
   await sleep(300); const fin = await p.evaluate(() => ({ started: __game.approach.stats.started, id: __game.approach.id, crashes: __game.flight.crashes, brake: __game.approach.stats.steerFrames, last: __game.approach.lastReason }));
-  check("selected from ~50 m with a 7 m lateral offset: the bird turns toward it by itself, and the automatic landing starts for exactly that perch (via the existing safety check)", sel2 === fi2.id && startedOk && fin.started >= 1 && fin.id === -1 && fin.crashes === 0, JSON.stringify({ sel2, startedOk, ...fin }));
+  check("selected from ~50 m with a 7 m lateral offset: the bird turns toward it by itself, and the automatic landing starts for exactly that perch (via the existing safety check)", sel2 === fi2.id && startedOk && fin.started >= 1 && fin.id === -1 && fin.crashes === 0, JSON.stringify({ sel2, startedOk, ...fin, dbg: await dbgTap() }));
   await p.waitForFunction(() => !__game.autoLand.active, null, { timeout: 40000 }).catch(() => {});
   // 去ったら解除: 接近先を選んだあと、鳥を反対へ向けて目印が視界から去ると、選択は自動で解け、着地は始まらない
   const fi3 = await farSetup(0); await waitSpot(fi3.id); await sleep(150); const q3 = await spotXY(fi3.id); const st3a = await stat();

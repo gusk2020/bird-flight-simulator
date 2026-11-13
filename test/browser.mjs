@@ -711,6 +711,7 @@ async function g10({ p, errs }) {
     }
     return { frac: diff / tot, worst };
   }, [dist, high, tz]);
+  await p.evaluate(() => { __game.settings.time = 0; __game.setHour(12); }); // 時刻の進みを止めて正午に固定(昼夜の進みで色が変わると、緑の判定が閾値の近くで揺れる)
   await measure(40, 12); // 初回は読み込み・準備で不安定なので捨てる
   // 道路の中心線を遠くから見下ろす。道路の真ん中の細い帯に「緑(草)」が漏れて見える画素の割合を、距離と位置を変えながら数える(道路は灰色、草は緑。深度の衝突があると草が道路に点々と出る)
   const leak = (dists, high) => p.evaluate(([dists, high]) => {
@@ -751,7 +752,11 @@ async function g11({ p, cdp, errs }) {
   const stat = () => p.evaluate(() => ({ last: __game.autoLand.lastTargetId, starts: __game.autoLand.stats.starts, refused: __game.autoLand.stats.refused, refusal: __game.autoLand.lastRefusal, active: __game.autoLand.active, tgt: __game.autoLand.target ? __game.autoLand.target.id : -1, ringTaps: __game.input.stats.ringTaps, flapTaps: __game.input.stats.gestureTaps, crashes: __game.flight.crashes, gone: __game.spots.stats.gone }));
   const realTap = (x, y) => cdp.send("Input.synthesizeTapGesture", { x: Math.round(x), y: Math.round(y), duration: 50, tapCount: 1, gestureSourceType: "touch" });
   /* 目印を押す。動いている目印(描画が遅いとき = CI や実機の低 FPS)では、取り違え防止の確認(H8-D)が出ることがある。それは仕様どおりなので、出たら確認ボタンを押して続ける */
-  const tapConfirm = async (x, y) => { await realTap(x, y); await sleep(250); const asked = await p.evaluate(() => { if (!__game.spotConfirm.active) return false; document.getElementById("spotGo").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "touch" })); return true; }); if (asked) await sleep(250); return asked; };
+  const tapConfirm = async (x, y) => { /* タップの効果(確認の表示・接近先の変化・着地の開始/拒否・見失い)が現れるまで待つ。遅い環境では確認の表示が 250 ms より遅れることがある */
+    const b = await p.evaluate(() => { const g = __game; return { ap: g.approach.id, st: g.autoLand.stats.starts, rf: g.autoLand.stats.refused, as: g.spotConfirm.stats.asked, gn: g.spots.stats.gone }; });
+    await realTap(x, y);
+    await p.waitForFunction(b => { const g = __game; return g.approach.id !== b.ap || g.autoLand.stats.starts > b.st || g.autoLand.stats.refused > b.rf || g.spotConfirm.stats.asked > b.as || g.spots.stats.gone > b.gn; }, b, { timeout: 2500, polling: "raf" }).catch(() => {});
+    const asked = await p.evaluate(() => { if (!__game.spotConfirm.active) return false; document.getElementById("spotGo").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "touch" })); return true; }); await sleep(250); return asked; };
   const vt = virtualTouch(cdp), tp = vt.tp, sleep = vt.sl; // 指の時間を決め打ちにする(virtualTouch の説明を参照)
   const setCtl = async (m) => { for (let i = 0; i < 3; i++) { if ((await p.evaluate(() => document.body.dataset.ctl)) === m) return; await p.evaluate(() => document.getElementById("btnCtl").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }))); await sleep(250); } };
   const setSteer = async (m) => { for (let i = 0; i < 5 && (await p.evaluate(() => __game.input.steerMode)) !== m; i++) { await p.evaluate(() => document.getElementById("btnSteer").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }))); await sleep(150); } };

@@ -472,9 +472,9 @@ async function g7({ p, cdp, errs }) {
     const g = __game, f = g.flight, a = g.world.apts.find(q => q.floors >= 9) || g.world.apts[0];
     const c = g.world.colliders.find(k => Math.abs((k.minX + k.maxX) / 2 - a.x) < 0.01 && Math.abs((k.minZ + k.maxZ) / 2 - a.z) < 0.01);
     f.reset(); const dx = -Math.sin(sideAng), dz = -Math.cos(sideAng); f.pos.set((c.minX + c.maxX) / 2 + Math.sin(sideAng) * 9, alt, c.maxZ + Math.cos(sideAng) * 9); f.prevPos.copy(f.pos); f.yaw = Math.atan2(-dx, -dz); f.vel.set(dx * v, 0, dz * v);
-    g.cam.snap(); const c0 = f.crashes; let inside = false, maxStun = 0, t0 = performance.now();
+    g.cam.snap(); const c0 = f.crashes; let inside = false, maxStun = 0, t0 = performance.now(), s0 = g.game.gameTime; /* 観測の窓はゲーム内の 3.5 秒(描画が遅いとゲーム内の時間は実時間より遅く進む。実時間 3.5 秒だと、遅い環境では衝突からの復帰を見届ける前に打ち切られる) */
     return await new Promise(res => { const tick = () => { for (const k of g.world.colliders) if (f.pos.x > k.minX && f.pos.x < k.maxX && f.pos.z > k.minZ && f.pos.z < k.maxZ && f.pos.y - 0.32 < k.top - 0.3) inside = true; maxStun = Math.max(maxStun, f.stun);
-      if (performance.now() - t0 > 3500) res({ crashes: f.crashes - c0, esc: f.escapes, inside, mode: f.mode, maxStun, away: Math.hypot(f.pos.x - Math.max(c.minX, Math.min(c.maxX, f.pos.x)), f.pos.z - Math.max(c.minZ, Math.min(c.maxZ, f.pos.z))), finite: Number.isFinite(f.pos.x + f.pos.y + f.pos.z) }); else requestAnimationFrame(tick); }; tick(); });
+      if (g.game.gameTime - s0 > 3.5 || performance.now() - t0 > 90000) res({ crashes: f.crashes - c0, esc: f.escapes, inside, mode: f.mode, maxStun, away: Math.hypot(f.pos.x - Math.max(c.minX, Math.min(c.maxX, f.pos.x)), f.pos.z - Math.max(c.minZ, Math.min(c.maxZ, f.pos.z))), finite: Number.isFinite(f.pos.x + f.pos.y + f.pos.z) }); else requestAnimationFrame(tick); }; tick(); });
   }, [alt, v, sideAng]);
   // H9: 低速巡航では、14 m/s の接近を巡航ガード(自動制動)が壁の手前で止めて衝突にならない。衝突後の復帰を確かめるには、ブースト後の速さ(16 m/s 以上は従来と同じ物理)で突っ込む
   const w1 = await wallRun(20, 22, 0);
@@ -501,6 +501,7 @@ async function g7({ p, cdp, errs }) {
   const waitRing = () => p.waitForFunction(() => !!__game.spots.get(window.__target.id), null, { timeout: 8000 }).catch(() => {});
   const ringXY = () => p.evaluate(() => { const sp = __game.spots.get(window.__target.id); return { vis: !!sp, x: sp ? sp.dx : 0, y: sp ? sp.dy : 0, w: innerWidth }; });
   const AL = () => p.evaluate(() => ({ refusal: __game.autoLand.lastRefusal, refused: __game.autoLand.stats.refused, active: __game.autoLand.active, starts: __game.autoLand.stats.starts, ok: __game.autoLand.stats.success, ended: { ...__game.autoLand.stats.ended }, mode: __game.flight.mode, crashes: __game.flight.crashes, ringTaps: __game.input.stats.ringTaps, flapTaps: __game.input.stats.gestureTaps, strokes: __game.flight.strokes, label: document.getElementById("autoland").textContent }));
+  const simWait = async (sec) => { const t0 = await p.evaluate(() => __game.game.gameTime); await p.waitForFunction(([t0, sec]) => __game.game.gameTime - t0 >= sec, [t0, sec], { timeout: 90000, polling: "raf" }).catch(() => {}); }; // ゲーム内の秒数で待つ(描画が遅いとゲーム内の時間は実時間より遅く進む)
   const finishLanding = async () => { await p.waitForFunction(() => !__game.autoLand.active, null, { timeout: 30000 }).catch(() => {}); await sleep(1500); };
   const onTarget = () => p.evaluate(() => { const f = __game.flight, t = window.__target; return { mode: f.mode, onTop: Math.abs(f.pos.y - 0.32 - t.top) < 0.06, inside: f.pos.x >= t.minX - 0.3 && f.pos.x <= t.maxX + 0.3 && f.pos.z >= t.minZ - 0.3 && f.pos.z <= t.maxZ + 0.3, x: f.pos.x, z: f.pos.z, walkV: f.walkV }; });
 
@@ -520,7 +521,7 @@ async function g7({ p, cdp, errs }) {
   // 歩く: 実際のタッチ入力(CDP)で、左側のスティック領域を上へスライド
   const walkable = roofInfo.w * roofInfo.d > 12 || Math.max(roofInfo.w, roofInfo.d) >= 3;
   await p.evaluate(() => { __game.flight.walkV = 0; __game.input.releaseAll(); });
-  const ww0 = await onTarget(); await tp("touchStart", [{ x: 120, y: 330, id: 80 }]); await tp("touchMove", [{ x: 120, y: 268, id: 80 }]); await sleep(1600);
+  const ww0 = await onTarget(); await tp("touchStart", [{ x: 120, y: 330, id: 80 }]); await tp("touchMove", [{ x: 120, y: 268, id: 80 }]); await simWait(1.6);
   const ww1 = await onTarget(); const stickY = await p.evaluate(() => __game.input.state.y); await tp("touchEnd", []); await sleep(300);
   const walked = Math.hypot(ww1.x - ww0.x, ww1.z - ww0.z);
   check("WALKABLE perch (roof): stick forward moves the bird at least 1.5 m, still landed on the roof top", walkable && stickY > 0.4 && walked >= 1.5 && ww1.mode === "landed" && ww1.onTop, `walked ${walked.toFixed(2)} m, stickY ${stickY.toFixed(2)}, ${JSON.stringify(ww1)}`);
@@ -538,8 +539,8 @@ async function g7({ p, cdp, errs }) {
   await p.evaluate(() => { const sp = __game.spots.get(window.__target.id), x = sp ? sp.dx : 0, y = sp ? sp.dy : 0, el = document.elementFromPoint(x, y) || document.body, o = { bubbles: true, pointerId: 72, clientX: x, clientY: y, pointerType: "touch" }; el.dispatchEvent(new PointerEvent("pointerdown", o)); el.dispatchEvent(new PointerEvent("pointerup", o)); __game.game.resume(); }); await sleep(150);
   await finishLanding(); const alN = await AL(); const otN = await onTarget(); const nwalkable = narrowInfo.w * narrowInfo.d > 12 || Math.max(narrowInfo.w, narrowInfo.d) >= 3;
   check("NARROW perch: it lands and stands on top (this is 'stands', not 'walks'), no crash", !nwalkable && alN.ok >= 1 && otN.mode !== "air" && otN.onTop && otN.inside && alN.crashes === cN, JSON.stringify({ narrow: narrowInfo, ...otN, ring: nrr, al: { ok: alN.ok, crashes: alN.crashes, starts: alN.starts, refused: alN.refused, ended: alN.ended, last: alN.lastTgt }, al0: cN, st: await p.evaluate(() => ({ speedScale: __game.flight.speedScale, wind: __game.settings.wind, cruise: __game.CRUISE.enabled, tgt: __game.autoLand.lastTargetId, want: window.__target.id, stun: __game.flight.stun })) }));
-  const nw0 = await onTarget(); await tp("touchStart", [{ x: 120, y: 330, id: 81 }]); await tp("touchMove", [{ x: 120, y: 268, id: 81 }]); await sleep(900); const nw1 = await onTarget(); await tp("touchEnd", []);
-  await sleep(1200); const nw2 = await onTarget(); const alN2 = await AL();
+  const nw0 = await onTarget(); await tp("touchStart", [{ x: 120, y: 330, id: 81 }]); await tp("touchMove", [{ x: 120, y: 268, id: 81 }]); await simWait(0.9); const nw1 = await onTarget(); await tp("touchEnd", []);
+  await simWait(1.2); const nw2 = await onTarget(); const alN2 = await AL();
   check("NARROW perch: pushing the stick walks off the end within ~2 m and lands safely (no crash, not stuck in the air)", Math.hypot(nw1.x - nw0.x, nw1.z - nw0.z) <= 2.5 && nw2.mode !== "air" && alN2.crashes === cN, JSON.stringify({ moved: Math.hypot(nw1.x - nw0.x, nw1.z - nw0.z).toFixed(2), ...nw2 }));
 
   // (2b) 補完: 実タッチ(CDP の合成タップ)・固定なし・通常の接近での狭い足場。上の NARROW は物理を一時停止して開始状態を固定した「統制実験」(着地の幾何だけを環境の速さから切り離す)で、

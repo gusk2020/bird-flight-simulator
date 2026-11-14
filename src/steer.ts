@@ -147,8 +147,8 @@ export class SteerLayer {
       if (this.yawT !== null) { const ex = wrap(this.yawT - f.yaw); if (Math.abs(ex) < STEER.reachYaw && !live) this.yawT = null; else x = -clamp(ex * STEER.turnGain, -1, 1); } // 右へ曲がる = x が正 = yaw が減る
       if (this.pitchT !== null) {
         // 上下は「目標の角度に比例した操舵」(開ループ)。飛行経路角を追いかけるフィードバックにすると、失速ぎみのときに機首を引き上げ続けて失速から出られなくなる(実測)
-        if (this.pitchT > 0.1 && f.speed < STEER.climbFlapV && f.strokeT < 0 && t - this.lastFlap > STEER.climbFlapGap) { raw.flapTap = true; this.lastFlap = t; this.stats.climbFlaps++; } // 上昇には羽ばたきが要る: 速さが足りなければ自動で羽ばたく
-        const pT = this.pitchT > 0 ? Math.min(this.pitchT, STEER.climbMaxRad * clamp((f.speed - STEER.climbV0) / STEER.climbV1, 0, 1)) : this.pitchT; // 遅いときは上昇を弱める
+        if (this.pitchT > 0.1 && f.speedN < STEER.climbFlapV && f.strokeT < 0 && t - this.lastFlap > STEER.climbFlapGap) { raw.flapTap = true; this.lastFlap = t; this.stats.climbFlaps++; } // 上昇には羽ばたきが要る: 速さが足りなければ自動で羽ばたく
+        const pT = this.pitchT > 0 ? Math.min(this.pitchT, STEER.climbMaxRad * clamp((f.speedN - STEER.climbV0) / STEER.climbV1, 0, 1)) : this.pitchT; // 遅いときは上昇を弱める
         y = clamp(pT / STEER.pitchFull, -1, 1);
         if (!live && t - this.tCourse > STEER.pitchHoldS) this.pitchT = null; // 離したあと、上下の指示は少しのあいだだけ保つ(ずっと上がり続けない)
       }

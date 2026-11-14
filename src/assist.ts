@@ -34,7 +34,7 @@ export class FlapAssist {
     const dive = inp.y < ASSIST.diveStick; // 本人の入力で判断(補助が足した分は含めない)
     // 失速中は翼を水平に戻して回復させる。遅いときは急旋回を少し緩める(旋回で速度を失って失速→落下するのを防ぐ)
     if (f.stall) { inp.x *= 0.2; inp.y = Math.min(inp.y, 0); }
-    else if (f.speed < ASSIST.turnSlow) inp.x *= Math.max(0.3, (f.speed - 4) / (ASSIST.turnSlow - 4));
+    else if (f.speedN < ASSIST.turnSlow) inp.x *= Math.max(0.3, (f.speedN - 4) / (ASSIST.turnSlow - 4));
     // 失速の手前(迎え角が大きい)で、上昇を強く指示していなければ、機首を少し下げて失速を防ぐ
     if (!f.stall && f.alpha > ASSIST.alphaWarn && inp.y < 0.5 && f.agl > 2) { inp.y -= Math.min(0.5, (f.alpha - ASSIST.alphaWarn) * 6); this.turnAssists++; }
     if (dive && f.agl > 3) return inp; // 急降下の楽しさは残す
@@ -43,10 +43,10 @@ export class FlapAssist {
     const T = ASSIST.lookSec, hx = f.vel.x, hz = f.vel.z, feet = f.pos.y + f.vel.y * T;
     let ground = f.pos.y - f.agl;
     if (f.world.heightAt) for (const k of [0.5, 1]) ground = Math.max(ground, f.world.heightAt(f.pos.x + hx * T * k, f.pos.z + hz * T * k));
-    const margin = feet - ground, urgent = margin < ASSIST.clearance || (f.speed < ASSIST.minSpeed && Math.abs(inp.x) > 0.2); // 旋回中の失速は早めに
+    const margin = feet - ground, urgent = margin < ASSIST.clearance || (f.speedN < ASSIST.minSpeed && Math.abs(inp.x) > 0.2); // 旋回中の失速は早めに
     if (f.clock - this.last < (urgent ? ASSIST.urgentCooldown : ASSIST.cooldown)) return inp;
     const off = f.clock - this.touchT, hold = off < ASSIST.handsOffHold;
-    const low = f.speed < ASSIST.minSpeed || urgent || (f.agl < ASSIST.lowAgl && f.vel.y < ASSIST.sinkRate)
+    const low = f.speedN < ASSIST.minSpeed || urgent || (f.agl < ASSIST.lowAgl && f.vel.y < ASSIST.sinkRate)
       || (!dive && off > 0.3 && f.vel.y < (hold ? -0.8 : ASSIST.handsOffSink) && f.agl < 40)
       || (!dive && f.vel.y < ASSIST.turnSink && f.agl < 40); // 旋回などで沈み込みが大きいとき
     if (low) { inp.flapTap = true; this.last = f.clock; this.autoFlaps++; }

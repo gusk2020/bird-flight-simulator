@@ -174,7 +174,7 @@ async function g3({ p, cdp, errs }) {
   check("holding 歩く walks forward, stays on the ground", dist(wA, wB) > 1 && wB.mode === "landed", `pos=${wA.x.toFixed(1)},${wA.z.toFixed(1)}>${wB.x.toFixed(1)},${wB.z.toFixed(1)} moved=${dist(wA, wB).toFixed(2)} hud=${wk.hud}`);
   await sleep(600);
   await p.evaluate(() => { window.__peak = 0; const t = () => { const f = __game.flight; window.__peak = Math.max(window.__peak, f.pos.y - 0.32 - __game.world.heightAt(f.pos.x, f.pos.z)); requestAnimationFrame(t); }; t(); });
-  await p.evaluate(() => { const el = document.getElementById("flap"); el.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 77 })); el.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 77 })); }); await sleep(2500); // 一瞬のタップ(ソフトウェア描画は低FPSなので同一タスクで押して離す)
+  await p.evaluate(() => { const el = document.getElementById("flap"); el.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 77 })); el.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 77 })); }); /* 一瞬のタップ(ソフトウェア描画は低FPSなので同一タスクで押して離す) */ await p.waitForFunction(() => window.__peak > 0.15 && __game.flight.mode !== "air", null, { timeout: 30000, polling: "raf" }).catch(() => {}); await sleep(300); // 跳ねて降りるまでは、実時間ではなく状態で待つ(描画が遅いとゲーム内の時間は実時間より遅く進む)
   const hp = await p.evaluate(() => ({ peak: window.__peak, mode: __game.flight.mode }));
   check("short tap hops (does not take off)", hp.peak > 0.15 && hp.peak < 1.2 && hp.mode !== "air", JSON.stringify(hp));
   await tp("touchStart", [{ x: 800, y: 350, id: 2 }]); await p.waitForFunction(() => __game.flight.mode === "air" && __game.flight.pos.y > 2, null, { timeout: 20000 }).catch(() => {}); await tp("touchEnd", []);

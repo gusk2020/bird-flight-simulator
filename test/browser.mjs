@@ -528,10 +528,10 @@ async function g7({ p, cdp, errs }) {
   check("lifting the thumb stops the walk (it stays on the roof)", Math.hypot(ww3.x - ww2.x, ww3.z - ww2.z) < 0.1 && ww3.mode === "landed" && ww3.onTop);
 
   // (2) 狭い足場(岩など): 「立てる」と「歩ける」を分ける。歩ける広さがなければ、足場の上に立って動かないことを確かめる
+  await p.evaluate(() => { __game.game.pause(); }); /* 先に一時停止してから置く(置いたあとに止めると、往復のあいだにもゲームが進み、負荷が高いほど足場に近づいてしまう) */
   const narrowInfo = await setup("rock", 11, 2.6, 8);
   check("a narrow perch (rock) with open surroundings exists", !!narrowInfo, JSON.stringify(narrowInfo));
   /* 開始状態を実行環境の速さに依らず同一にする: 物理を一時停止してリングが出るのを待ち、タップと同時に再開する。固定しないと、リングが出てからタップが届くまでのゲーム内時間(= タップ時の足場までの距離)が環境の速さで変わり、狭い足場への着地の成否がその距離で決まってしまう(CI では毎回ほぼ同じ座標で外れた)。タイマーで位置を戻す方式は、負荷が高いとタイマー自体が走らず固定にならないので、一時停止を使う */
-  await p.evaluate(() => { __game.game.pause(); });
   await waitRing(); const nrr = await ringXY(); const cN = (await AL()).crashes;
   await p.evaluate(() => { const sp = __game.spots.get(window.__target.id), x = sp ? sp.dx : 0, y = sp ? sp.dy : 0, el = document.elementFromPoint(x, y) || document.body, o = { bubbles: true, pointerId: 72, clientX: x, clientY: y, pointerType: "touch" }; el.dispatchEvent(new PointerEvent("pointerdown", o)); el.dispatchEvent(new PointerEvent("pointerup", o)); __game.game.resume(); }); await sleep(150);
   await finishLanding(); const alN = await AL(); const otN = await onTarget(); const nwalkable = narrowInfo.w * narrowInfo.d > 12 || Math.max(narrowInfo.w, narrowInfo.d) >= 3;
@@ -539,6 +539,23 @@ async function g7({ p, cdp, errs }) {
   const nw0 = await onTarget(); await tp("touchStart", [{ x: 120, y: 330, id: 81 }]); await tp("touchMove", [{ x: 120, y: 268, id: 81 }]); await sleep(900); const nw1 = await onTarget(); await tp("touchEnd", []);
   await sleep(1200); const nw2 = await onTarget(); const alN2 = await AL();
   check("NARROW perch: pushing the stick walks off the end within ~2 m and lands safely (no crash, not stuck in the air)", Math.hypot(nw1.x - nw0.x, nw1.z - nw0.z) <= 2.5 && nw2.mode !== "air" && alN2.crashes === cN, JSON.stringify({ moved: Math.hypot(nw1.x - nw0.x, nw1.z - nw0.z).toFixed(2), ...nw2 }));
+
+  // (2b) 補完: 実タッチ(CDP の合成タップ)・固定なし・通常の接近での狭い足場。上の NARROW は物理を一時停止して開始状態を固定した「統制実験」(着地の幾何だけを環境の速さから切り離す)で、
+  //      描画フレーム・実タッチ・接近の時間差は迂回している。それらを含む一連の動作は、ここで別に確かめる(統制と実操作の保証を区別する)。成功率は統計として数え、認識の取りこぼしと衝突だけは 0 を要求する
+  { const rowsN = [];
+    for (const dist of [10, 12, 14, 11]) {
+      const inf = await setup("rock", dist, 2.6, 8); if (!inf) { rowsN.push({ dist, result: "no-surface" }); continue; }
+      const shown = await p.waitForFunction(() => !!__game.spots.get(window.__target.id), null, { timeout: 7000 }).then(() => true).catch(() => false); if (!shown) { rowsN.push({ dist, result: "no-ring" }); continue; }
+      const q = await ringXY(); const b = await AL(); await realTap(Math.round(q.x), Math.round(q.y));
+      await p.waitForFunction(x => { const g = __game; return g.input.stats.ringTaps > x.t || g.autoLand.stats.starts > x.s || g.autoLand.stats.refused > x.r || !g.spots.get(window.__target.id); }, { t: b.ringTaps, s: b.starts, r: b.refused }, { timeout: 2500, polling: "raf" }).catch(() => {});
+      await sleep(150); const a = await AL(); const now = await ringXY();
+      const row = { dist, tapped: a.ringTaps === b.ringTaps + 1, started: a.starts > b.starts, refused: a.refused > b.refused, crash: false, on: false };
+      if (!row.tapped && !row.started) { row.result = !now.vis ? "ring-gone-before-tap" : Math.hypot(now.x - q.x, now.y - q.y) > 34 ? "ring-moved-before-tap" : "tap-not-recognised"; rowsN.push(row); await p.evaluate(() => __game.autoLand.cancel("user")); continue; }
+      if (row.started) { await finishLanding(); const e = await AL(), ot2 = await onTarget(); row.crash = e.crashes > b.crashes; row.on = ot2.mode !== "air" && ot2.onTop && ot2.inside; row.result = row.on ? "landed-on-top" : "landed-elsewhere"; } else row.result = "refused";
+      rowsN.push(row); await p.evaluate(() => __game.autoLand.cancel("user")); }
+    const startedN = rowsN.filter(r => r.started), onN = startedN.filter(r => r.on).length, missN = rowsN.filter(r => r.result === "tap-not-recognised").length, crashN = startedN.filter(r => r.crash).length;
+    console.log("   real-touch narrow-perch trials:", JSON.stringify(rowsN)); console.log(`   SUMMARY narrow real-touch: trials ${rowsN.length} | started ${startedN.length} | on top ${onN} | landed elsewhere ${startedN.length - onN} | crashes ${crashN} | tap not recognised with the finger on the ring ${missN}`);
+    check("NARROW perch, real touch, no pinning: a press on the ring is always recognised, no landing crashes, and at least half of the started landings end on top (counted, not forced)", missN === 0 && crashN === 0 && (startedN.length === 0 || onN / startedN.length >= 0.5), JSON.stringify({ started: startedN.length, on: onN, miss: missN, crash: crashN })); }
 
   // (3) 取消: 自動着地中に大きなスティック操作で手動へ戻る(実際のタッチ入力)
   await setup("rock", 12, 2.6, 8); await waitRing(); await tapAtXY(0, 0, 73); await sleep(100);

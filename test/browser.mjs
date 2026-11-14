@@ -532,7 +532,9 @@ async function g7({ p, cdp, errs }) {
   const narrowInfo = await setup("rock", 11, 2.6, 8);
   check("a narrow perch (rock) with open surroundings exists", !!narrowInfo, JSON.stringify(narrowInfo));
   /* 開始状態を実行環境の速さに依らず同一にする: 物理を一時停止してリングが出るのを待ち、タップと同時に再開する。固定しないと、リングが出てからタップが届くまでのゲーム内時間(= タップ時の足場までの距離)が環境の速さで変わり、狭い足場への着地の成否がその距離で決まってしまう(CI では毎回ほぼ同じ座標で外れた)。タイマーで位置を戻す方式は、負荷が高いとタイマー自体が走らず固定にならないので、一時停止を使う */
-  await waitRing(); const nrr = await ringXY(); const cN = (await AL()).crashes;
+  /* 一時停止中は、見た目が変わらない限り描画・目印の更新を省く(main.ts の dirty)。目印を出すために、画面サイズ変更の通知で描画を 1 回ずつ促しながら待つ */
+  await p.evaluate(() => new Promise(res => { const t0 = performance.now(), tick = () => { if (__game.spots.get(window.__target.id) || performance.now() - t0 > 8000) return res(); window.dispatchEvent(new Event("resize")); requestAnimationFrame(tick); }; tick(); }));
+  const nrr = await ringXY(); const cN = (await AL()).crashes;
   await p.evaluate(() => { const sp = __game.spots.get(window.__target.id), x = sp ? sp.dx : 0, y = sp ? sp.dy : 0, el = document.elementFromPoint(x, y) || document.body, o = { bubbles: true, pointerId: 72, clientX: x, clientY: y, pointerType: "touch" }; el.dispatchEvent(new PointerEvent("pointerdown", o)); el.dispatchEvent(new PointerEvent("pointerup", o)); __game.game.resume(); }); await sleep(150);
   await finishLanding(); const alN = await AL(); const otN = await onTarget(); const nwalkable = narrowInfo.w * narrowInfo.d > 12 || Math.max(narrowInfo.w, narrowInfo.d) >= 3;
   check("NARROW perch: it lands and stands on top (this is 'stands', not 'walks'), no crash", !nwalkable && alN.ok >= 1 && otN.mode !== "air" && otN.onTop && otN.inside && alN.crashes === cN, JSON.stringify({ narrow: narrowInfo, ...otN, ring: nrr, al: { ok: alN.ok, crashes: alN.crashes, starts: alN.starts, refused: alN.refused, ended: alN.ended, last: alN.lastTgt }, al0: cN, st: await p.evaluate(() => ({ speedScale: __game.flight.speedScale, wind: __game.settings.wind, cruise: __game.CRUISE.enabled, tgt: __game.autoLand.lastTargetId, want: window.__target.id, stun: __game.flight.stun })) }));

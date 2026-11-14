@@ -30,7 +30,7 @@ import { AutoLand, AUTOLAND } from "./autoland";
 import { Approach } from "./approach";
 import { SpotConfirm } from "./spotconfirm";
 import { CruiseGuard } from "./avoid";
-import { CruiseGovernor } from "./cruise";
+import { CruiseGovernor, CRUISE } from "./cruise";
 import { SetupUi } from "./setupui";
 import { guideValues } from "./guide";
 import { GuideView } from "./guideui";
@@ -455,4 +455,4 @@ function updateHud(dt: number, now: number) {
 renderer.setAnimationLoop(frame);
 // テスト・デバッグ用
 (window as unknown as Record<string, unknown>).__ui = setupUi; (window as unknown as Record<string, unknown>).__guide = guideView;
-(window as unknown as Record<string, unknown>).__game = { spotTapLog, cruiseGov, spotLanding, spotConfirm, approach, spots, steerLayer, steerTestStart, game, flight, world, input, cam, camera, renderer, scene, frame, env: () => envAt(hour), stats, npc, lines, streaks, speedIntensity, setHour: (h: number) => { hour = h; targetHour = null; applyEnv(); }, settings, applySettings, assist, prefs, autopilot, setAuto, season, applySeasonLook, saveSeason, forage, perchAssist, autoLand, proxLand, puddles, puddleView, life, surfaces, cruiseGuard, npcView, npcUpdate: () => npcView.update(npc, camera.position, 220, world.lightsLevel()), hour: () => hour, director, drift, uiHider, wxLevel: () => wxLevel, wind, rain, quality };
+(window as unknown as Record<string, unknown>).__game = { CRUISE, spotTapLog, cruiseGov, spotLanding, spotConfirm, approach, spots, steerLayer, steerTestStart, game, flight, world, input, cam, camera, renderer, scene, frame, env: () => envAt(hour), stats, npc, lines, streaks, speedIntensity, setHour: (h: number) => { hour = h; targetHour = null; applyEnv(); }, settings, applySettings, assist, prefs, autopilot, setAuto, season, applySeasonLook, saveSeason, forage, perchAssist, autoLand, proxLand, puddles, puddleView, life, surfaces, cruiseGuard, npcView, npcUpdate: () => npcView.update(npc, camera.position, 220, world.lightsLevel()), hour: () => hour, director, drift, uiHider, wxLevel: () => wxLevel, wind, rain, quality };

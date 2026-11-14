@@ -165,7 +165,7 @@ async function g3({ p, cdp, errs }) {
   let s;
 
   console.log("\n# walking / hop / dawn lights (C2)");
-  await p.evaluate(() => { const g = __game, f = g.flight; f.pos.set(28, 6, 60); f.prevPos.copy(f.pos); f.vel.set(0, 0, -9); });
+  await p.evaluate(() => { const g = __game, f = g.flight; f.pos.set(28, g.world.heightAt(28, 60) + 1.2, 60); f.prevPos.copy(f.pos); f.vel.set(0, 0, -3); }); /* 歩く・跳ぶの検査の前提は「開けた地面に降りている」こと。高さ 6 m・9 m/s から降りると、低速巡航では着地までに 200 m 以上滑空し、歩けない場所(周囲が壁・縁)に降りることがある(CI でも同じ座標 41.6,-161.4 で失敗した)。着地点が飛行の細部に左右されないよう、開けた地面のすぐ上から降りる */
   await p.waitForFunction(() => __game.flight.mode !== "air", null, { timeout: 120000 }).catch(() => {}); // H9: 低速巡航で、同じ高さからの着地までの飛行時間が約3倍(待つ上限だけ延ばす。条件は同じ)
   await p.waitForFunction(() => __game.flight.mode === "landed", null, { timeout: 40000 }).catch(() => {}); await sleep(300);
   check("landed: brake button becomes 歩く", (await p.textContent("#brake")) === "歩く" && (await S()).mode === "landed");
@@ -530,7 +530,10 @@ async function g7({ p, cdp, errs }) {
   // (2) 狭い足場(岩など): 「立てる」と「歩ける」を分ける。歩ける広さがなければ、足場の上に立って動かないことを確かめる
   const narrowInfo = await setup("rock", 11, 2.6, 8);
   check("a narrow perch (rock) with open surroundings exists", !!narrowInfo, JSON.stringify(narrowInfo));
-  await waitRing(); const nrr = await ringXY(); const cN = (await AL()).crashes; await tapAtXY(0, 0, 72); await sleep(150);
+  /* 開始状態を実行環境の速さに依らず同一にする: 鳥を出発点に固定してリングが出るのを待ち、タップと同時に速度を戻して離す。固定しないと、リングが出てからタップが届くまでのゲーム内時間(= タップ時の足場までの距離)が環境の速さで変わり、狭い足場への着地の成否がその距離で決まってしまう(CI では毎回ほぼ同じ座標で外れた) */
+  await p.evaluate(() => { const f = __game.flight, x = f.pos.x, y = f.pos.y, z = f.pos.z; window.__nv = [f.vel.x, f.vel.y, f.vel.z]; clearInterval(window.__hv); window.__hv = setInterval(() => { f.pos.set(x, y, z); f.vel.set(0, 0, 0); }, 8); });
+  await waitRing(); const nrr = await ringXY(); const cN = (await AL()).crashes;
+  await p.evaluate(() => { const f = __game.flight; clearInterval(window.__hv); f.vel.set(window.__nv[0], window.__nv[1], window.__nv[2]); const sp = __game.spots.get(window.__target.id), x = sp ? sp.dx : 0, y = sp ? sp.dy : 0, el = document.elementFromPoint(x, y) || document.body, o = { bubbles: true, pointerId: 72, clientX: x, clientY: y, pointerType: "touch" }; el.dispatchEvent(new PointerEvent("pointerdown", o)); el.dispatchEvent(new PointerEvent("pointerup", o)); }); await sleep(150);
   await finishLanding(); const alN = await AL(); const otN = await onTarget(); const nwalkable = narrowInfo.w * narrowInfo.d > 12 || Math.max(narrowInfo.w, narrowInfo.d) >= 3;
   check("NARROW perch: it lands and stands on top (this is 'stands', not 'walks'), no crash", !nwalkable && alN.ok >= 1 && otN.mode !== "air" && otN.onTop && otN.inside && alN.crashes === cN, JSON.stringify({ narrow: narrowInfo, ...otN, ring: nrr, al: { ok: alN.ok, crashes: alN.crashes, starts: alN.starts, refused: alN.refused, last: alN.lastTgt }, al0: cN }));
   const nw0 = await onTarget(); await tp("touchStart", [{ x: 120, y: 330, id: 81 }]); await tp("touchMove", [{ x: 120, y: 268, id: 81 }]); await sleep(900); const nw1 = await onTarget(); await tp("touchEnd", []);

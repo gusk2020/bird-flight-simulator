@@ -912,6 +912,7 @@ async function g11({ p, cdp, errs }) {
 
 // ---- g12: 実タッチでの自動着地の成功率(H2)。試行→候補が出た→タップ→開始/拒否→成功/失敗/取消/衝突→1.5秒保持→歩行 を分けて数える。再試行はしない
 async function g12({ p, cdp, errs }) {
+  const simWait = async (sec) => { const t0 = await p.evaluate(() => __game.game.gameTime); await p.waitForFunction(([t0, sec]) => __game.game.gameTime - t0 >= sec, [t0, sec], { timeout: 90000, polling: "raf" }).catch(() => {}); };
   console.log("\n# automatic landing by real taps: counts (H2)");
   const realTap = (x, y) => cdp.send("Input.synthesizeTapGesture", { x, y, duration: 50, tapCount: 1, gestureSourceType: "touch" });
   const tp = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
@@ -978,7 +979,7 @@ async function g12({ p, cdp, errs }) {
       row.held = held.mode !== "air" && held.same; row.on = held.on; row.walkable = held.walkable;
       if (row.held && held.walkable) {
         const t = await p.evaluate(() => { const f = __game.flight, t = window.__target, alongX = t.maxX - t.minX >= t.maxZ - t.minZ, cx = (t.minX + t.maxX) / 2, cz = (t.minZ + t.maxZ) / 2; let yaw = alongX ? -Math.PI / 2 : Math.PI; const fx = -Math.sin(yaw), fz = -Math.cos(yaw); if ((cx - f.pos.x) * fx + (cz - f.pos.z) * fz < 0) yaw += Math.PI; f.yaw = yaw; f.walkV = 0; return { x: f.pos.x, z: f.pos.z }; });
-        const Lp = await p.evaluate(() => __game.input.layout()), sx = Math.round(Lp.cruise.cx), sy = Math.round(Lp.cruise.cy); /* 上側(巡航)の◎の中心から上へスライド = 歩く */ await tp("touchStart", [{ x: sx, y: sy, id: 91 }]); await tp("touchMove", [{ x: sx, y: sy - 40, id: 91 }]); await sleep(1500);
+        const Lp = await p.evaluate(() => __game.input.layout()), sx = Math.round(Lp.cruise.cx), sy = Math.round(Lp.cruise.cy); /* 上側(巡航)の◎の中心から上へスライド = 歩く */ await tp("touchStart", [{ x: sx, y: sy, id: 91 }]); await tp("touchMove", [{ x: sx, y: sy - 40, id: 91 }]); await simWait(1.5); /* 歩く距離はゲーム内の時間で決まる(描画が遅いと、実時間 1.5 秒ではゲーム内の時間が足りない) */
         const z = await p.evaluate(() => ({ x: __game.flight.pos.x, z: __game.flight.pos.z, mode: __game.flight.mode })); await tp("touchEnd", []); await sleep(200);
         row.walked = Math.hypot(z.x - t.x, z.z - t.z) >= 0.8 && z.mode === "landed";
       }

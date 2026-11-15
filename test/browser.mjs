@@ -664,7 +664,7 @@ async function g8({ p, cdp, errs }) {
   check("lifting the finger does not stop the bird: it keeps creeping forward and holds its altitude", rel1.prox && rel1.state === "creep" && rel1.speed > 1.5 && Math.hypot(rel1.x - rel0.x, rel1.z - rel0.z) > 0.8 && Math.abs(rel1.y - rel0.y) < 1.0, `speed ${rel1.speed.toFixed(1)} moved ${Math.hypot(rel1.x - rel0.x, rel1.z - rel0.z).toFixed(1)} m dy ${(rel1.y - rel0.y).toFixed(2)}`);
   // 巡航◎に触れると、通常飛行へ(スティックで舵)
   const up = lay.cruise; await tp("touchStart", [{ x: Math.round(up.cx), y: Math.round(up.cy), id: 12 }]); await tp("touchMove", [{ x: Math.round(up.cx + 60), y: Math.round(up.cy), id: 12 }]);
-  await p.waitForFunction(() => !__game.flight.prox.on, null, { timeout: 12000 }).catch(() => {});
+  await p.waitForFunction(() => !__game.flight.prox.on, null, { timeout: 60000 }).catch(() => {}); /* 戻るまでのゲーム内時間は決まっている。待ちの上限は、遅い環境でも実時間で足りるようにしただけの保険 */
   const back = await F(); const cr = await p.evaluate(() => ({ stickX: __game.input.state.x, phase: __game.input.gesture.phase })); await tp("touchEnd", []);
   check("touching the upper (cruise) pad uses the usual stick and returns the bird to normal flight, no crash", !back.prox && back.mode === "air" && cr.phase === "stick" && back.crashes === before.crashes, JSON.stringify({ back: { prox: back.prox, mode: back.mode, speed: +back.speed.toFixed(1) }, cr }));
 
@@ -689,14 +689,14 @@ async function g8({ p, cdp, errs }) {
   await p.waitForFunction(() => __game.flight.sitting, null, { timeout: 6000 }).catch(() => {});
   const sit = await F(); await sleep(500); const sit2 = await F(); await tp("touchEnd", []);
   check("on the ground, touching the downward side of the lower pad makes the bird sit down (no walking)", sit.sitting && sit.mode === "landed" && Math.hypot(sit2.x - sit.x, sit2.z - sit.z) < 0.05, JSON.stringify({ sitting: sit.sitting, mode: sit.mode }));
-  await tp("touchStart", [{ x: Math.round(up.cx), y: Math.round(up.cy + 20), id: 42 }]); await tp("touchMove", [{ x: Math.round(up.cx), y: Math.round(up.cy - 30), id: 42 }]); await sleep(1200);
+  await tp("touchStart", [{ x: Math.round(up.cx), y: Math.round(up.cy + 20), id: 42 }]); await tp("touchMove", [{ x: Math.round(up.cx), y: Math.round(up.cy - 30), id: 42 }]); await simWait(1.2); /* ゲーム内の 1.2 秒 */
   const stand = await F(); await tp("touchEnd", []);
   check("walking with the upper pad (stick forward) stands the bird up and walks, as before", !stand.sitting && Math.hypot(stand.x - sit.x, stand.z - sit.z) > 0.8, `moved ${Math.hypot(stand.x - sit.x, stand.z - sit.z).toFixed(2)} m`);
   // 中心の長押し: 短く飛んで微速前進
   await p.evaluate(() => { const g = __game, f = g.flight; f.reset(); g.input.releaseAll(); f.pos.set(28, 0.32, 60); f.prevPos.copy(f.pos); f.vel.set(0, 0, 0); f.mode = "landed"; f.walkV = 0; f.yaw = 0; });
   await sleep(300); await tp("touchStart", [{ x: cx, y: cy, id: 51 }]);
-  await p.waitForFunction(() => __game.flight.mode === "air" && __game.flight.prox.on, null, { timeout: 8000 }).catch(() => {});
-  const hop = await F(); await sleep(800); const hop2 = await F(); await tp("touchEnd", []);
+  await p.waitForFunction(() => __game.flight.mode === "air" && __game.flight.prox.on && __game.flight.pos.y > 0.4, null, { timeout: 30000, polling: "raf" }).catch(() => {}); /* 浮き上がって 0.4 m を超えるまで状態で待つ(離陸直後に読むと、時点の揺れで高さが 0.4 m 前後になる) */
+  const hop = await F(); await simWait(0.8); const hop2 = await F(); await tp("touchEnd", []);
   await p.waitForFunction(() => __game.flight.mode === "landed" && !__game.flight.prox.on, null, { timeout: 15000 }).catch(() => {});
   const land = await F();
   check("a long press on the center of the lower pad on the ground: a short flight with a slow forward creep, then a soft landing after lifting the finger", hop.mode === "air" && hop.y > 0.4 && hop.y < 4 && Math.hypot(hop2.x - hop.x, hop2.z - hop.z) > 0.8 && land.mode === "landed" && land.crashes === hop.crashes, JSON.stringify({ hopY: +hop.y.toFixed(2), landed: land.mode }));

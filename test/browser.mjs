@@ -653,12 +653,21 @@ async function g8({ p, cdp, errs }) {
   const braked = await F(); const info = await p.evaluate(() => ({ active: __game.input.prox.active, strokes: __game.flight.strokes, hud: document.getElementById("hud").textContent }));
   check("touching the lower pad (center) brakes from 12 m/s to a creep within a few frames, staying in the air, near the same altitude", braked.prox && braked.speed < 4 && braked.mode === "air" && Math.abs(braked.y - before.y) < 2.5 && info.active, `speed ${braked.speed.toFixed(1)} dy ${(braked.y - before.y).toFixed(2)} ${info.hud.slice(0, 30)}`);
   // 右へ(環状): 約90度右へ向く
-  const yawBefore = (await F()).yaw; await tp("touchMove", [{ x: Math.round(lay.prox.cx + lay.prox.r * 0.75), y: cy, id: 11 }]);
+  const yawBefore = (await F()).yaw;
+  /* 物理ステップごとの記録(旋回の途中の速さを、描画フレームの境界や実時間に依存せずに測る)。各ステップの「前の向き・後の向き・指示の向き」 */
+  await p.evaluate(() => { const f = __game.flight, o = Object.getPrototypeOf(f).step.bind(f); window.__turnRec = []; f.step = (dt, inp) => { const y = f.yaw; o(dt, inp); window.__turnRec.push([y, f.yaw, f.prox.yaw]); }; });
+  await tp("touchMove", [{ x: Math.round(lay.prox.cx + lay.prox.r * 0.75), y: cy, id: 11 }]);
   /* 旋回は目標の向き(触れ始めの向きから 90 度右)へ指数的に近づく。「68.8 度を超えた」時点で読むと、その後に何ステップ進んでから読むかで値が変わる(超えた 0.05 秒後は約 -79 度、0.1 秒後は約 -84 度、落ち着くと -90 度。ゲームは 1 フレームに 0.1 秒までを進めるので、読み取りの時点は環境で揺れる。main の c29213a でも同じ曲線)。
      評価は、旋回が目標に達した状態(目標の向きとの差が約 1 度未満)に連動させる。判定の範囲(-80〜-100 度)は変えない */
   await p.waitForFunction(y0 => { const f = __game.flight, w = a => Math.atan2(Math.sin(a), Math.cos(a)); return w(f.yaw - y0) < -1.2 && Math.abs(w(f.prox.yaw - f.yaw)) < 0.02; }, yawBefore, { timeout: 30000, polling: "raf" }).catch(() => {});
   const turned = await F(); const dYaw = Math.atan2(Math.sin(turned.yaw - yawBefore), Math.cos(turned.yaw - yawBefore)) / Math.PI * 180;
   check("sliding to the right side of the ring turns the bird about 90 degrees to the right and it moves that way slowly", dYaw < -80 && dYaw > -100 && turned.speed < 4 && turned.mode === "air", `turned ${dYaw.toFixed(0)} deg, speed ${turned.speed.toFixed(1)}`);
+  /* 旋回の途中の速さ(実タッチ経路 + 物理ステップごとの記録)。指示の向きが変わったステップを 0 として、1・3・6・12・18・30 ステップ後(1/60, 0.05, 0.1, 0.2, 0.3, 0.5 秒)の角度を、固定ステップの純粋な物理(test/h1prox.ts)と同じ曲線に照合する。
+     これは「旋回の速さ(turnRate・turnGain・時間積分)が変わっていない」ことを保証する。上の最終角度の検査は「目標に着く」ことだけを保証し、速さは保証しない */
+  await p.waitForFunction(() => { const r = window.__turnRec, w = a => Math.atan2(Math.sin(a), Math.cos(a)); if (!r || !r.length) return false; const i = r.findIndex(x => Math.abs(w(x[2] - r[0][2])) > 0.0175); return i >= 0 && r.length >= i + 31; }, null, { timeout: 60000, polling: "raf" }).catch(() => {});
+  const curve = await p.evaluate(() => { const r = window.__turnRec, w = a => Math.atan2(Math.sin(a), Math.cos(a)), i = r.findIndex(x => Math.abs(w(x[2] - r[0][2])) > 0.0175); delete __game.flight.step; if (i < 0) return null; const y0 = r[i][0]; return [1, 3, 6, 12, 18, 30].map(k => +(w(r[i + k - 1][1] - y0) / Math.PI * 180).toFixed(2)); });
+  const BASE90 = [-7.16, -21.49, -42.97, -73.98, -84.63, -89.40];
+  check("turn speed by real touch, recorded per physics step: the angle 1, 3, 6, 12, 18 and 30 steps after the command changes follows the fixed-step curve (+-0.5 deg)", !!curve && curve.every((v, k) => Math.abs(v - BASE90[k]) <= 0.5), JSON.stringify({ got: curve, want: BASE90 }));
   // 離す: 止まらずゆっくり前進、高度を保つ
   await tp("touchEnd", []); const rel0 = await F(); await simWait(1.5); const rel1 = await F(); /* ゲーム内の 1.5 秒(描画が遅いとゲーム内の時間は実時間より遅く進む) */
   check("lifting the finger does not stop the bird: it keeps creeping forward and holds its altitude", rel1.prox && rel1.state === "creep" && rel1.speed > 1.5 && Math.hypot(rel1.x - rel0.x, rel1.z - rel0.z) > 0.8 && Math.abs(rel1.y - rel0.y) < 1.0, `speed ${rel1.speed.toFixed(1)} moved ${Math.hypot(rel1.x - rel0.x, rel1.z - rel0.z).toFixed(1)} m dy ${(rel1.y - rel0.y).toFixed(2)}`);

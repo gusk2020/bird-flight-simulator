@@ -1,8 +1,19 @@
+# GitHub Pages のデプロイ(サイト全体を 1 回で入れ替える)。ルート / = 正式版(main)、/h9/ = H9 の試遊版(手動実行のときだけ)。
+#   ・main への push: 正式版だけをデプロイする(今までと同じ。/h9/ は載らない)。
+#   ・手動実行(workflow_dispatch): main をルートに、入力 playtest_ref のブランチを /h9/ に載せる。playtest_ref を none にすると正式版だけ。
+# main と試遊版は別々にチェックアウト・ビルドし、tools/assemble_site.sh で 1 つのアーティファクトにまとめる。ルートは main のビルドと完全に一致することを diff で確かめ、
+# 一致しなければデプロイしない。別リポジトリ・PAT・force-push は使わない。
+# 注意: Pages はデプロイのたびにサイト全体が入れ替わる。main へ push すると(= 正式版だけのデプロイ)、/h9/ は消える。試遊を続けるときは手動実行し直す。
 name: Deploy to GitHub Pages
 on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      playtest_ref:
+        description: /h9/ に載せる試遊版のブランチ(none で正式版だけ)
+        required: true
+        default: claude/h9-slow-cruise-ui
 permissions:
   contents: read
 concurrency:
@@ -11,14 +22,42 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      PLAYTEST: ${{ github.event_name == 'workflow_dispatch' && inputs.playtest_ref != 'none' && inputs.playtest_ref || '' }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
+          path: main-src
       - uses: actions/setup-node@v4
-        with: { node-version: 20, cache: npm }
-      - run: npm ci
-      - run: npm run build
+        with: { node-version: 20, cache: npm, cache-dependency-path: main-src/package-lock.json }
+      - run: cd main-src && npm ci && npm run build
+      - name: 試遊版(H9)を別にチェックアウトしてビルドする
+        if: env.PLAYTEST != ''
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.playtest_ref }}
+          path: h9-src
+      - name: 試遊版が H9 のソースか確かめる(古い main 版を H9 として公開しない)
+        if: env.PLAYTEST != ''
+        run: |
+          cd h9-src
+          test -f src/cruise.ts && test -f src/guide.ts && test -f docs/H9_HANDOVER.md || { echo "このブランチは H9 ではありません。公開しません。"; exit 1; }
+          echo "h9 source: $(git rev-parse HEAD) ($(git log -1 --format=%s | cut -c1-80))"
+      - name: 試遊版をビルド
+        if: env.PLAYTEST != ''
+        run: cd h9-src && npm ci && npm run build
+      - name: 1 つのアーティファクトに組み立てる(ルート = main のビルドと完全一致を確認)
+        run: |
+          H9DIST=none; H9REF=; H9SHA=
+          if [ -n "$PLAYTEST" ]; then H9DIST=h9-src/dist; H9REF="$PLAYTEST"; H9SHA=$(git -C h9-src rev-parse HEAD); fi
+          # 組み立てのスクリプトは、試遊版のブランチにあるものを使う(main にはまだ無いため)。試遊版が無いときは main-src のものを使う
+          SCRIPT=main-src/tools/assemble_site.sh; [ -f "$SCRIPT" ] || SCRIPT=h9-src/tools/assemble_site.sh
+          bash "$SCRIPT" main-src/dist "$H9DIST" site "$H9REF" "$H9SHA" "$(git -C main-src rev-parse HEAD)" "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          test -f site/index.html
+          if [ -n "$PLAYTEST" ]; then cat site/h9/build-info.json; fi
       - uses: actions/upload-pages-artifact@v3
-        with: { path: dist }
+        with: { path: site }
   deploy:
     needs: build
     runs-on: ubuntu-latest

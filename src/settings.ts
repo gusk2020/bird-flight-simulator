@@ -9,7 +9,11 @@ export type TimeSpeed = "slow" | "normal" | "fast";
 export type SeasonSpeedPref = "fast" | "normal" | "slow";
 export interface Prefs { control: ControlMode; autoPolicy: AutoPolicy; autoTimeSpeed: TimeSpeed; autoHideUi: boolean; seasonSpeed: SeasonSpeedPref; seasonPhase: number; /** H8-A: 単一◎の操縦方式(off=従来) */ steer: SteerMode; /** H8-B: 着地点マーカーを表示するか */ landmarks: boolean; /** H9: ◎の位置(縦横の向きごと。null=既定の位置) */ pads: { land: PadCustom | null; port: PadCustom | null }; /** H9: 飛行ガイド(非表示/計器型/HUD型) */ guide: GuideMode }
 export const DEFAULT_PREFS: Prefs = { control: "both", autoPolicy: "random", autoTimeSpeed: "normal", autoHideUi: true, seasonSpeed: "normal", steer: "off", landmarks: true, pads: { land: null, port: null }, guide: "off", seasonPhase: 0 };
-export const PREFS_KEY = "vindving.prefs.v1";
+/** 保存キー。ルート(正式版)は従来どおり "vindving.prefs.v1" のまま。サブパス /h9/ で配信される試遊版だけ別のキーにする:
+ *  GitHub Pages は同じオリジン(gusk2020.github.io)で正式版と試遊版を配るので、キーが同じだと、試遊での設定が正式版の保存データに混ざる(またその逆)。
+ *  判定はページのパス(…/h9/ または …/h9/index.html)だけで、ルートや他のパスの挙動は変わらない。 */
+export const prefsKeyFor = (pathname: string) => /(^|\/)h9(\/|$)/.test(pathname) ? "vindving.h9.prefs.v1" : "vindving.prefs.v1";
+export const PREFS_KEY = prefsKeyFor(typeof location !== "undefined" ? location.pathname : "/");
 const CONTROLS: ControlMode[] = ["both", "right", "left"], POLICIES: AutoPolicy[] = ["life", "scenic", "adventure", "random"], SPEEDS: TimeSpeed[] = ["slow", "normal", "fast"], SPEEDS_SEASON: SeasonSpeedPref[] = ["fast", "normal", "slow"];
 type Store = Pick<Storage, "getItem" | "setItem">;
 

@@ -10,6 +10,7 @@ import { L } from "./common";
 import { guideValues, compassName } from "../src/guide";
 import { Wind } from "../src/wind";
 import { PHYS as PH } from "../src/params";
+import { prefsKeyFor, PREFS_KEY, DEFAULT_PREFS, loadPrefs, savePrefs } from "../src/settings";
 
 /** 手動の巡航を想定した飛行。tapEvery 秒ごとに羽ばたきをタップ(0=触れない)、chain=連打、assist=片手の補助 */
 function fly(secs: number, o: { tapEvery: number; chain?: boolean; assist?: boolean; governor: boolean; v0?: number }) {
@@ -84,3 +85,14 @@ export function h9Tests() {
   Object.assign(CRUISE, keep);
 }
 function check_(ok: boolean) { if (!ok) check("canStart must not change state", false); }
+
+export function h9StorageTests() {
+  suite("H9 playtest site: the saved settings of the /h9/ trial never mix with the official version's (same origin on GitHub Pages)");
+  const root = "vindving.prefs.v1";
+  check("the official version keeps the original key on every path that is not /h9/ (root, project root, index.html, other sub-paths)", ["/", "/index.html", "/bird-flight-simulator/", "/bird-flight-simulator/index.html", "/bird-flight-simulator/assets/x.js", "/h90/", "/xh9/", "/bird-flight-simulator/h9x/"].every(p => prefsKeyFor(p) === root), JSON.stringify(["/", "/bird-flight-simulator/", "/h90/"].map(prefsKeyFor)));
+  check("the /h9/ trial uses its own key (with or without a trailing slash or index.html)", ["/bird-flight-simulator/h9/", "/bird-flight-simulator/h9", "/bird-flight-simulator/h9/index.html", "/h9/"].every(p => prefsKeyFor(p) === "vindving.h9.prefs.v1" && prefsKeyFor(p) !== root));
+  check("without a page location (unit tests, other hosts) the key is the original one, so nothing changes for saved data of the official version", PREFS_KEY === root);
+  { const m = new Map<string, string>(), st = { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v) };
+    m.set(root, JSON.stringify({ ...DEFAULT_PREFS, control: "right", guide: "hud" })); const before = m.get(root);
+    check("loading and saving through the original key does not touch another key (the trial's key is separate)", loadPrefs(st).control === "right" && (savePrefs({ ...DEFAULT_PREFS }, st), m.has(root)) && !m.has("vindving.h9.prefs.v1") && before !== m.get(root)); }
+}

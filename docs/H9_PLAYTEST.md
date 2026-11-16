@@ -3,7 +3,7 @@
 > **運用方針(ユーザー決定・確定)**: 正式版も試遊版も、**`gusk2020/bird-flight-simulator` の 1 つのリポジトリだけ**で管理する。**別リポジトリの作成・PAT の作成・Cloudflare など外部サービスの追加はしない。**
 > 以前の案(試遊専用の別リポジトリ `vind-ving-playtest`、`docs/h9-playtest-site/` のワークフロー、`playtest-publish.yml` の別 repo への force push)は**撤回**した。今後の試遊版(H10 以降)も同じ方式で行う。
 >
-> **状態**は文末の「§6 公開の実績」を見る(ここに書いていない URL は、公開と確認が済むまで存在するものとして扱わない)。
+> **状態(2026/11/16 JST 確認済み)**: **H9 試遊版は公開済み** — `https://gusk2020.github.io/bird-flight-simulator/h9/`(ビルド元 `claude/h9-slow-cruise-ui` の `ca550be`)。正式版(ルート)は現状のまま。詳細は §6。実機(Pixel 7a)の操作感は未確認。
 
 ## 1. 仕組み
 - GitHub Pages は 1 リポジトリに 1 サイト。デプロイのたびに**サイト全体が入れ替わる**ので、1 回のデプロイで 2 つを一緒に載せる。
@@ -43,19 +43,26 @@
 - 試遊版だけをやめたいとき: `playtest_ref` を `none` にして実行(正式版だけのサイトに戻る)。
 
 ## 6. 公開の実績
-**状態: 未公開(ブロッカーあり)。`/h9/` の URL はまだ存在しない(取得すると 404)。**
 
-- 2026/11/16 に、このブランチの `pages.yml` を手動実行した(Pages の実行 **43818242540**、ブランチ `claude/h9-slow-cruise-ui`、HEAD `e50dc04`、`playtest_ref` = `claude/h9-slow-cruise-ui`)。
-  - **build ジョブは成功**: main と H9 を別々にチェックアウト・ビルドし、組み立てて(ルートは main のビルドと完全一致を確認)、アーティファクトを作成した。
-  - **deploy ジョブは失敗(拒否)**: `Branch "claude/h9-slow-cruise-ui" is not allowed to deploy to github-pages due to environment protection rules.` `github-pages` 環境が、main 以外のブランチからのデプロイを許可していない。デプロイが拒否されただけで、**公開中のサイトは入れ替わっていない**(確認済み: ルートの `index.html` の SHA-256 は main のビルドと一致、アセットは 200、`/h9/` は 404)。
-- 環境の保護ルールは、このセッションのプロキシが読み取りも変更も遮断していて(403)、Claude からは変えられない。変えるべきでもない(リポジトリの設定変更)。
+### 6.1 公開済み(2026/11/16 16:05〜16:07 JST、確認済み)
+- 手動実行: Pages の実行 **43821291687**(ブランチ `claude/h9-slow-cruise-ui`、`playtest_ref` = `claude/h9-slow-cruise-ui`)。build・deploy とも成功。
+  - 1 回目(実行 43818242540)は、`github-pages` 環境がブランチからのデプロイを拒否して失敗(サイトは変わらなかった)。ユーザーが環境にブランチのデプロイ許可を足したあと、2 回目で成功。
+- **アクセスできた URL**(実在の URL を取得して確認):
+  - `https://gusk2020.github.io/bird-flight-simulator/h9/` — HTTP 200(HTML 16,717 バイト)。
+  - `https://gusk2020.github.io/bird-flight-simulator/h9/assets/index-D_UOuXCO.js` — HTTP 200(685,504 バイト)。
+  - `https://gusk2020.github.io/bird-flight-simulator/h9/build-info.json` — HTTP 200。`h9_source_ref` = `claude/h9-slow-cruise-ui`、**`h9_source_sha` = `ca550bea53e5fc27bc5afece3ee6201abeb95df7`**(ブランチの当時の HEAD と一致)、`root_source_sha` = `c29213a4afe38768a0c25ce7e6d99455ab22eebf`(main)、ビルド時刻 2026-11-16T07:05:38Z。
+  - 正式版(ルート): `https://gusk2020.github.io/bird-flight-simulator/` — HTTP 200(11,649 バイト)、`…/assets/index-BPCMNOYV.js` — HTTP 200(673,624 バイト)。
+- **正式版が維持されている**: ルートの `index.html`(SHA-256 2afb218a…)と JS(62194f3b…)は、公開前の取得値および main(c29213a)の手元ビルドと**一致**。ルートの JS に H9 の機能(`scale0`、`vindving.h9.prefs.v1`)は含まれない。
+- **H9 の配信物が、ブランチのビルドと一致**: `/h9/` の JS(SHA-256 f81e82f2…)と `index.html`(9ba59ae0…)は、`ca550be` を手元でビルドしたものと一致。`/h9/` の JS に `scale0`(5 件)・`canStart`(2 件)・`vindving.h9.prefs.v1`(1 件)がある。
+- **CSS**: 外部の CSS ファイルは無い(スタイルは `index.html` に埋め込み、`<style>` 1 つ)。取得する対象の CSS ファイルは存在しない。
+- アセット参照は相対パス(絶対パス参照 0 件)で、`/h9/` 配下で解決される。
+- **実在の URL をブラウザ(Chromium、Pixel 7a 相当 412×915・タッチ・縦画面)で開いて確認**: `/h9/` は起動し、ページエラー 0、失敗した読み込み 0、起動 3 画面(DOM)・飛行ガイド 3 択・低速巡航(`CRUISE` 有効、係数 0.5)を確認。ルートは起動し、エラー 0、H9 の機能は混ざっていない(正式版のまま)。
+- **保存データの分離(実在のサイトで確認)**: 同じブラウザで、ルートで設定を保存 → `/h9/` で飛行ガイド=HUD を保存 → `/h9/` の保存は `vindving.h9.prefs.v1` に入り、ルートの `vindving.prefs.v1` は変わらない(開き直しても不変)。
 
-### ユーザーが Android で行う操作(1 回だけ・約 2 分)
-GitHub(Chrome で github.com、見づらければ「デスクトップ用サイト」)で:
-1. リポジトリ `gusk2020/bird-flight-simulator` → **Settings** → **Environments** → **github-pages**。
-2. **Deployment branches and tags** で、**Selected branches and tags** にして、**Add deployment branch or tag rule** → 種類は Branch、パターンに `claude/h9-slow-cruise-ui` を入れて追加する(main のルールは残す)。
-3. Claude に「許可した」と伝える。Claude が同じ手動実行をやり直し、公開して URL を確認する。
-(将来の試遊版 H10 以降も同じ方式にするなら、パターンを `claude/*` にする選択もある。広げるほど、他のブランチからもサイトを入れ替えられるので、必要になったときにユーザーが決める。)
+### 6.2 注意(更新・消える条件)
+- **このブランチへ push しても `/h9/` は更新されない**。手動実行し直す(§5)。公開中のものは `ca550be` のビルド。
+- **main への push(= 正式版だけのデプロイ)で `/h9/` は消える。** 試遊を続けるときは、手動実行し直す。
+- 環境の保護ルールに足されたブランチ(`claude/h9-slow-cruise-ui`)以外のブランチは、デプロイできない。
 
-### 公開に成功したときの記録欄
-(公開後に、実行 ID・ビルド元の SHA・`build-info.json` の照合・HTML/JS/CSS の取得確認の結果を追記する。)
+### 6.3 未確認
+- **Pixel 7a 実機の操作感・低 FPS 安全性は未確認**(上の確認は、ソフトウェア描画のヘッドレス Chromium)。縦画面で上部のボタン列と文字が重なって見えるかは実機で未確認。

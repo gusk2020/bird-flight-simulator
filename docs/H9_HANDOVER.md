@@ -326,14 +326,16 @@ g8 は旋回の**最終角度**(約 90 度)に着くことは保証するが、*
 - この repo の Pages 設定・環境(`github-pages` の保護ルール)は、プロキシが 403 で遮断しており、事前に確認できない。ブランチからのデプロイが環境の保護ルールで拒否される場合、デプロイは失敗するだけで、サイトは入れ替わらない。
 - main への push は `/h9/` を消す(正式版だけを再デプロイするため)。
 
-### 13.5 公開の実績・未確認
-- **公開は未実施(ブロッカー)**。Pages の手動実行(run **43818242540**、HEAD `e50dc04`)は、build が成功し、**deploy が環境保護ルールで拒否**された: `Branch "claude/h9-slow-cruise-ui" is not allowed to deploy to github-pages due to environment protection rules.`(`github-pages` 環境は main 以外のブランチからのデプロイを許可していない。§13.4 で予想した状況。)
-- **公開中のサイトは影響を受けていない**(実測): ルートの `index.html` の SHA-256 が main(c29213a)のビルドと一致(2afb218a…)、ルートのアセットは 200、`/h9/` と `/h9/build-info.json` は 404。
-- 環境の保護ルールの読み取り・変更は、このセッションのプロキシが遮断(403)。**ユーザーの操作が 1 回必要**: Settings → Environments → github-pages → Deployment branches and tags に、ブランチ `claude/h9-slow-cruise-ui` のルールを足す(手順は `docs/H9_PLAYTEST.md` §6)。足してもらえば、同じ手動実行(`gh workflow run pages.yml --ref claude/h9-slow-cruise-ui -f playtest_ref=claude/h9-slow-cruise-ui`)をやり直して公開する。
-- 実機の操作感・低 FPS 安全性は未確認。
+### 13.5 公開の実績・未確認(2026/11/16 16:07 JST 確認済み)
+- **公開済み**: `https://gusk2020.github.io/bird-flight-simulator/h9/`(Pages の実行 **43821291687**、ビルド元 `claude/h9-slow-cruise-ui` の `ca550bea53e5fc27bc5afece3ee6201abeb95df7`)。1 回目(実行 43818242540、HEAD `e50dc04`)は、`github-pages` 環境のブランチ制限で deploy が拒否された(サイトは変わらなかった)。ユーザーがその環境に `claude/h9-slow-cruise-ui` のデプロイ許可を足したあと、2 回目で成功。
+- **確認した実績(実在の URL)**: `/h9/` の HTML(200)・JS(200)・`build-info.json`(200、`h9_source_sha` = `ca550be` で一致)、ルートの HTML・JS(200)。外部の CSS ファイルは無い(スタイルは HTML に埋め込み)。詳細は `docs/H9_PLAYTEST.md` §6。
+- **正式版は維持**: ルートの `index.html`・JS の SHA-256 が、公開前の値および main(c29213a)の手元ビルドと一致。ルートに H9 の機能は混ざっていない。
+- **ブラウザでの起動確認(実在の URL)**: `/h9/`・ルートともに起動・エラー 0。`/h9/` で起動 3 画面・飛行ガイド 3 択・低速巡航(係数 0.5)。保存データの分離(ルートの保存が不変)も、実在のサイトで確認。
+- **未確認**: Pixel 7a 実機の操作感・低 FPS 安全性(上の確認はヘッドレス Chromium)。
+- **注意**: このブランチへの push では `/h9/` は更新されない(手動実行し直す)。main への push で `/h9/` は消える。
 
 ### 13.6 次の担当 AI の再開手順
-0. ユーザーが環境のデプロイ許可を足したか確認(足したと言われてから実行)。足されるまでは、公開しない(手動実行しても deploy が拒否されるだけで、サイトは変わらない)。
-1. `gh workflow run pages.yml --ref claude/h9-slow-cruise-ui -f playtest_ref=claude/h9-slow-cruise-ui` で手動実行し、`gh run list --workflow pages.yml` で結果を確認。成功していれば、`https://gusk2020.github.io/bird-flight-simulator/h9/build-info.json` を取得して、ブランチ・SHA を照合する。
+0. (済み)ユーザーが `github-pages` 環境にブランチ `claude/h9-slow-cruise-ui` のデプロイ許可を足した。別のブランチを `/h9/` に載せるときは、その許可が要る。
+1. 更新するとき: `gh workflow run pages.yml --ref claude/h9-slow-cruise-ui -f playtest_ref=claude/h9-slow-cruise-ui` で手動実行し、`gh run list --workflow pages.yml` で結果を確認。成功していれば、`https://gusk2020.github.io/bird-flight-simulator/h9/build-info.json` を取得して、ブランチ・SHA を照合する。
 2. ルートの内容(`index.html` のハッシュ)が main のビルドと一致することを再確認する。
 3. 失敗した場合は、ログ(環境の保護ルール、権限)を読んで、報告する。別リポジトリ方式には戻らない。

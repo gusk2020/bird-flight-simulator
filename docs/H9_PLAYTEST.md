@@ -43,4 +43,19 @@
 - 試遊版だけをやめたいとき: `playtest_ref` を `none` にして実行(正式版だけのサイトに戻る)。
 
 ## 6. 公開の実績
-(公開を実施したら、この節に、実行 ID・ビルド元の SHA・取得確認の結果を追記する。未実施の間は「未公開」。)
+**状態: 未公開(ブロッカーあり)。`/h9/` の URL はまだ存在しない(取得すると 404)。**
+
+- 2026/11/16 に、このブランチの `pages.yml` を手動実行した(Pages の実行 **43818242540**、ブランチ `claude/h9-slow-cruise-ui`、HEAD `e50dc04`、`playtest_ref` = `claude/h9-slow-cruise-ui`)。
+  - **build ジョブは成功**: main と H9 を別々にチェックアウト・ビルドし、組み立てて(ルートは main のビルドと完全一致を確認)、アーティファクトを作成した。
+  - **deploy ジョブは失敗(拒否)**: `Branch "claude/h9-slow-cruise-ui" is not allowed to deploy to github-pages due to environment protection rules.` `github-pages` 環境が、main 以外のブランチからのデプロイを許可していない。デプロイが拒否されただけで、**公開中のサイトは入れ替わっていない**(確認済み: ルートの `index.html` の SHA-256 は main のビルドと一致、アセットは 200、`/h9/` は 404)。
+- 環境の保護ルールは、このセッションのプロキシが読み取りも変更も遮断していて(403)、Claude からは変えられない。変えるべきでもない(リポジトリの設定変更)。
+
+### ユーザーが Android で行う操作(1 回だけ・約 2 分)
+GitHub(Chrome で github.com、見づらければ「デスクトップ用サイト」)で:
+1. リポジトリ `gusk2020/bird-flight-simulator` → **Settings** → **Environments** → **github-pages**。
+2. **Deployment branches and tags** で、**Selected branches and tags** にして、**Add deployment branch or tag rule** → 種類は Branch、パターンに `claude/h9-slow-cruise-ui` を入れて追加する(main のルールは残す)。
+3. Claude に「許可した」と伝える。Claude が同じ手動実行をやり直し、公開して URL を確認する。
+(将来の試遊版 H10 以降も同じ方式にするなら、パターンを `claude/*` にする選択もある。広げるほど、他のブランチからもサイトを入れ替えられるので、必要になったときにユーザーが決める。)
+
+### 公開に成功したときの記録欄
+(公開後に、実行 ID・ビルド元の SHA・`build-info.json` の照合・HTML/JS/CSS の取得確認の結果を追記する。)

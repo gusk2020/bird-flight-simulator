@@ -1,6 +1,6 @@
 import type { FlightInput } from "./flight";
 import { GESTURE, OneHandGesture } from "./gesture";
-import { ProxPad, padLayout, inProxRegion, type PadLayout } from "./proxpad";
+import { ProxPad, padLayout, inProxRegion, NO_INSETS, type PadLayout, type PadCustom, type Insets } from "./proxpad";
 import type { ControlMode } from "./settings";
 import { SteerPad, type SteerMode } from "./steer";
 
@@ -37,7 +37,10 @@ export class Input {
   /** H8-A: 機首の向き(世界の yaw)。単一◎の基準。横風で進行方向と機首がずれても、指の向きは機首から見た左右にする */
   getYaw: () => number = () => 0;
   /** 近接◎の配置(片手操作のとき)。画面の大きさと左右から決まる */
-  layout(): PadLayout | null { return this.mode === "both" ? null : padLayout(innerWidth, innerHeight, this.mode); }
+  /** H9: 保存された◎の位置(縦横の向きごと)と、安全領域。main が設定する */
+  pads: { land: PadCustom | null; port: PadCustom | null } = { land: null, port: null }; insets: Insets = NO_INSETS;
+  customPads(): PadCustom | null { return innerWidth > innerHeight ? this.pads.land : this.pads.port; }
+  layout(): PadLayout | null { return this.mode === "both" ? null : padLayout(innerWidth, innerHeight, this.mode, this.customPads(), this.insets); }
   private steerTapSeq = 0;
   private ringCand = new Map<number, { x: number; y: number; t: number; id: number }>(); private ringFired = new Set<number>();
   private out: FlightInput = { x: 0, y: 0, flapHeld: false, flapTap: false, brake: false };
@@ -46,7 +49,7 @@ export class Input {
   steerMode: SteerMode = "off"; readonly steer = new SteerPad();
   get steerOn() { return this.mode !== "both" && this.steerMode !== "off"; }
   /** 単一◎の位置と大きさ(片手操作の半面の下寄り) */
-  steerRect() { const L = padLayout(innerWidth, innerHeight, this.mode === "left" ? "left" : "right"); return { cx: L.prox.cx, cy: L.prox.cy, r: L.prox.r * 1.1 }; }
+  steerRect() { const L = padLayout(innerWidth, innerHeight, this.mode === "left" ? "left" : "right", this.customPads(), this.insets); return { cx: L.prox.cx, cy: L.prox.cy, r: L.prox.r * 1.1 }; }
   private stickId = -1; private ox = 0; private oy = 0; private R = 60;
   private keys = new Set<string>();
   private base = document.getElementById("stickBase")!; private knob = document.getElementById("stickKnob")!;

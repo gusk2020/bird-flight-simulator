@@ -19,7 +19,7 @@ export interface Result { kind: string; refused: boolean; why: string; ok: boole
 /** 人が「このあたりの足場へ降りたい」と思って飛んでいる状況: 距離6〜16m・面の上0.8〜5m・速さ6〜11m/s・足場の方向から±45度ずれた向き */
 export function trial(s: Surface, i: number, trace?: Record<string, number | string>[]): Result {
   seed = 500 + i * 7 + s.id;
-  const f = new Flight(world), pa = new PerchAssist(idx), al = new AutoLand(idx, pa, L.heightAt);
+  const f = new Flight(world), pa = new PerchAssist(idx), al = new AutoLand(idx, pa, L.heightAt); const SS = Number(process.env.SPEEDSCALE ?? 1); f.speedScale = SS; // H9: 低速巡航のときの自動着地(SPEEDSCALE=0.5 など。進入の速さも同じ割合にする)
   if (process.env.APPWIND) { const w = new Wind(); w.set(Number(process.env.WINDDIR ?? 270), Number(process.env.WINDSPD ?? 3), Number(process.env.WINDGUST ?? 0.3)); f.wind = w; } // アプリの既定の風(西から3 m/s、突風0.3)
   const apt = (s.kind === "balcony" || s.kind === "rail") ? L.apts.find(a => Math.abs((s.minX + s.maxX) / 2 - a.x) < a.w / 2 + 0.1 && Math.abs((s.minZ + s.maxZ) / 2 - a.z) < a.d / 2 + 1.5) : undefined;
   const cx = (s.minX + s.maxX) / 2, cz = (s.minZ + s.maxZ) / 2;
@@ -28,7 +28,7 @@ export function trial(s: Surface, i: number, trace?: Record<string, number | str
   // dist は足場の縁からの距離(大きな屋根では中心からの距離にすると、屋根の真上から始まってしまう)
   const dxs = Math.cos(ang), dzs = Math.sin(ang), hx = (s.maxX - s.minX) / 2, hz = (s.maxZ - s.minZ) / 2, tExit = Math.min(hx / Math.max(Math.abs(dxs), 1e-6), hz / Math.max(Math.abs(dzs), 1e-6));
   f.pos.set(cx + dxs * (tExit + dist), h0, cz + dzs * (tExit + dist)); f.prevPos.copy(f.pos);
-  const toward = Math.atan2(-(cx - f.pos.x), -(cz - f.pos.z)); f.yaw = toward + (rnd() - 0.5) * 1.57; const v0 = 6 + rnd() * Number(process.env.VSPAN ?? 5);
+  const toward = Math.atan2(-(cx - f.pos.x), -(cz - f.pos.z)); f.yaw = toward + (rnd() - 0.5) * 1.57; const v0 = (6 + rnd() * Number(process.env.VSPAN ?? 5)) * SS;
   f.vel.set(-Math.sin(f.yaw) * v0, -0.5, -Math.cos(f.yaw) * v0);
   let tail = 0; if (f.wind) { const wv = new (f.windVec.constructor as any)(); f.wind.at(f.pos.x, f.pos.y, f.pos.z, 0, wv); const hv = Math.hypot(f.vel.x, f.vel.z) || 1; tail = (wv.x * f.vel.x + wv.z * f.vel.z) / hv; }
   const out: Result = { tail, v0, kind: s.kind, refused: false, why: "", ok: false, crash: false, secs: 0, walked: false };

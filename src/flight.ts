@@ -28,13 +28,13 @@ export class Flight {
   yaw = 0; pitch = 0; roll = 0;
   mode: Mode = "air";
   stun = 0; stall = false; strokeT = -1; strokes = 0;
-  wind: WindSource | null = null; windVec = new THREE.Vector3(); liftScale = 1; dragScale = 1; clock = 0; airspeed = 0;
+  wind: WindSource | null = null; windVec = new THREE.Vector3(); liftScale = 1; dragScale = 1; /** H9: 通常巡航の低速化。1=従来の空力。小さいほどゆっくり巡航する(揚力・抗力を 1/speedScale² 倍し、釣り合いの速さが speedScale 倍になる)。CruiseGovernor が手動飛行のときだけ動かす */ speedScale = 1; clock = 0; airspeed = 0;
   /** 着地補助が小ジャンプの初速を一時的に上書きする(次の1回のジャンプでだけ使い、毎ステップ末尾で消す) */
   hopHint: { up: number; fwd: number; yaw?: number } | null = null;
   groundHold = 0; perchId = -1; perchT = 0; perchCool = 0; perchBlend = 0; walkV = 0; hopping = false;
   /** 旋回の横滑りを機首方向へ向け直すときに残す割合(手動操作=PHYS.turnKeep。0=従来どおり捨てる: オート周遊はこちらで調整済み) */
   turnKeep: number = P.turnKeep; hopT = -1; walkPhase = 0;
-  alpha = 0; speed = 0; agl = 0; braking = false; crashes = 0; resets = 0;
+  alpha = 0; speed = 0; /** H9: 速さを speedScale で割った値(従来の物理での同じ状態の速さ)。補助や操舵のしきい値はこの値で比べる */ get speedN() { return this.speed / this.speedScale; } agl = 0; braking = false; crashes = 0; resets = 0;
   /** G1-2: 壁への衝突から自動で安全な向きへ復帰する(手動操作)。オート周遊は専用の復旧を持つので Autopilot.start が切り、止めたときに main が戻す */
   wallRecovery = true;
   /** H1 近接機動の状態。on の間は揚力の物理ではなく、指示された向きへ上限つきの加速度で動く(失速しない・位置は動かさない) */
@@ -101,14 +101,14 @@ export class Flight {
     this.vel.sub(w);
     const speed = this.vel.length(); this.airspeed = speed;
     // --- 姿勢 ---
-    const ctl = clamp(speed / P.controlSpeed, 0.35, 1.2);
+    const SS = this.speedScale, aeroK = 1 / (SS * SS), ctl = clamp(speed / (P.controlSpeed * SS), 0.35, 1.2);
     this.yaw -= sx * P.turnRate * ctl * dt;
     let pt = P.trimPitch + (sy > 0 ? sy * P.maxClimbPitch : sy * P.maxDivePitch);
     if (this.braking) pt += 0.15;
     if (this.stall) pt = Math.min(pt, P.stallRecoverPitch);
     this.pitch += (pt - this.pitch) * (1 - Math.exp(-P.pitchResponse * dt));
     this.pitch = clamp(this.pitch, -P.pitchLimit, P.pitchLimit);
-    const rt = -sx * P.maxBank * Math.min(1, speed / 8);
+    const rt = -sx * P.maxBank * Math.min(1, speed / (8 * SS));
     this.roll += (rt - this.roll) * (1 - Math.exp(-P.bankResponse * dt));
 
     // --- 力 ---
@@ -131,11 +131,11 @@ export class Flight {
     // 揚力方向: 翼法線のうち速度に垂直な成分
     _l.copy(_u).addScaledVector(_d, -_u.dot(_d));
     const ll = _l.length();
-    if (ll > 1e-3) _a.addScaledVector(_l, (P.liftK * this.liftScale * cl * q) / ll * Math.min(1, ll * 2));
-    _a.addScaledVector(_d, -P.liftK * this.dragScale * cd * q);
+    if (ll > 1e-3) _a.addScaledVector(_l, (P.liftK * aeroK * this.liftScale * cl * q) / ll * Math.min(1, ll * 2));
+    _a.addScaledVector(_d, -P.liftK * aeroK * this.dragScale * cd * q);
     if (this.strokeT >= 0) {
       const s = Math.sin(Math.PI * this.strokeT);
-      _a.addScaledVector(f, P.flapThrust * s * clamp((P.flapMaxSpeed - speed) / 6, 0, 1)); _a.y += P.flapLift * s;
+      _a.addScaledVector(f, P.flapThrust * s * clamp((P.flapMaxSpeed * SS - speed) / (6 * SS), 0, 1)); _a.y += P.flapLift * s;
     }
     this.vel.addScaledVector(_a, dt);
     // 横滑りを減衰 (旋回で速度が機首方向へ曲がる)

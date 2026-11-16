@@ -119,4 +119,30 @@ export function h1ProxTests() {
     for (let i = 0; i < 600; i++) { const t = i / 60, ia = inp({ x: Math.sin(t) * 0.5, y: Math.cos(t * 0.7) * 0.3, flapTap: i % 55 === 0 }); a.step(1 / 60, ia); b.step(1 / 60, { ...ia, prox: null }); }
     check("with prox: null the trajectory is bit-for-bit the same as without the field", a.pos.distanceTo(b.pos) === 0 && a.vel.distanceTo(b.vel) === 0 && !a.prox.on);
   }
+  suite("H9: the ring-turn curve (fixed 1/60 s steps, pure physics) - catches a change in turn speed that the final angle alone would hide");
+  {
+    /* 旋回の途中の角度を、固定ステップ(ゲーム本体の物理と同じ 1/60 秒)で測る。描画フレームの境界や実時間に依存しない決定的な値。
+       基準値は、このコミットの前の main(c29213a)と H9 で同じ条件・同じ入力で実測した値(過去の報告値ではない): どちらも全時点で一致した。
+       旋回の前半は turnRate(最大の速さ)で、後半は turnGain(向きの差への追従)で決まる。許容 ±0.2 度は、固定ステップで結果が決定的であること、
+       および turnGain の ×0.95・turnRate の ×0.98 程度の変更でも基準を外れること(実測: turnGain ×0.9 は 0.2 秒で +1.7 度、turnRate ×0.9 は 0.1 秒で +4.3 度)から決めた。
+       旋回の速さを意図して変えたときは、この表を新しい実測値に更新する(それが回帰テストの目的)。 */
+    const TOL = 0.2;
+    const angleAt = (offDeg: number, steps: number[]) => { const f = mkFlight(0, 30, 100, 0, 10), y0 = f.yaw, out: number[] = [], last = Math.max(...steps);
+      for (let i = 1; i <= last; i++) { f.step(1 / 60, withProx(cmd(y0 + offDeg * DEG))); const k = steps.indexOf(i); if (k >= 0) out[k] = wrap(f.yaw - y0) / DEG; } return out; };
+    const STEPS = [1, 3, 6, 12, 18, 30];                         // 1/60, 0.05, 0.1, 0.2, 0.3, 0.5 秒
+    const BASE90 = [-7.16, -21.49, -42.97, -73.98, -84.63, -89.40];  // 90 度右(環状)。最初の約 0.1 秒は turnRate(7.5 rad/s = 1 ステップ 7.16 度)で上限
+    const near = (got: number[], want: number[]) => got.every((g, i) => Math.abs(g - want[i]) <= TOL);
+    const g90 = angleAt(-90, STEPS), gL = angleAt(90, STEPS);
+    check("90 degrees to the right: the angle after 1, 3, 6, 12, 18 and 30 steps (1/60 s each) matches the measured curve (+-0.2 deg)", near(g90, BASE90), `got ${g90.map(v => v.toFixed(2)).join(" ")} want ${BASE90.join(" ")}`);
+    check("the turn to the left is the mirror image of the turn to the right", near(gL, BASE90.map(v => -v)), `got ${gL.map(v => v.toFixed(2)).join(" ")}`);
+    const g120 = angleAt(-120, [12, 18, 30]), B120 = [-85.65, -108.50, -118.71];
+    check("120 degrees (outer ring): a longer turn, 0.2 / 0.3 / 0.5 s match the measured curve", near(g120, B120), `got ${g120.map(v => v.toFixed(2)).join(" ")} want ${B120.join(" ")}`);
+    const g45 = angleAt(-45, [3, 6, 12]), B45 = [-18.72, -29.79, -39.91];
+    check("45 degrees: the follow-up part (turnGain) after the first step matches the measured curve at 0.05 / 0.1 / 0.2 s", near(g45, B45), `got ${g45.map(v => v.toFixed(2)).join(" ")} want ${B45.join(" ")}`);
+    const g90slow = (() => { const f = mkFlight(0, 30, 100, 0, 6), y0 = f.yaw; for (let i = 0; i < 12; i++) f.step(1 / 60, withProx(cmd(y0 - 90 * DEG))); return wrap(f.yaw - y0) / DEG; })();
+    check("the turn does not depend on the forward speed (6 m/s gives the same angle at 0.2 s as 10 m/s)", Math.abs(g90slow - g90[3]) < 0.01, `${g90slow.toFixed(2)} vs ${g90[3].toFixed(2)}`);
+    check("the turn settles on the commanded direction (within 0.5 deg after 1 s)", Math.abs(angleAt(-90, [60])[0] + 90) < 0.5);
+    check("the turn is slower than a jump and faster than a crawl: half way (45 deg) is reached between 0.05 and 0.1 s, 90 percent (81 deg) between 0.2 and 0.3 s", g90[1] > -45 && g90[2] < -42 && g90[3] > -81 && g90[4] < -81, `${g90.map(v => v.toFixed(1)).join(" ")}`);
+  }
+
 }

@@ -89,6 +89,9 @@ export class AutoLand {
     return s;
   }
 
+  /** H9: いま押したら自動着地が始まるか(start と同じ読み替え・同じ検査。状態は変えない)。着地点マーカーの緑はこの結果だけで決める */
+  canStart(f: Flight, s0: Surface): { ok: boolean; why: string } { const s = AUTOLAND.railForBalcony ? this.retarget(f, s0) : s0; return this.check(f, s); }
+
   start(f: Flight, s0: Surface): boolean {
     const s = AUTOLAND.railForBalcony ? this.retarget(f, s0) : s0, c = this.check(f, s);
     if (!c.ok) { this.stats.refused++; this.end = ""; this.lastRefusal = c.why; return false; }

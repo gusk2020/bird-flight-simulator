@@ -1,6 +1,6 @@
 # H9 引き継ぎ書(低速巡航・◎位置・着地点2色・飛行ガイド・起動3画面)
 
-作成: 2026/11/14 JST(§9・§10 は 2026/11/15 JST、§11 は 2026/11/16 JST に追記)。正本は GitHub(Issue #43 / Draft PR #44)。この文書は「どこまで確認できたか」と「次に何をするか」の記録で、過去の SHA を最新とみなさないこと。必ず現在の branch / PR / CI を自分で確認してから再開する。
+作成: 2026/11/14 JST(§9・§10 は 2026/11/15 JST、§11・§12 は 2026/11/16 JST に追記)。正本は GitHub(Issue #43 / Draft PR #44)。この文書は「どこまで確認できたか」と「次に何をするか」の記録で、過去の SHA を最新とみなさないこと。必ず現在の branch / PR / CI を自分で確認してから再開する。
 
 ## 1. 対象
 
@@ -253,3 +253,45 @@ g8 は旋回の**最終角度**(約 90 度)に着くことは保証するが、*
 - 5 回成功しても、完全安定の証明ではない(§9.1 の注記と同じ)。
 - Pixel 7a 実機の操作性・低 FPS の安全性は未確認。
 - main 統合・Ready 化・公開は、ユーザーの許可が出てから。
+
+## 12. H9 試遊サイトの準備(2026/11/16)
+
+ユーザー決定: H9 専用の試遊先を GitHub だけで準備する(Pixel 7a の Chrome で開ける HTTPS URL)。main 版の Pages の置き換えは禁止。
+
+### 12.1 状態
+**公開はまだ。URL はまだ無い**(創作しない)。試遊専用リポジトリが存在せず、このセッションの権限では作れないため、ユーザーの操作が一度だけ必要。手順は `docs/H9_PLAYTEST.md` §2。
+
+### 12.2 調べたこと(確認済み)
+- 既存の試遊専用リポジトリ: **無い**。ユーザーの repo 一覧(10 件)に `gusk2020/vind-ving-playtest` は無い(H6 の文書の名前は例示)。他の repo(omega-codon-play、paremon-play など)は別のゲーム用なので使わない。
+- このセッションの GitHub 権限: bird-flight-simulator だけ(追加済みの repo の範囲)。新しい repo の作成はその範囲の外なので、**試していない**。
+- この repo の Pages の設定・Actions の変数・Secrets: プロキシが遮断(403)していて、**確認できなかった**。`playtest-publish.yml` が前提とする `PLAYTEST_REPO`・`PLAYTEST_TOKEN` の有無は不明。
+- Pages は 1 リポジトリに 1 サイト。この repo の Pages は main 版(`pages.yml`)が使っているので、H9 を載せると main 版を置き換えるか main の公開内容を変えることになる。**別の URL には別のリポジトリが必要。**
+
+### 12.3 準備したもの(この PR)
+- `docs/h9-playtest-site/deploy-h9-playtest.yml`: 試遊専用リポジトリに置くワークフロー。公開リポジトリのブランチを**トークンなしで**チェックアウト → H9 のソースか確認(古い main 版は止める)→ ビルド → 絶対パス参照がないか確認 → `build-info.json`(元のブランチ・SHA・ビルド時刻・実行へのリンク)を保存 → `actions/deploy-pages` で**その repo の Pages にだけ**公開。Secrets・PAT・force-push は不要。YAML の構文と、2 つの確認のシェルは、手元で模擬して確認した(公開は未実行)。
+- `docs/h9-playtest-site/README.md`: 試遊専用リポジトリの README(用途と `build-info.json` の見方)。
+- `docs/H9_PLAYTEST.md`: ユーザーの操作(Android・約 3 分)、試遊で見てほしいこと、再配布の手順、自動確認の範囲。`docs/H6_PLAYTEST.md` に H9 への案内を追記。
+- `tools/verify_subpath.mjs`: サブパス配下に dist を置いた模擬の配信での検証。
+
+### 12.4 自動確認の実績(ローカル、実在の URL ではない。実機の代替ではない)
+`node tools/verify_subpath.mjs dist /vind-ving-playtest/`(ビルド元 `9ac449c`、`base: "./"`、Pixel 7a 相当 412×915・タッチ):
+- アセット参照がすべて相対パス(`./assets/index-*.js`)、サブパス配下の全アセットが 200、base の外への要求 0。
+- ゲームが起動(`window.__game`)、ページエラー・コンソールエラー・失敗した読み込み 0。
+- H9 の 5 機能の存在: 起動 3 画面(① 環境設定・② 操作UI設定・③ 開始。設定に戻る・オート・自分で操作)、◎位置の編集(プレビュー・初期位置)、飛行ガイド 3 択(off・gauge・hud)、着地点マーカー(キャンバスと緑の判定 `canStart`)、低速巡航(`CRUISE` 有効・係数 0.5)。
+- 「自分で操作」で開始し、ゲーム内時間が進み、速度係数 0.5(速度 7.2 m/s で巡航)。
+- **負の対照**: `base: "/"`(絶対パス)でビルドすると、同じ検証が 7 項目で失敗する(白画面になるビルドを検出できる)。
+- 気づいた点(実機未確認): 縦画面(412 px 幅)で、上部のボタン列と速度・高度の文字が重なって見える(ソフトウェア描画の画面での確認)。実機で確認が必要。
+
+### 12.5 未確認・残るリスク
+- 実在の URL への HTTP 取得・実機での起動は、公開後に行う(未実施)。
+- この repo の Pages 設定・Secrets は見えない(403)。ただし H9 の公開にはどちらも使わない設計。
+- 試遊専用リポジトリ作成後は、Pages の Source を「GitHub Actions」にする操作(1 回)が要る。`github-pages` 環境の保護ルール(既定では main ブランチからのデプロイのみ)に、新 repo の main で動かすワークフローは適合する。
+- 公開されるのはビルド済みのゲームのみ(ソース・秘密情報なし)。ただし新 repo の README には、元の repo 名とブランチ名が出る。
+- 実機の操作感・低 FPS 安全性は未確認。
+
+### 12.6 再開手順
+1. ユーザーが `vind-ving-playtest`(Public、README あり)を作って「作った」と伝える。
+2. Claude: `add_repo`(access: push)でそのリポジトリを追加 → `docs/h9-playtest-site/deploy-h9-playtest.yml` を `.github/workflows/` へ、README を置く(通常の push)。
+3. ユーザー: Pages の Source を「GitHub Actions」にする。
+4. Claude(起動できる場合)またはユーザー: `deploy-h9-playtest` を実行。
+5. Claude: 実在の URL を HTTP 取得して確認(`build-info.json` の `source_sha` が最新の HEAD と一致するか、HTML・JS の取得)。確認できてから URL を案内する。

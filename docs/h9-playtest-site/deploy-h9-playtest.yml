@@ -1,0 +1,62 @@
+# Vind Ving H9 試遊サイトの公開(手動実行のみ)。**試遊専用リポジトリ**の `.github/workflows/` に置いて使う。
+# 元のゲーム(gusk2020/bird-flight-simulator)の main・既存の Pages・セーブには触れない。公開リポジトリをトークンなしでチェックアウトし、ビルドして、
+# この(試遊専用)リポジトリの GitHub Pages にだけデプロイする。トークン・Secrets は不要。force-push もしない(Pages の標準デプロイ)。
+# 前提(ユーザーが一度だけ): この試遊専用リポジトリで Settings → Pages → Build and deployment → Source を「GitHub Actions」にする。
+name: deploy-h9-playtest
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: ビルドするブランチ(gusk2020/bird-flight-simulator の)
+        required: true
+        default: claude/h9-slow-cruise-ui
+permissions:
+  contents: read
+concurrency:
+  group: pages
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: gusk2020/bird-flight-simulator
+          ref: ${{ inputs.ref }}
+          path: src
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: src/package-lock.json
+      - name: H9 のソースか確かめる(古い main 版を H9 として公開しない)
+        run: |
+          cd src
+          test -f src/cruise.ts && test -f src/guide.ts && test -f docs/H9_HANDOVER.md || { echo "このブランチは H9 ではありません(src/cruise.ts・src/guide.ts・docs/H9_HANDOVER.md がない)。公開しません。"; exit 1; }
+          echo "build source: $(git rev-parse HEAD) ($(git log -1 --format=%s | cut -c1-80))"
+      - run: cd src && npm ci
+      - run: cd src && npm run build
+      - name: サブパスで白画面にならないか確かめる(アセット参照がすべて相対パス)+ ビルド情報を保存
+        run: |
+          cd src
+          if grep -Eo '(src|href)="/[^"]*"' dist/index.html; then echo "index.html に絶対パスの参照があります。サブパスの公開では白画面になります。"; exit 1; fi
+          ls dist/assets | head
+          SHA=$(git rev-parse HEAD)
+          printf '{\n "game": "Vind Ving",\n "stage": "H9 playtest",\n "source_repo": "gusk2020/bird-flight-simulator",\n "source_ref": "%s",\n "source_sha": "%s",\n "built_at_utc": "%s",\n "workflow_run": "%s/%s/actions/runs/%s"\n}\n' \
+            "${{ inputs.ref }}" "$SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${{ github.server_url }}" "${{ github.repository }}" "${{ github.run_id }}" > dist/build-info.json
+          cat dist/build-info.json
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: src/dist
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.d.outputs.page_url }}
+    steps:
+      - id: d
+        uses: actions/deploy-pages@v4

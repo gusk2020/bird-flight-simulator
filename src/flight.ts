@@ -27,6 +27,8 @@ export class Flight {
   pos = new V(); prevPos = new V(); vel = new V();
   yaw = 0; pitch = 0; roll = 0;
   mode: Mode = "air";
+  /** 飛べる範囲(原点から±m)と最高高度(m)。標準ワールドは PHYS の値のまま。地域マップ(regionMain.ts)だけが地形の大きさに合わせて変える */
+  bound: number = P.bound; maxAltitude: number = P.maxAltitude;
   stun = 0; stall = false; strokeT = -1; strokes = 0;
   wind: WindSource | null = null; windVec = new THREE.Vector3(); liftScale = 1; dragScale = 1; clock = 0; airspeed = 0;
   /** 着地補助が小ジャンプの初速を一時的に上書きする(次の1回のジャンプでだけ使い、毎ステップ末尾で消す) */
@@ -397,10 +399,10 @@ export class Flight {
   private finish() {
     const p = this.pos, v = this.vel;
     if (![p.x, p.y, p.z, v.x, v.y, v.z, this.yaw, this.pitch, this.roll].every(Number.isFinite) || p.y < -5) { this.reset(); return; }
-    const B = P.bound;
+    const B = this.bound;
     if (Math.abs(p.x) > B) { p.x = Math.sign(p.x) * B; if (v.x * p.x > 0) v.x = 0; }
     if (Math.abs(p.z) > B) { p.z = Math.sign(p.z) * B; if (v.z * p.z > 0) v.z = 0; }
-    if (p.y > P.maxAltitude) { p.y = P.maxAltitude; if (v.y > 0) v.y = 0; }
+    if (p.y > this.maxAltitude) { p.y = this.maxAltitude; if (v.y > 0) v.y = 0; }
     this.speed = v.length();
   }
 }

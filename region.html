@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Vind Ving 地域マップ(試作)</title>
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:#9cd;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;font-family:sans-serif;overscroll-behavior:none}
+canvas{display:block;width:100%;height:100%}
+#hud{max-width:calc(100% - 20px);position:fixed;top:calc(54px + env(safe-area-inset-top));left:max(10px,env(safe-area-inset-left));color:#fff;font-size:13px;line-height:1.35;text-shadow:0 0 3px #000,0 0 3px #000;pointer-events:none}
+#warn{position:fixed;top:calc(112px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);color:#ffd9a0;font-size:13px;text-shadow:0 0 3px #000,0 0 3px #000;pointer-events:none;white-space:nowrap;opacity:0;transition:opacity .3s}
+#stick{position:fixed;left:0;bottom:0;width:50%;height:72%;touch-action:none}
+#stickBase,#stickKnob{position:fixed;border-radius:50%;pointer-events:none;display:none;transform:translate(-50%,-50%)}
+#stickBase{width:120px;height:120px;border:2px solid #fff8;background:#ffffff18}
+#stickKnob{width:54px;height:54px;background:#fff7;border:2px solid #fffc}
+.btn{position:fixed;border-radius:50%;border:2px solid #fffc;background:#0005;color:#fff;font-size:16px;touch-action:none;padding:0;font-family:inherit}
+.btn.on{background:#fff6}
+#flap{right:max(18px,env(safe-area-inset-right));bottom:max(18px,env(safe-area-inset-bottom));width:clamp(76px,22vmin,112px);height:clamp(76px,22vmin,112px)}
+#brake{right:calc(max(18px,env(safe-area-inset-right)) + clamp(76px,22vmin,112px) + 14px);bottom:max(18px,env(safe-area-inset-bottom));width:clamp(60px,16vmin,84px);height:clamp(60px,16vmin,84px);font-size:14px}
+#top{position:fixed;top:max(8px,env(safe-area-inset-top));right:max(10px,env(safe-area-inset-right));display:flex;gap:8px}
+#top .btn{position:static;border-radius:18px;height:36px;min-width:58px;font-size:13px}
+#overlay{overflow-y:auto;position:fixed;inset:0;background:#000b;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:12px;color:#fff;z-index:10;padding:calc(18px + env(safe-area-inset-top)) 16px calc(18px + env(safe-area-inset-bottom));box-sizing:border-box}
+#overlay[hidden]{display:none}
+#overlay h1{margin:0;font-size:22px}
+#overlay p,#overlay .note{margin:0;font-size:13px;opacity:.9;line-height:1.55;max-width:34em}
+#overlay .row{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;align-items:center;font-size:13px}
+#overlay button,#overlay .fileBtn,#overlay a.back{font-size:15px;padding:8px 18px;border-radius:24px;border:2px solid #fff;background:#fff3;color:#fff;font-family:inherit;text-decoration:none;cursor:pointer}
+#overlay button.on{background:#fffa;color:#123}
+#overlay button:disabled{opacity:.35}
+#err{color:#ffb0a0;font-size:13px;max-width:34em;line-height:1.5;min-height:1em}
+#info{font-size:12px;line-height:1.55;max-width:36em;text-align:left;background:#ffffff14;border-radius:10px;padding:10px 12px}
+#info b{color:#ffe08a}
+#info div{margin:2px 0}
+#toast{position:fixed;left:50%;top:58px;transform:translateX(-50%);padding:6px 14px;border-radius:14px;background:rgba(20,26,36,.72);color:#fff;font-size:13px;z-index:7;opacity:0;transition:opacity .3s;pointer-events:none}
+</style></head><body>
+<div id="toast"></div><div id="hud"></div><div id="warn"></div>
+<div id="stick"></div><div id="stickBase"></div><div id="stickKnob"></div>
+<div id="top"><button class="btn" id="btnPause">⏸</button><button class="btn" id="btnCam">三人称</button><button class="btn" id="btnTime">昼</button><button class="btn" id="btnReset">リセット</button></div>
+<button class="btn" id="brake">減速</button><button class="btn" id="flap">羽ばたき</button>
+<div id="overlay"><h1>地域マップ(試作)</h1>
+<p>酷道・腐道・未成線(KFM)が書き出した地域データ(kfm.region.v1)の<b>地形</b>の上を飛びます。建物・電線・着地面は元データに無いので出ません。着地できるのは地面と水面だけです。</p>
+<div class="row"><button id="btnSample">KFMの公開サンプルを読み込む</button><label class="fileBtn">ファイルを選ぶ<input id="file" type="file" accept=".json,application/json" hidden></label></div>
+<div class="row">尺度 <button data-scale="1:20">1/20</button><button data-scale="1:1">実寸</button></div>
+<div id="err" role="alert"></div>
+<div class="row"><button id="ovGo" disabled>飛ぶ</button><a class="back" id="back" href="./index.html">標準のVind Vingへ戻る</a></div>
+<div id="info" hidden></div>
+<div class="note">左:ドラッグで旋回・上下　右:羽ばたき・減速　⏸でこの画面に戻れます</div></div>
+<script type="module" src="/src/regionMain.ts"></script></body></html>

@@ -1,4 +1,5 @@
 import { kfmRegionTests } from "./kfmRegion";
+import { regionTerrainTests } from "./regionTerrain";
 import { h2LandTests, h5WindTests } from "./h2land";
 import { h3LifeTests } from "./h3life";
 import { h2WalkTests } from "./h2walk";
@@ -36,4 +37,5 @@ h5WindTests();
 h2WalkTests(); h8SteerTests();
 h3LifeTests();
 kfmRegionTests();
+regionTerrainTests();
 finish();

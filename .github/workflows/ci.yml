@@ -28,7 +28,9 @@ jobs:
       - run: npm run build          # tsc型チェック + vite build
 
   browser:
-    runs-on: ubuntu-latest
+    # Playwright 1.56 chromium-headless-shell is unavailable on ubuntu26.04.
+    # Pin a supported runner; do not skip or loosen any browser tests.
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     strategy:
       fail-fast: false
